@@ -4,10 +4,44 @@ from utils import gen_equivalence_classes, reduce_ballots
 
 epsilon = 0.0001
 
+
 # order_q[w] returns a list of rounds in which it is possible that candidate
 # w achieved a quota.
 def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     merge_map, tot_ballots, args, quota, upperbound, log=None):
+
+    R = len(order_c)
+
+    # Work out when we can stop caring about a candidate having a 
+    # quota, and transfer values.
+
+    # Do we get to a round where everyone left standing is winning?
+    c_cntr = 0
+    s_cntr = 0
+    num_cands = len(candidates)
+
+    LAST_ROUND = 0
+    for r in range(R):
+        c_cntr += 1
+        
+        if s_cntr == args.seats:
+            break
+        
+        if num_cands - c_cntr == args.seats - s_cntr:
+            break 
+
+        if order_a[r] == 1:
+            s_cntr += 1
+
+        LAST_ROUND += 1  
+
+    # Rework order_c/order_a
+    if LAST_ROUND < R:
+        rem += order_c[LAST_ROUND+1:]
+        order_c = order_c[:LAST_ROUND+1]
+        order_a = order_a[:LAST_ROUND+1]
+
+        R = LAST_ROUND + 1
 
     # Form equivalence classes over ballots. 
     classes, _, class_map = gen_equivalence_classes(order_c, rem)
@@ -24,7 +58,6 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     #model.setRealParam("limits/gap", args.g)
     #model.setRealParam("limits/time", args.time)
 
-    R = len(order_c)
     cands = order_c + rem
 
     # VARIABLES
@@ -75,10 +108,15 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     # variables will only be defined for rounds where a candidate was seated.
     tvalue = {}
 
+
+
+
     # mapping between candidate and their index in the order_c prefix, equal
     # to R+1 (where R is the length of the prefix) if they are still standing
     # at the end of the prefix.
     candpos = { c : 0 for c in cands }
+
+    print(LAST_ROUND)
 
     for c in cands:
         pos = R+1
@@ -87,7 +125,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         
         candpos[c] = pos
 
-        for r in range(R):
+        for r in range(LAST_ROUND):
             if pos < r: 
                 break
 
@@ -114,10 +152,8 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
             # sit with this candidate at the start of this round.
             e_pi_c_r[c,r] = []
         
-    last_seating = None  
-    if args.seats == len(winners):
-        last_seating = max([candpos[w] for w in winners])
- 
+      
+        
 
     sum_ps = 0
     sum_ms = 0
@@ -161,7 +197,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         # Number of rankings on the ballot type.
         lballot = len(b.prefs)
 
-        for r in range(R):
+        for r in range(LAST_ROUND):
             if ballotwith != None:
                 # The ballot is still with candidate 'ballotwith' at the 
                 # start of this round, but we need to decide if it should
@@ -189,26 +225,27 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
                             continue
 
                         if ballotwith in winners:
-                            # Could the new candidate already have a quota?
-                            # If so, they may be skipped.
-                            qposses = order_q[ballotwith]
-                            minqp = min(qposses)
-                            maxqp = max(qposses)
+                            if ballotwith in order_q:
+                                # Could the new candidate already have a quota?
+                                # If so, they may be skipped.
+                                qposses = order_q[ballotwith]
+                                minqp = min(qposses)
+                                maxqp = max(qposses)
 
-                            if maxqp < r:
-                                # we skip this candidate
-                                withindex += 1
-                                continue
+                                if maxqp < r:
+                                    # we skip this candidate
+                                    withindex += 1
+                                    continue
 
-                            if minqp < r:
-                                # ballotwith could get it, but might not
-                                e_pi_c_r[ballotwith,r+1].append((b.num, \
-                                    caveats[:] + [(ballotwith,r,0)]))
+                                if minqp < r:
+                                    # ballotwith could get it, but might not
+                                    e_pi_c_r[ballotwith,r+1].append((b.num, \
+                                        caveats[:] + [(ballotwith,r,0)]))
 
-                                caveats.append((ballotwith, r, 1))
+                                    caveats.append((ballotwith, r, 1))
 
-                                withindex += 1
-                                continue
+                                    withindex += 1
+                                    continue
 
                             # otherwise, we will move to next break statement
 
@@ -223,7 +260,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
  
     model.addCons(sum_ps == sum_ms)
 
-    for r in range(R):
+    for r in range(LAST_ROUND):
         if order_a[r] == 0:
             for c in cands:
                 pos = candpos[c]
@@ -238,11 +275,12 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
                 if ce != co and candpos[co] > r:
                     model.addCons(vcr[ce,r] <= vcr[co,r] - epsilon)
         else:
-            model.chgVarLb(qcr[order_c[r],r], 1)
-
-            if last_seating == None or last_seating > r:
-                tvalue[r] = model.addVar(vtype="C", lb=0, ub=1.0, \
-                    name="tv(%s)"%r)
+            # This is not necessarily true
+            if r <= LAST_ROUND:
+                model.chgVarLb(qcr[order_c[r],r], 1)
+            
+            if r != R-1 and r <= LAST_ROUND:
+                tvalue[r] = model.addVar(vtype="C",lb=0,ub=1.0,name="tv(%s)"%r)
 
 
     # Add constraints on the tallies of candidate that are elected during
@@ -252,7 +290,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         # In what round where they seated?
         pos = candpos[w]
 
-        if last_seating != None and last_seating <= pos:
+        if pos == R-1 or pos > LAST_ROUND:
             continue
 
         # All ballot types that sit with 'w' at the start of round 'pos'
@@ -268,7 +306,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
 
     for c in cands:
         pos = candpos[c]
-        for r in range(min(R, pos+1)):
+        for r in range(min(LAST_ROUND, pos+1)):
             # what ballots could be in c's tally at the start of r?
             possballots = e_pi_c_r[c,r]
 
@@ -318,7 +356,8 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
             model.addCons(vcr[c,r] == tally)            
 
 
-    # Weird bug with quicksum introducing an offset for objective.
+    # Weird thing with quicksum introducing an offset for objective, so
+    # am avoiding using it.
     model.setObjective(sum_ps, "minimize")
 
     model.writeProblem()

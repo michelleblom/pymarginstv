@@ -84,6 +84,9 @@ if __name__ == "__main__":
 
     r_order_q = {}
     for w in winners:
+        if not (w in order_q):
+            continue
+
         rq = order_q[w]
         pos = order_c.index(w)
         
