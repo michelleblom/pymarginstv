@@ -87,48 +87,25 @@ if __name__ == "__main__":
         if not (w in order_q):
             continue
 
-        rq = order_q[w]
         pos = order_c.index(w)
         
-        minrq = rq
-        maxrq = rq
+        minrq = pos-1
+        maxrq = pos-1
 
-        for r in range(minrq, 0, -1):
+        for r in range(pos-1, -1, -1):
             if order_a[r] == 1:
                 minrq -= 1    
-
-        for r in range(maxrq, pos, 1):
-            if order_a[r] == 1:
-                maxrq += 1
+            else:
+                break
 
         r_order_q[w] = (minrq, maxrq)
 
+    
+    print("order_c {}".format(order_c), file=log)
+    print("order_a {}".format(order_a), file=log)
     print("r_order_q {}".format(r_order_q), file=log)
 
-    # cut order_c and order_a off when the final winner gets their seat,
-    # put all remaining candidates in 'rem'
-    n_order_c = []
-    n_order_a = []
-
-    filled = 0
-    rem = []
-    for r in range(len(order_c)):
-        if filled == args.seats:
-            rem.append(order_c[r])
-            continue
-
-        n_order_c.append(order_c[r])
-        if order_a[r] == 1:
-            n_order_a.append(1)
-            filled += 1
-        else:
-            n_order_a.append(0)
-
-    print("order_c {}".format(n_order_c), file=log)
-    print("order_a {}".format(n_order_a), file=log)
-    print("order_q {}".format(r_order_q), file=log)
-
-    stvdistance(candidates, ballots, n_order_c, n_order_a, rem, winners, \
+    stvdistance(candidates, ballots, order_c, order_a, [], winners, \
         r_order_q, merge_map, tot_ballots, args, quota, upper_bound, log=log)
 
     log.close()
