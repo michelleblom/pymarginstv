@@ -6,21 +6,32 @@ import time
 
 epsilon = 0.0001
 
+# NOTE: When test3 is merged, problem becomes infeasible. But when 
+# unmerged, it is feasible.
+
 def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
     lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, tallies, rem, candpos, \
     order_q):
 
     ballotwith = bw
+    last_ballotwith = ballotwith
     cp_ballotwith = cp_bw
     ballot_value = bvalue
     withindex = wi
+
+    # The ballot is with candidate 'ballotwith' at the 
+    # start of round 'rstart', but we need to decide if/when it should
+    # move to another candidate. 
+    tallies[ballotwith,rstart] += ballot_value*ys[b.num]
     
     for r in range(rstart, R):
         if ballotwith != None:
             # The ballot is still with candidate 'ballotwith' at the 
             # start of this round, but we need to decide if it should
-            # move to another candidate in this round. 
-            tallies[ballotwith,r] += ballot_value*ys[b.num]
+            # move to another candidate in this round.
+            if last_ballotwith != ballotwith: 
+                tallies[ballotwith,r] += ballot_value*ys[b.num]
+                last_ballotwith = ballotwith 
 
             if r == LAST_ROUND:
                 break
@@ -97,8 +108,6 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
                 if withindex == lballot:
                     ballotwith = None  
 
-# order_q[w] returns a list of rounds in which it is possible that candidate
-# w achieved a quota.
 def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     merge_map, supers, tot_ballots, args, quota, upperbound, log=None):
 
@@ -227,6 +236,9 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
 
             tallies[c,r] = 0
 
+            if r > 0:
+                tallies[c,r] += vcr[c,r-1]
+
             if c in winners and c in order_c:
                 qcr[c,r] = model.addVar(vtype="B", name="qcr(%s,%s)"%(c,r))
                 nqcr[c,r] = model.addVar(vtype="B", name="nqcr(%s,%s)"%(c,r))
@@ -289,10 +301,6 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
 
         model.addCons(ys[b.num] == b.votes + ps[b.num] - ms[b.num])
 
-        # Initialise entry for ballot class in the map to store rounds in
-        # which the ballot type is involved in a surplus transfer.
-        e_pi_st[b.num] = []
-
         # Running indicator of who this ballot type is sitting with
         ballotwith = b.prefs[0] 
 
@@ -327,8 +335,6 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     print("Move to defining candidate tallies each round")
     tstart = time.perf_counter()
 
-    # TODO: revise so that tallies[c,r] has vcr[c,r-1] as first element in
-    # sum, then only add what candidate could get in round r-1 to expression.
     for c in cands:
         pos = candpos[c]
         for r in range(min(LAST_ROUND+1, pos+1)):
