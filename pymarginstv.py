@@ -19,7 +19,7 @@ import sys
 import argparse
 
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
-    simulate_stv, compute_weub, compute_simple_ub
+    simulate_stv, compute_weub, compute_simple_ub, merge_outcome
 
 #from stvtree import treestv
 
@@ -60,8 +60,6 @@ if __name__ == "__main__":
     quota, tallies = simulate_stv(ballots, candidates, args.seats, \
         order_c, order_a, order_q, winners, log=log)
 
-
-
     weub = compute_weub(candidates, winners, order_c, order_a, tallies)
     simple_ub = compute_simple_ub(candidates, quota, winners)
 
@@ -74,9 +72,6 @@ if __name__ == "__main__":
 
     # Testing stvdistance
     tot_ballots = sum([b.votes for b in ballots])
-
-    # Assuming no merging
-    merge_map = { c.num : c.num for c in candidates } 
 
     # Reframe order_q so we have a range of rounds in which winners
     # could have achieved their quota
@@ -99,13 +94,20 @@ if __name__ == "__main__":
                 break
 
         r_order_q[w] = (minrq, maxrq)
-
     
     print("order_c {}".format(order_c), file=log)
     print("order_a {}".format(order_a), file=log)
     print("r_order_q {}".format(r_order_q), file=log)
 
-    stvdistance(candidates, ballots, order_c, order_a, [], winners, \
-        r_order_q, merge_map, tot_ballots, args, quota, upper_bound, log=log)
+    m_order_c, m_order_a, m_order_q, merge_map, supers, _ = merge_outcome(\
+        order_c, order_a, r_order_q)
+
+    print("m_order_c {}".format(m_order_c), file=log)
+    print("m_order_a {}".format(m_order_a), file=log)
+    print("m_order_q {}".format(m_order_q), file=log)
+    
+    stvdistance(candidates, ballots, m_order_c, m_order_a, [], winners, \
+        m_order_q, merge_map, supers, tot_ballots, args, quota, upper_bound, \
+        log=log)
 
     log.close()
