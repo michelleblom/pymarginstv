@@ -60,6 +60,7 @@ if __name__ == "__main__":
     quota, tallies = simulate_stv(ballots, candidates, args.seats, \
         order_c, order_a, order_q, winners, log=log)
 
+
     weub = compute_weub(candidates, winners, order_c, order_a, tallies)
     simple_ub = compute_simple_ub(candidates, quota, winners)
 

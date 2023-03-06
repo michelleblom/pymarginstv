@@ -172,8 +172,8 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         print("Number of equivalence classes: {}".format(len(classes)),\
             file=log)
 
-        for c in classes:
-            print(c, file=log)
+        #for c in classes:
+        #    print(c, file=log)
 
     model = Model("STVDISTANCE")
     #model.setRealParam("limits/gap", args.g)
@@ -262,9 +262,10 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
                     model.addCons(vcr[c,r] <= quota - epsilon)
 
             ce = order_c[r]
-            for co in nonsupers:
-                if ce != co and candpos[co] > r:
-                    model.addCons(vcr[ce,r] <= vcr[co,r] - epsilon)
+            if ce in nonsupers:
+                for co in nonsupers:
+                    if ce != co and candpos[co] > r:
+                        model.addCons(vcr[ce,r] <= vcr[co,r] - epsilon)
 
         else:
             cs = order_c[r]
@@ -346,7 +347,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     # am avoiding using it.
     model.setObjective(sum_ps, "minimize")
 
-    model.writeProblem()
+    #model.writeProblem()
 
     print("Optimizing")
     model.optimize()

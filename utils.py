@@ -607,9 +607,10 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
 
             r += 1
 
-            for cand in candidates:
-                if cand.standing:
-                    cand_tallies_by_round[cand.num][r+1] = cand.sim_votes
+            if r != ncand-1:
+                for cand in candidates:
+                    if cand.standing:
+                        cand_tallies_by_round[cand.num][r+1] = cand.sim_votes
 
         else:
             new_surpluses = []
@@ -646,9 +647,10 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
 
                 r += 1
             
-                for cand in candidates:
-                    if cand.standing:
-                        cand_tallies_by_round[cand.num][r+1] = cand.sim_votes
+                if r != ncand-1:
+                    for cand in candidates:
+                        if cand.standing:
+                            cand_tallies_by_round[cand.num][r+1]=cand.sim_votes
 
             surpluses = new_surpluses
 
@@ -912,4 +914,134 @@ def reduce_ballots(ncands, order_c, remainder, merge_map, ballots, rballots,\
         # Add to vote/paper tally.
         rbal.votes += b.votes
         rbal.papers += b.papers  
+
+
+def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
+    segments, supers, merge=True):
+
+    """
+        elim_seq    -  A sequence of consecutively eliminated candidates.
+                       If the list is of sufficient length (> 1).
+                       Candidates in elim_seq will be added to merge_map, with 
+                       their mapped value being their id in the merged 
+                       election outcome. If the list of not of sufficient
+                       length, the candidate(s) will remain as themselve --
+                       unmerged in the new outcome representation.
+
+        m_order_c   -  Sequence of the candidates who are eliminated/elected
+                       in each round of tabulation, listed in the order that
+                       they are eliminated/elected. Represents the election
+                       outcome with merged candidates.
+
+        m_order_a   -  Sequence of events that occur in each round of 
+                       tabulation (0 for elimination, 1 for election).
+                       Represents the election outcome with merged candidates.
+
+        merge_map   -  Map between original candidate ids and their potentially
+                       new ids in the merged election representation.
+
+        segments    -  A partition of the non-merged election outcome prefix
+                       eg. [[1],[2,3,4],[5]] means that candidates 1 and 5
+                       remain as 1 and 4 in the merged representation, but
+                       candidates 2-4 are merged.
+
+        supers      -  Ids of the super candidates.
+    """
+    if True: #len(elim_seq) < 3: 
+        # Do not merge the candidates, add them to m_order_c, and m_order_a
+        # as themselves. 
+        for e in elim_seq:
+            m_order_c.append(e)
+            m_order_a.append(0)
+            merge_map[e] = e
+            segments.append([e])
+    else:
+
+        mc = elim_seq[0]
+        for sc in elim_seq[:-1]:
+            merge_map[sc] = mc
+
+        supers.append(mc)
+
+        m_order_c.append(mc)
+        m_order_a.append(0)
+
+        segments.append(elim_seq[:-1])
+
+        lc = elim_seq[-1]
+        merge_map[lc] = lc
+        m_order_c.append(lc)
+        m_order_a.append(0)
+
+        segments.append([lc])
+
+
+def merge_outcome(order_c, order_a, order_q):
+    merge_map = {}
+
+    # We reformulate the prefix order (order_c and order_a) into its merged
+    # representation
+    m_order_c = []
+    m_order_a = []
+
+    # List of ids corresponding to the new merged candidates.
+    supers = []
+
+    # Find blocks of at least 3 eliminations in order_a
+    elim_seq = []
+
+    # Partition order_c into segments according to which candidates will
+    # be merged together. For example, segments = [[1],[2,3,4],[5]] will
+    # indicate that candidates 1 and 5 remain 'un-merged', but candidates
+    # 2-4 will be merged to create a new candidate (with id 2). 
+    segments = []
+    for i in range(len(order_a)):
+        ci = order_c[i]
+        if order_a[i] == 1:
+            if elim_seq != []:
+                # Merge candidates in elim_seq, add to segments and create
+                # an entry for the merged candidate in m_order_c and 
+                # m_order_a. Indicate that the original candidates are now
+                # mapped to a new identifier in merge_map.
+                # Note: we actually leave the first candidate in elim_seq
+                # un-merged, and merge the remainder, to support creating 
+                # a tighter optimisation problem.
+                add_elim_sequence(elim_seq, m_order_c, m_order_a,\
+                    merge_map, segments, supers)
+
+                elim_seq = []
+
+            m_order_c.append(ci)
+            m_order_a.append(1)
+            merge_map[ci] = ci
+            segments.append([ci])
+
+        else:
+            elim_seq.append(ci)
+
+    if elim_seq != []:
+        # Merge candidates in elim_seq, add to segments and create an entry for
+        # the merged candidate in m_order_c and m_order_a. Indicate that the
+        # original candidates are now mapped to a new identifier in merge_map.
+        # Note: we actually leave the first candidate in elim_seq
+        # un-merged, and merge the remainder, to support creating 
+        # a tighter optimisation problem.
+        add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
+            segments, supers)
+        
+    # Create a map between old round numbers and new ones
+    round_conv = {-1 : -1}
+    j = 0
+    
+    for r in range(len(segments)):
+        for c in segments[r]:
+            round_conv[j] = r
+            j += 1
+
+    # Create merged version of order_q, note no candidates that will end
+    # up being merged will have an entry in m_order_q.
+    m_order_q = { c : (round_conv[r1],round_conv[r2]) \
+        for c,(r1,r2) in order_q.items() }
+
+    return m_order_c, m_order_a, m_order_q, merge_map, supers, segments
  
