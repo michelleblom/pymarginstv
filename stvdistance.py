@@ -6,8 +6,6 @@ import time
 
 epsilon = 0.0001
 
-# NOTE: When test3 is merged, problem becomes infeasible. But when 
-# unmerged, it is feasible.
 
 def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
     lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, tallies, rem, candpos, \
@@ -109,7 +107,8 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
                     ballotwith = None  
 
 def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
-    merge_map, supers, tot_ballots, args, quota, upperbound, log=None):
+    merge_map, supers, tot_ballots, args, quota, upperbound, LAST_ROUND, \
+    log=None):
 
     # Assume no merged candidates for now.
     R = len(order_c)
@@ -117,26 +116,6 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     # Work out when we can stop caring about a candidate having a 
     # quota, and transfer values.
     cands = order_c + rem
-
-    # Do we get to a round where everyone left standing is winning?
-    c_cntr = 0
-    s_cntr = 0
-    num_cands = len(cands)
-
-    LAST_ROUND = 0
-    for r in range(R):
-        c_cntr += 1
-        
-        if order_a[r] == 1:
-            s_cntr += 1 
-
-        if s_cntr == args.seats:
-            break
-
-        if num_cands - c_cntr == args.seats - s_cntr:
-            break 
-
-        LAST_ROUND += 1  
 
     # Rework order_c/order_a
     if LAST_ROUND < R-1:
@@ -147,35 +126,16 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         R = LAST_ROUND + 1
 
 
-    if log != None:
-        print("Last round for model: {}".format(LAST_ROUND), file=log)
-
-    tstart = time.perf_counter()
-
     # Form equivalence classes over ballots. 
     classes, _, class_map = gen_equivalence_classes(order_c, rem)
-
-    tnow = time.perf_counter()
-    print("Time spent generating equivalence classes: {}".format(tnow-tstart))
-
-    tstart = tnow
 
     # Reduce ballots to equivalence classes
     reduce_ballots(len(candidates), order_c, rem, merge_map, ballots, \
         classes, class_map)
 
-    tnow = time.perf_counter()
-    print("Time spent generating reducing ballots to classes: {}".format(\
-        tnow-tstart))
-
-    if log != None:
-        print("Number of equivalence classes: {}".format(len(classes)),\
-            file=log)
-
-        #for c in classes:
-        #    print(c, file=log)
-
     model = Model("STVDISTANCE")
+    model.setEmphasis(SCIP_PARAMEMPHASIS.OPTIMALITY)
+    #model.hideOutput()
     #model.setRealParam("limits/gap", args.g)
     #model.setRealParam("limits/time", args.time)
 
@@ -284,9 +244,6 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     sum_ms = 0
 
 
-    print("Working through classes")
-    tstart = time.perf_counter()
-
     for b in classes:
         ps[b.num] = model.addVar(vtype="I", lb=0, ub=upperbound, \
             name="ps(%s)"%b.num)
@@ -294,7 +251,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         ms[b.num] = model.addVar(vtype="I", lb=0, ub=min(upperbound,b.votes),\
             name="ms(%s)"%b.num)
 
-        ys[b.num] = model.addVar(vtype="C", lb=b.votes, ub=tot_ballots, \
+        ys[b.num] = model.addVar(vtype="C", lb=0, ub=tot_ballots, \
             name="ys(%s)"%b.num)
 
         sum_ps += ps[b.num]
@@ -325,23 +282,13 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         distribute_ballots_t(0, R, ballotwith, cp_ballotwith, withindex, 1, \
             [], ys, b, lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, \
             tallies, rem, candpos, order_q)
-
-
       
-    tnow = time.perf_counter()
-    print("Finished working through classes, time {}".format(tnow-tstart))
- 
     model.addCons(sum_ps == sum_ms)
-
-    print("Move to defining candidate tallies each round")
-    tstart = time.perf_counter()
 
     for c in cands:
         pos = candpos[c]
         for r in range(min(LAST_ROUND+1, pos+1)):
             model.addCons(vcr[c,r] == tallies[c,r])  
-
-    print("Done {}s".format(time.perf_counter()-tstart))
 
     # Weird thing with quicksum introducing an offset for objective, so
     # am avoiding using it.
@@ -349,13 +296,10 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
 
     #model.writeProblem()
 
-    print("Optimizing")
     model.optimize()
 
-    print("Done")
-
     if model.getStatus() == "infeasible":
-        print("infeasible")
+        return False, None
 
     else:
-        print("Objective: {}".format(model.getObjVal()))
+        return True, model.getObjVal()

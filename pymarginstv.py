@@ -21,9 +21,8 @@ import argparse
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
     simulate_stv, compute_weub, compute_simple_ub, merge_outcome
 
-#from stvtree import treestv
+from stvtree import treestv
 
-from stvdistance import stvdistance
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -57,7 +56,7 @@ if __name__ == "__main__":
     order_q = {}
     winners = []
 
-    quota, tallies = simulate_stv(ballots, candidates, args.seats, \
+    quota, tallies, totvotes = simulate_stv(ballots, candidates, args.seats,\
         order_c, order_a, order_q, winners, log=log)
 
 
@@ -66,49 +65,9 @@ if __name__ == "__main__":
 
     upper_bound = min(weub, simple_ub)
 
-    #lb, ub = treestv(ballots, candidates, winners, order_c, order_a,\
-    #    upper_bound, args.seats, log=log
-
     print("WEUB {}, simple UB {}".format(weub, simple_ub), file=log)
 
-    # Testing stvdistance
-    tot_ballots = sum([b.votes for b in ballots])
-
-    # Reframe order_q so we have a range of rounds in which winners
-    # could have achieved their quota
-    R = len(order_c)
-
-    r_order_q = {}
-    for w in winners:
-        if not (w in order_q):
-            continue
-
-        pos = order_c.index(w)
-        
-        minrq = pos-1
-        maxrq = pos-1
-
-        for r in range(pos-1, -1, -1):
-            if order_a[r] == 1:
-                minrq -= 1    
-            else:
-                break
-
-        r_order_q[w] = (minrq, maxrq)
-    
-    print("order_c {}".format(order_c), file=log)
-    print("order_a {}".format(order_a), file=log)
-    print("r_order_q {}".format(r_order_q), file=log)
-
-    m_order_c, m_order_a, m_order_q, merge_map, supers, _ = merge_outcome(\
-        order_c, order_a, r_order_q)
-
-    print("m_order_c {}".format(m_order_c), file=log)
-    print("m_order_a {}".format(m_order_a), file=log)
-    print("m_order_q {}".format(m_order_q), file=log)
-    
-    stvdistance(candidates, ballots, m_order_c, m_order_a, [], winners, \
-        m_order_q, merge_map, supers, tot_ballots, args, quota, upper_bound, \
-        log=log)
+    lb, ub = treestv(ballots, candidates, winners, order_c, order_a,\
+        upper_bound, args.seats, args, quota, totvotes, log=log)
 
     log.close()

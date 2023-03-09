@@ -664,7 +664,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
 
             break
 
-    return quota, cand_tallies_by_round
+    return quota, cand_tallies_by_round, totvotes
 
 def next_candidate(prefs, cnum, candidates):
     idx = prefs.index(cnum)
