@@ -29,7 +29,13 @@ if __name__ == "__main__":
 
     # Input: stv data file
     parser.add_argument('-d', dest='data')
+
+    # Input: number of seats in election
     parser.add_argument('-s', dest='seats', type=int)
+
+    # Input: acceptable gap to which to solve MINLPs
+    parser.add_argument('-g', dest='gap', type=float, default=0.01)
+
 
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
@@ -51,15 +57,28 @@ if __name__ == "__main__":
     else:
         candidates, ballots, _, cid2num, _ = read_ballots_txt(args.data)
 
-    order_c = []
+    # Simulated election outcome: order_c contains candidates in order
+    # of when they are elected/eliminated; order_a contains a series of 1s/0s
+    # where 1 represents an election/0 an elimination. 
+    order_c = [] 
     order_a = []
+
+    # Map between candidates who win on a quota, and the range of rounds
+    # in which they could have achieved their quota (with a -1 representing
+    # a candidate who may have had a quota on first preferences. For example,
+    # order_q[w] = (-1,0) says that w could have had their quota on first
+    # preferences or they could have achieved it through the vote transfers
+    # in round 0. 
     order_q = {}
     winners = []
 
+    # Simulate election, return quota, candidate tallies per round, and
+    # the total valid ballots cast.
     quota, tallies, totvotes = simulate_stv(ballots, candidates, args.seats,\
         order_c, order_a, order_q, winners, log=log)
 
-
+    # Heuristics for computing initial upper bounds on the margin. 
+    # WEUB stands for "winner elimination upper bound".
     weub = compute_weub(candidates, winners, order_c, order_a, tallies)
     simple_ub = compute_simple_ub(candidates, quota, winners)
 
@@ -67,6 +86,7 @@ if __name__ == "__main__":
 
     print("WEUB {}, simple UB {}".format(weub, simple_ub), file=log)
 
+    # Start branch and bound.
     lb, ub = treestv(ballots, candidates, winners, order_c, order_a,\
         upper_bound, args.seats, args, quota, totvotes, log=log)
 

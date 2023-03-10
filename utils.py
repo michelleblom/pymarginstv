@@ -52,6 +52,9 @@ class Ballot:
         self.papers = votes
 
     def __str__(self):
+        """
+            Convert ballot to a string representation.
+        """
         desc = "Ballot {} Ranking ".format(self.num)
 
         for p in self.prefs:
@@ -63,6 +66,13 @@ class Ballot:
 
 
 class Candidate:
+    """
+        Data structure representing a candidate. Candidate's have a 
+        numeric id (how they are referred to in the ballot files) and
+        a number (index) representing their position in a candidate
+        list. Group id/position/ATL/BTL/mentions are not used in this
+        codebase. 
+    """
     def __init__(self, num, idn):
         self.num = num
         self.id = idn
@@ -87,6 +97,9 @@ class Candidate:
         self.surplus = 0
 
 class Outcome:
+    """
+        
+    """
     def __init__(self):
         self.cand = []
         self.action = []
