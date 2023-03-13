@@ -35,6 +35,9 @@ if __name__ == "__main__":
 
     # Input: acceptable gap to which to solve MINLPs
     parser.add_argument('-g', dest='gap', type=float, default=0.01)
+    
+    # Input: max solve time (s) for MINLPs 
+    parser.add_argument('-t', dest='time', type=int, default=500)
 
 
     # Output: Log file 

@@ -1,4 +1,5 @@
-from pyscipopt import Model, SCIP_PARAMSETTING, SCIP_PARAMEMPHASIS
+from pyscipopt import Model, SCIP_PARAMSETTING, SCIP_PARAMEMPHASIS, \
+    Eventhdlr, SCIP_EVENTTYPE
 
 from utils import gen_equivalence_classes, reduce_ballots
 
@@ -234,6 +235,18 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
                     ballotwith = None  
 
 
+class NodeSolved(Eventhdlr):
+    
+    def __init__(self, upperbound):
+        self.upperbound = upperbound
+    
+    def eventinit(self):
+        self.model.catchEvent(SCIP_EVENTTYPE.NODESOLVED, self)
+
+    def eventexec(self, event):
+        if self.model.getDualbound() >= self.upperbound:
+            self.model.interruptSolve()
+ 
 
 def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     merge_map, supers, tot_ballots, args, quota, upperbound, LAST_ROUND, \
@@ -327,7 +340,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     model.setEmphasis(SCIP_PARAMEMPHASIS.OPTIMALITY)
     #model.hideOutput()
     model.setRealParam("limits/gap", args.gap)
-    #model.setRealParam("limits/time", args.time)
+    model.setRealParam("limits/time", args.time)
 
     # VARIABLES
     # 'Signature' here refers to equivalence class rankings.
@@ -515,6 +528,8 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
 
     #model.writeProblem()
 
+    eventhdlr = NodeSolved(upperbound)
+    model.includeEventhdlr(eventhdlr, "UBreached", "Terminate when UB reached")
     model.optimize()
 
     if model.getStatus() == "infeasible":
@@ -523,4 +538,4 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     else:
         # As we are usually going to stop solving when we get to an 
         # allowed gap, return lower bound on objective.
-        return True, model.getDualbound()
+        return True, model.getDualbound(), model.getPrimalbound()
