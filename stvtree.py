@@ -260,6 +260,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
             frontier.insert(newn)
 
+
     if log != None:
         print(frontier, file=log)
 
@@ -285,11 +286,11 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         # by the selected node. That candidate can either be seated or 
         # eliminated.
         for r in fnode.rem:
-            node_order_c = fnode.order_c + [r]
-            rem = [c.num for c in candidates if not c.num in node_order_c]
-
             # Candidate can either be elected or eliminated.
             for o in range(2):
+                node_order_c = fnode.order_c + [r]
+                rem = [c.num for c in candidates if not c.num in node_order_c]
+
                 node_winners = set(fnode.winners)
                 if o == 1:
                     node_winners.add(r)
@@ -314,9 +315,15 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     # Are we in a situation where the number of seats left
                     # equals the number of candidates in rem?
                     node_order_c += rem
+                    node_winners.update(rem)
                     node_order_a += [1]*nrem
                     new_rem = []
                     seats_filled = seats
+
+                if node_winners == winner_set:
+                    # This represents the original outcome
+                    continue
+
 
                 # Work out the round at which we can stop forming constraints,
                 # compute bounds on when candidate could achieve their quotas,
@@ -350,7 +357,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     frontier.prune(running_ub, log=log)
                         
                 else:
-                    newn = TreeNode(node_order_c[:], node_order_a, \
+                    newn = TreeNode(node_order_c, node_order_a, \
                         node_winners, rem, dist)
 
                     frontier.insert(newn)

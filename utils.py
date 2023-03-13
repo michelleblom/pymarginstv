@@ -454,9 +454,11 @@ def compute_weub(candidates, winners, order_c, order_a, tallies):
                 wtally = tallies[w][r]
 
                 change = math.ceil(wtally-ctally)
+
                 weub = min(weub, change)
 
                 halfless = wtally-0.5*change
+
                 use_half = True
                 for s in standing:
                     if s == w:
@@ -468,7 +470,6 @@ def compute_weub(candidates, winners, order_c, order_a, tallies):
 
                 if use_half:
                     weub = min(weub, 0.5*change)
-                
     return weub
                        
 
@@ -618,12 +619,11 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                             print(f"Candidate {cand.name} has a quota.", \
                                 file=log) 
 
-            r += 1
-
             if r != ncand-1:
                 for cand in candidates:
                     if cand.standing:
                         cand_tallies_by_round[cand.num][r+1] = cand.sim_votes
+            r += 1
 
         else:
             new_surpluses = []
@@ -658,12 +658,12 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                         new_surpluses.append(cand)
                         order_q[cand.num] = r
 
-                r += 1
             
                 if r != ncand-1:
                     for cand in candidates:
                         if cand.standing:
                             cand_tallies_by_round[cand.num][r+1]=cand.sim_votes
+                r += 1
 
             surpluses = new_surpluses
 
