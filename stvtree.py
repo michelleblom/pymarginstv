@@ -1,5 +1,5 @@
 from stvdistance import stvdistance
-
+import numpy as np
 
 epsilon = 0.9
 
@@ -38,7 +38,7 @@ class TreeNode:
             action = "e" if self.order_a[r] == 0 else "s"
             summary += str(self.order_c[r]) + action + " "
 
-        summary += "with distance {:.2f}/{:.2f}".format(self.dist, self.dist_ub)
+        summary += "with distance {}/{}".format(self.dist, self.dist_ub)
 
         return summary
 
@@ -273,9 +273,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
     # seats, so our initial set of nodes will not include any leaves.
     for cand in candidates:
         node_order_c  = [cand.num]
-
         rem = [c.num for c in candidates if c.num != cand.num]
-        
+
         for o in range(2):
             node_order_a = [o]
             node_winners = set([cand.num]) if o == 1 else []
@@ -289,19 +288,72 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             # Compute order_q map
             order_q = get_order_q(node_order_c, node_order_a, 0, node_winners)
             
+            # Determine if we need an original loser to get seated sometime
+            # in the future (past the current outcome prefix
+            new_winner = False
+            for i in range(len(node_order_c)):
+                if node_order_a[i] == 1:
+                    w = node_order_c[i]
+                    if not (w in winner_set):
+                        new_winner = True
+                        break
+
+            og_losers = []
+            og_winners = []
+            if not new_winner:
+                og_losers = []
+                og_winners = []
+
+                for c in rem:
+                    if c in winner_set:
+                        og_winners.append(c)
+                    else:
+                        og_losers.append(c)
+
+            disp_lowerbound = 0
+            if og_losers != []:
+                displacement_cost = np.inf
+                for ogl in og_losers:
+                    for ogw in og_winners:
+                        # What would be the least displacement cost to
+                        # displace ogw with ogl? What is the maximum vote
+                        # that ogl could have assuming ogw is still standing?
+                        mint_ogw = candidates[ogw].fp_votes
+                        maxt_ogl = 0
+                        for b in ballots:
+                            pos_w = b.prefs.index(ogw) if ogw in b.prefs else -1
+                            pos_l = b.prefs.index(ogl) if ogl in b.prefs else -1
+                           
+                            if pos_w != -1 and (pos_l == -1 or pos_w < pos_l):
+                                maxt_ogl += b.votes
+
+                        # We must at least ensure that we can make maxt_ogl
+                        # greater or equal to mint_ogw 
+                        displacement_cost = min(displacement_cost, 0.5*max(0,\
+                            mint_ogw - maxt_ogl))
+
+                disp_lowerbound = displacement_cost
+                                               
             # Evaluate distance for our new tree node.
             _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
                 node_order_a, rem, node_winners, order_q, merge_map, [],\
-                tot_ballots, args, quota, running_ub, 0, log=log)
+                tot_ballots, args, quota, running_ub, 0, disp_lowerbound, \
+                log=log)
 
             if log != None:
                 if dist == None:
                     print("    DISTANCE None/Infeasible".format(file=log))
+                elif dist == -1:
+                    print("    No solution found by timeout", file=log)
+                    print("    Margin computation terminated", file=log)
                 else:
                     print("    DISTANCE {:.2f}/{:.2f}".format(dist, dist_ub),\
                         file=log)
 
-            if dist == None or dist_ub >= running_ub:
+            if dist == -1:
+                return running_lb, running_ub
+
+            if dist == None or dist >= running_ub:
                 continue
 
             # Create and add node to our frontier.
@@ -319,6 +371,10 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
     while frontier.size > 0:
         running_lb = min([n.dist for n in frontier.nodes])
 
+        if log != None:
+            print("Lower bound {}, upper bound {}".format(running_lb,\
+                running_ub), file=log)
+
         if abs(running_ub - running_lb) <= agap:
             converged = True
             break
@@ -329,7 +385,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         if fnode == None:
             break
 
-        running_lb, running_ub, converged, children = expand_node(fnode, \
+        running_lb, running_ub, converged, _ = expand_node(fnode, \
             frontier, ballots, candidates, winner_set, running_lb, running_ub, \
             seats, ncands, args, quota, tot_ballots, merge_map, \
             agap=agap, log=log)
@@ -338,23 +394,23 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             break
 
         # dive
-        sorted_children = sorted(children, key=lambda x: x[-1])
-        while sorted_children != []:
-            index, _ = sorted_children.pop(0)
-            child = frontier.pop(index)
+        #sorted_children = sorted(children, key=lambda x: x[-1])
+        #while sorted_children != []:
+        #    index, _ = sorted_children.pop(0)
+        #    child = frontier.pop(index)
 
-            running_lb, running_ub, converged, children = expand_node(child, \
-                frontier, ballots, candidates, winner_set, running_lb, \
-                running_ub,seats, ncands, args, quota, tot_ballots, merge_map,\
-                agap=agap,log=log)
+        #    running_lb, running_ub, converged, children = expand_node(child, \
+        #        frontier, ballots, candidates, winner_set, running_lb, \
+        #        running_ub,seats, ncands, args, quota, tot_ballots, merge_map,\
+        #        agap=agap,log=log)
 
-            if converged:
-                break
+        #    if converged:
+        #        break
             
-            sorted_children = sorted(children, key=lambda x: x[-1])
+        #    sorted_children = sorted(children, key=lambda x: x[-1])
 
-        if converged:
-            break
+        #if converged:
+        #    break
 
 
         if log != None:
@@ -424,6 +480,53 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
                 # This represents the original outcome
                 continue
 
+            # Determine if we need an original loser to get seated sometime
+            # in the future (past the current outcome prefix
+            new_winner = False
+            for i in range(len(node_order_c)):
+                if node_order_a[i] == 1:
+                    w = node_order_c[i]
+                    if not (w in winner_set):
+                        new_winner = True
+                        break
+
+            og_losers = []
+            og_winners = []
+            if not new_winner:
+                og_losers = []
+                og_winners = []
+
+                for c in rem:
+                    if c in winner_set:
+                        og_winners.append(c)
+                    else:
+                        og_losers.append(c)
+
+            disp_lowerbound = 0
+            if og_losers != []:
+                displacement_cost = np.inf
+                for ogl in og_losers:
+                    for ogw in og_winners:
+                        # What would be the least displacement cost to
+                        # displace ogw with ogl? What is the maximum vote
+                        # that ogl could have assuming ogw is still standing?
+                        mint_ogw = candidates[ogw].fp_votes
+                        maxt_ogl = 0
+                        for b in ballots:
+                            pos_w = b.prefs.index(ogw) if ogw in b.prefs else -1
+                            pos_l = b.prefs.index(ogl) if ogl in b.prefs else -1
+                           
+                            if pos_l != -1 and (pos_w == -1 or pos_l < pos_w):
+                                maxt_ogl += b.votes
+
+                        # We must at least ensure that we can make maxt_ogl
+                        # greater or equal to mint_ogw 
+                        displacement_cost = min(displacement_cost, 0.5*max(0,\
+                            mint_ogw - maxt_ogl))
+
+                disp_lowerbound = displacement_cost
+
+            disp_lowerbound = max(disp_lowerbound, fnode.dist)
 
             # Work out the round at which we can stop forming constraints,
             # compute bounds on when candidate could achieve their quotas,
@@ -437,23 +540,35 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
             if log != None:
                 print("EVALUATING {}/{}".format(node_order_c, \
                     node_order_a), file=log)
+                print("Displacement LB {}".format(disp_lowerbound), file=log)
 
             _, dist, dist_ub=stvdistance(candidates,ballots,node_order_c, \
                 node_order_a, new_rem, node_winners, order_q, merge_map,[],\
-                tot_ballots, args, quota, running_ub, LAST_ROUND, log=log)
+                tot_ballots, args, quota, running_ub, LAST_ROUND, \
+                disp_lowerbound, log=log)
 
             if log != None:
                 if dist == None:
-                    print("    DISTANCE None/Infeasible".format(file=log))
+                    print("    DISTANCE None/Infeasible", file=log)
+                elif dist == -1:
+                    print("    No solution found by timeout", file=log)
+                    print("    Margin computation terminated", file=log)
                 else:
-                    print("    DISTANCE {:.2f}/{:.2f}".format(dist, dist_ub),\
+                    print("    DISTANCE {}/{}".format(dist, dist_ub),\
                         file=log)
+            
+            if dist == -1:
+                break
 
-            if dist == None or dist_ub >= running_ub:
+            if dist == None or dist >= running_ub:
                 continue
 
             if seats_filled == seats:
-                running_ub = dist_ub
+                if log != None and dist_ub < running_ub:
+                    print("Reducing upper bound to {}".format(dist_ub), \
+                        file=log)
+
+                running_ub = min(running_ub, dist_ub)
 
                 if abs(running_ub - running_lb) <= agap:
                     converged = True

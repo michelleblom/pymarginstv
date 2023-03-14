@@ -4,6 +4,7 @@ from pyscipopt import Model, SCIP_PARAMSETTING, SCIP_PARAMEMPHASIS, \
 from utils import gen_equivalence_classes, reduce_ballots
 
 import time
+import math
 
 epsilon = 0.0001
 
@@ -263,7 +264,7 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
 
 def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     merge_map, supers, tot_ballots, args, quota, upperbound, LAST_ROUND, \
-    log=None):
+    disp_lowerbound, log=None):
     """
         Compute the number of ballots we would have to alter in order to 
         achieve the outcome prefix stated in order_c and order_a. 
@@ -329,6 +330,9 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         log          : Will either be None or an output stream to use when
                        printing out diagnostics.
 
+
+        disp_lowerbound : 
+
         Simple lower bounding rules applied. We compute the minimum and 
         maximum tallies candidates could have in any round. Candidates 'c'
         elected on a quota in a round 'r' must have a quota in their tally. 
@@ -342,7 +346,18 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         0 if the difference is negative, as the smallest vote change required.
 
         We take the maximum of all these 'smallest required vote changes' to
-        be a lower bound on the margin.
+        be a lower bound on the margin. That is the original lower bounding
+        rule described in the paper on margin computation for STV. However,
+        we can go further. Consider a prefix where it is clear that at least 
+        one original loser still standing has to displace one of the original
+        winners still standing (eg. our prefix contains just eliminations or
+        only original winners getting seated). In this case, we need to ensure
+        that at least one of the original losers will not be eliminated before
+        one of the original winners. We can put a lower bound on the number of
+        vote changes required to ensure this by taking the difference between
+        the maximum tallies of the remaining original losers and the minimum
+        tallies of the remaining original winners. We then take the minimum of
+        these vote changes as a lower bound.
     """
 
     R = len(order_c)
@@ -504,6 +519,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     # over the course of the outcome prefix.
     max_tallies = { c : [0]*R for c in cands}
 
+
     for b in classes:
         ps[b.num] = model.addVar(vtype="I", lb=0, ub=upperbound, \
             name="ps(%s)"%b.num)
@@ -545,9 +561,6 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
             [], ys, b, lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, \
             tallies, rem, candpos, order_q, max_tallies)
   
-    #print(order_c)
-    #print(order_a) 
-    #print(max_tallies) 
     # Constraint enforces consistency  
     model.addCons(sum_ps == sum_ms)
 
@@ -566,17 +579,23 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
                     if c == ce or candpos[ce] < pos:
                         continue
 
-                    lowerbound = max(lowerbound,max(0, cfpvotes - \
-                        max_tallies[ce][r]))
+                    # Does this have to be difference div 2?
+                    lowerbound = max(lowerbound,max(0, 0.5*(cfpvotes - \
+                        max_tallies[ce][r])))
 
         for r in range(min(LAST_ROUND+1, pos+1)):
             model.addCons(vcr[c,r] == tallies[c,r])  
                
+    lowerbound = max(lowerbound, disp_lowerbound)
+
     if lowerbound >= upperbound:
         return True, lowerbound, lowerbound
 
     model.addCons(sum_ps <= upperbound)
     model.addCons(sum_ps >= lowerbound)
+
+    #hdlr = NodeSolved(upperbound)
+    #model.includeEventhdlr(hdlr, "UB reached", "Term on UB reached")
 
     # Weird thing with quicksum introducing an offset for objective, so
     # am avoiding using it.
@@ -587,7 +606,14 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     if model.getStatus() == "infeasible":
         return False, None, None
 
+    elif model.getStatus() == "timelimit":
+        if model.getNCountedSols() > 0:
+            return True, int(math.floor(model.getDualbound())), \
+                int(math.ceil(model.getPrimalbound()))
+        else:
+            return False, -1, -1
     else:
         # As we are usually going to stop solving when we get to an 
         # allowed gap, return lower bound on objective.
-        return True, model.getDualbound(), model.getPrimalbound()
+        return True, int(math.floor(model.getDualbound())), \
+            int(math.ceil(model.getPrimalbound()))

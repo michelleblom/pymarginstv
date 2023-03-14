@@ -35,6 +35,7 @@ if __name__ == "__main__":
 
     # Input: acceptable gap to which to solve MINLPs
     parser.add_argument('-g', dest='gap', type=float, default=0.01)
+    parser.add_argument('-agap', dest='agap', type=int, default=1)
     
     # Input: max solve time (s) for MINLPs 
     parser.add_argument('-t', dest='time', type=int, default=500)
@@ -91,6 +92,6 @@ if __name__ == "__main__":
 
     # Start branch and bound.
     lb, ub = treestv(ballots, candidates, winners, order_c, order_a,\
-        upper_bound, args.seats, args, quota, totvotes, log=log)
+        upper_bound, args.seats, args, quota, totvotes, agap=args.agap,log=log)
 
     log.close()
