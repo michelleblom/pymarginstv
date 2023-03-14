@@ -101,6 +101,9 @@ class Frontier:
     def similar(self, node1, node2):
         if abs(node1.dist - node2.dist) > epsilon:
             return False
+        
+        if abs(node1.dist_ub - node2.dist_ub) > epsilon:
+            return False
 
         if node1.order_a != node2.order_a:
             return False
@@ -136,16 +139,16 @@ class Frontier:
             if self.similar(node, fnode):
                 if log != None:
                     print("Node similar to {}".format(fnode), file=log)
-                return
+                return None
 
         for i in range(len(self.nodes)):
             if node.dist < self.nodes[i].dist:
                 self.nodes.insert(i, node)
-                return 
+                return i
 
         self.nodes.append(node)
         self.size += 1 
-        return
+        return self.size-1
 
 
 
@@ -292,8 +295,11 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                 tot_ballots, args, quota, running_ub, 0, log=log)
 
             if log != None:
-                print("    DISTANCE {:.2f}/{:.2f}".format(dist, dist_ub), \
-                    file=log)
+                if dist == None:
+                    print("    DISTANCE None/Infeasible".format(file=log))
+                else:
+                    print("    DISTANCE {:.2f}/{:.2f}".format(dist, dist_ub),\
+                        file=log)
 
             if dist == None or dist_ub >= running_ub:
                 continue
@@ -323,7 +329,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         if fnode == None:
             break
 
-        running_lb, running_ub, converged = expand_node(fnode, \
+        running_lb, running_ub, converged, children = expand_node(fnode, \
             frontier, ballots, candidates, winner_set, running_lb, running_ub, \
             seats, ncands, args, quota, tot_ballots, merge_map, \
             agap=agap, log=log)
@@ -332,23 +338,23 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             break
 
         # dive
-        #sorted_children = sorted(children, key=lambda x: x[-1])
-        #while sorted_children != []:
-        #    _, index, _ = sorted_children.pop(0)
-        #    child = frontier.pop(index)
+        sorted_children = sorted(children, key=lambda x: x[-1])
+        while sorted_children != []:
+            index, _ = sorted_children.pop(0)
+            child = frontier.pop(index)
 
-        #    running_lb, running_ub, converged, children = expand_node(child, \
-        #        frontier, ballots, candidates, winner_set, running_lb, \
-        #        running_ub,seats, ncands, args, quota, tot_ballots, merge_map,\
-        #        agap=agap,log=log)
+            running_lb, running_ub, converged, children = expand_node(child, \
+                frontier, ballots, candidates, winner_set, running_lb, \
+                running_ub,seats, ncands, args, quota, tot_ballots, merge_map,\
+                agap=agap,log=log)
 
-        #    if converged:
-        #        break
+            if converged:
+                break
             
-        #    sorted_children = sorted(children, key=lambda x: x[-1])
+            sorted_children = sorted(children, key=lambda x: x[-1])
 
-        #if converged:
-        #    break
+        if converged:
+            break
 
 
         if log != None:
@@ -373,6 +379,8 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
 
     if log != None:
         print("EXPANDING NODE {}".format(fnode), file=log)
+
+    children = []
 
     # Add a candidate to the end of the outcome prefix represented
     # by the selected node. That candidate can either be seated or 
@@ -435,7 +443,11 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
                 tot_ballots, args, quota, running_ub, LAST_ROUND, log=log)
 
             if log != None:
-                print("    DISTANCE {}".format(dist), file=log)
+                if dist == None:
+                    print("    DISTANCE None/Infeasible".format(file=log))
+                else:
+                    print("    DISTANCE {:.2f}/{:.2f}".format(dist, dist_ub),\
+                        file=log)
 
             if dist == None or dist_ub >= running_ub:
                 continue
@@ -453,10 +465,12 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
                 newn = TreeNode(node_order_c, node_order_a, \
                     node_winners, rem, dist, dist_ub)
 
-                frontier.insert(newn, log=log)
+                index = frontier.insert(newn, log=log)
 
+                if index != None:
+                    children.append((index, dist))
 
-    return running_lb, running_ub, converged
+    return running_lb, running_ub, converged, children
 
 
 

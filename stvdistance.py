@@ -9,7 +9,7 @@ epsilon = 0.0001
 
 def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
     lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, tallies, rem, candpos, \
-    order_q):
+    order_q, max_tallies):
     """
         This function is used to build up a candidates tally at the start of 
         any given round. The 'tallies' structure maps candidate numbers and 
@@ -106,6 +106,10 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
                      i.e., they are not simply remaining at the end) and the 
                      range of rounds in which they could, based on the outcome 
                      prefix, have received their quota.
+
+        max_tallies: Map between candidates and a list representing the 
+                     maximum tally of the candidate in each round of the 
+                     outcome prefix.
     """
 
     # Ballot is currently sitting with 'ballotwith' at the start of round
@@ -135,6 +139,8 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
     
     for r in range(rstart, R):
         if ballotwith != None:
+            max_tallies[ballotwith][r] += b.votes
+
             # The ballot is still with candidate 'ballotwith' at the 
             # start of this round, but we need to decide if it should
             # move to another candidate in this round.
@@ -211,7 +217,8 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
                                     cp_ballotwith, withindex, nbv, \
                                     caveats[:] + [(ballotwith, r, 0)], ys, b, \
                                     lballot, LAST_ROUND, winners, tvalue, \
-                                    nqcr, qcr, tallies, rem, candpos, order_q)
+                                    nqcr, qcr, tallies, rem, candpos, order_q,\
+                                    max_tallies)
 
                                 # Now we are assuming that 'ballotwith' has
                                 # a quota at the start of round 'r', and the
@@ -235,17 +242,23 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
                     ballotwith = None  
 
 
-class NodeSolved(Eventhdlr):
+#class NodeSolved(Eventhdlr):
+#    """
+#        Event handler used to check whether the current dual bound is 
+#        greater or equal to the current upper bound on the margin. If so,
+#        we terminate the solve early. We could have just added a constraint
+#        on the objective to limit it to the upperbound -- perhaps that would
+#        be a better approach. 
+#    """
+#    def __init__(self, upperbound):
+#        self.upperbound = upperbound
     
-    def __init__(self, upperbound):
-        self.upperbound = upperbound
-    
-    def eventinit(self):
-        self.model.catchEvent(SCIP_EVENTTYPE.NODESOLVED, self)
+#    def eventinit(self):
+#        self.model.catchEvent(SCIP_EVENTTYPE.NODESOLVED, self)
 
-    def eventexec(self, event):
-        if self.model.getDualbound() >= self.upperbound:
-            self.model.interruptSolve()
+#    def eventexec(self, event):
+#        if self.model.getDualbound() >= self.upperbound:
+#            self.model.interruptSolve()
  
 
 def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
@@ -315,6 +328,21 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
 
         log          : Will either be None or an output stream to use when
                        printing out diagnostics.
+
+        Simple lower bounding rules applied. We compute the minimum and 
+        maximum tallies candidates could have in any round. Candidates 'c'
+        elected on a quota in a round 'r' must have a quota in their tally. 
+        The minimum vote change required is max(0, Q - vcr_max[c,r]). 
+        When a candidate is eliminated, no candidate can have a quota. We
+        take the difference between candidates' minimum tallies and a quota
+        in that round to be the minimum vote change required. The eliminated
+        candidate's tally must also be less than (or equal to) that of 
+        all other candidates in that round. We take the difference between
+        their minimum tally, and the maximum tallies of other candidates, or
+        0 if the difference is negative, as the smallest vote change required.
+
+        We take the maximum of all these 'smallest required vote changes' to
+        be a lower bound on the margin.
     """
 
     R = len(order_c)
@@ -472,6 +500,10 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     sum_ps = 0
     sum_ms = 0
 
+    # Data structure to store maximum round-by-round tallies for candidates
+    # over the course of the outcome prefix.
+    max_tallies = { c : [0]*R for c in cands}
+
     for b in classes:
         ps[b.num] = model.addVar(vtype="I", lb=0, ub=upperbound, \
             name="ps(%s)"%b.num)
@@ -511,29 +543,49 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         # in different rounds.
         distribute_ballots_t(0, R, ballotwith, cp_ballotwith, withindex, 1, \
             [], ys, b, lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, \
-            tallies, rem, candpos, order_q)
-    
+            tallies, rem, candpos, order_q, max_tallies)
+  
+    #print(order_c)
+    #print(order_a) 
+    #print(max_tallies) 
     # Constraint enforces consistency  
     model.addCons(sum_ps == sum_ms)
 
-    # Connect tally expressions to tally variables.
+    # Connect tally expressions to tally variables. 
+    lowerbound = 0
     for c in cands:
         pos = candpos[c]
+
+        if pos <= LAST_ROUND and c in nonsupers:
+            if order_c[pos] == 1:
+                lowerbound = max(lowerbound, max(0, quota-max_tallies[c][pos]))
+            else:
+                cfpvotes = candidates[c].fp_votes
+                lowerbound = max(lowerbound, max(0, cfpvotes-quota))
+                for ce in nonsupers:
+                    if c == ce or candpos[ce] < pos:
+                        continue
+
+                    lowerbound = max(lowerbound,max(0, cfpvotes - \
+                        max_tallies[ce][r]))
+
         for r in range(min(LAST_ROUND+1, pos+1)):
             model.addCons(vcr[c,r] == tallies[c,r])  
+               
+    if lowerbound >= upperbound:
+        return True, lowerbound, lowerbound
+
+    model.addCons(sum_ps <= upperbound)
+    model.addCons(sum_ps >= lowerbound)
 
     # Weird thing with quicksum introducing an offset for objective, so
     # am avoiding using it.
     model.setObjective(sum_ps, "minimize")
 
-    #model.writeProblem()
-
-    eventhdlr = NodeSolved(upperbound)
-    model.includeEventhdlr(eventhdlr, "UBreached", "Terminate when UB reached")
     model.optimize()
 
     if model.getStatus() == "infeasible":
-        return False, None
+        return False, None, None
 
     else:
         # As we are usually going to stop solving when we get to an 
