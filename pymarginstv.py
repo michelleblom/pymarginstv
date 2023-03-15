@@ -86,7 +86,9 @@ if __name__ == "__main__":
     weub = compute_weub(candidates, winners, order_c, order_a, tallies)
     simple_ub = compute_simple_ub(candidates, quota, winners)
 
-    upper_bound = min(weub, simple_ub)
+    # TODO: Error check weub for test3.json 3 seats. 
+
+    upper_bound = simple_ub # min(weub, simple_ub)
 
     print("WEUB {}, simple UB {}".format(weub, simple_ub), file=log)
 

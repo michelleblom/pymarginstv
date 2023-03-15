@@ -264,7 +264,7 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
 
 def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     merge_map, supers, tot_ballots, args, quota, upperbound, LAST_ROUND, \
-    disp_lowerbound, log=None):
+    disp_lowerbound, isleaf = False, log=None):
     """
         Compute the number of ballots we would have to alter in order to 
         achieve the outcome prefix stated in order_c and order_a. 
@@ -331,7 +331,18 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
                        printing out diagnostics.
 
 
-        disp_lowerbound : 
+        disp_lowerbound : Displacement lower bound. This represents a lower
+                          bound on the number of votes we have to change
+                          for one of the original losers that is still 
+                          standing after the outcome prefix to displace one
+                          of the original winners that is still standing. It
+                          represents a lower bound on the vote change required
+                          for an original loser to, at some point, have the
+                          chance of having more votes than an original winner.
+
+        isleaf       : Flag indicating whether the outcome prefix actually
+                       represents a complete outcome. 
+  
 
         Simple lower bounding rules applied. We compute the minimum and 
         maximum tallies candidates could have in any round. Candidates 'c'
@@ -343,21 +354,13 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         candidate's tally must also be less than (or equal to) that of 
         all other candidates in that round. We take the difference between
         their minimum tally, and the maximum tallies of other candidates, or
-        0 if the difference is negative, as the smallest vote change required.
+        0 if the difference is negative, and divide by two to get the smallest
+        vote change required. We take the maximum of all these 'smallest 
+        required vote changes' to be a lower bound on the margin. That is the 
+        original lower bounding rule described in the paper on margin 
+        computation for STV. [Although there we did not divide by two and I
+        think you need to].
 
-        We take the maximum of all these 'smallest required vote changes' to
-        be a lower bound on the margin. That is the original lower bounding
-        rule described in the paper on margin computation for STV. However,
-        we can go further. Consider a prefix where it is clear that at least 
-        one original loser still standing has to displace one of the original
-        winners still standing (eg. our prefix contains just eliminations or
-        only original winners getting seated). In this case, we need to ensure
-        that at least one of the original losers will not be eliminated before
-        one of the original winners. We can put a lower bound on the number of
-        vote changes required to ensure this by taking the difference between
-        the maximum tallies of the remaining original losers and the minimum
-        tallies of the remaining original winners. We then take the minimum of
-        these vote changes as a lower bound.
     """
 
     R = len(order_c)
