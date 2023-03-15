@@ -214,7 +214,8 @@ def get_order_q(order_c, order_a, LAST_ROUND, winners):
     return order_q
 
 
-def compute_disp_lb(node_order_c, node_order_a, winner_set, ballots, rem):
+def compute_disp_lb(candidates, node_order_c, node_order_a, winner_set, \
+    ballots, rem):
     """
         Consider a prefix where it is clear that at least one original loser 
         still standing has to displace one of the original winners still 
@@ -288,26 +289,16 @@ def compute_disp_lb(node_order_c, node_order_a, winner_set, ballots, rem):
                 # What would be the least displacement cost to
                 # displace ogw with ogl? What is the maximum vote
                 # that ogl could have assuming ogw is still standing?
-                mint_ogw = 0
+                mint_ogw = candidates[ogw].fp_votes
                 maxt_ogl = 0
                 for b in ballots:
-                    prefs = b.prefs[:]
-
-                    # Remove candidates from prefs that have been eliminated
-                    # in the outcome prefix.
-                    for i in range(lprefix):
-                        if node_order_a[i] == 0:
-                            prefs.remove(node_order_c[i])
-
-                    # Allocate votes of type b to ogw or ogl as appropriate
-                    if prefs[0] == ogw:
-                        mint_ogw += b.votes
-                        continue
-                           
+                    # Note we cannot assume the elimination of the candidates
+                    # in the prefix as we are basing this computation 
+                    # on the assumption of no manipulation. 
                     pos_w = b.prefs.index(ogw) if ogw in b.prefs else -1
                     pos_l = b.prefs.index(ogl) if ogl in b.prefs else -1
                            
-                    if pos_w != -1 and (pos_l == -1 or pos_w < pos_l):
+                    if pos_l != -1 and (pos_w == -1 or pos_l < pos_w):
                         maxt_ogl += b.votes
 
                 # We must at least ensure that we can make maxt_ogl
@@ -390,8 +381,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             # Compute order_q map
             order_q = get_order_q(node_order_c, node_order_a, 0, node_winners)
             
-            disp_lowerbound = compute_disp_lb(node_order_c, node_order_a, \
-                winner_set, ballots, rem)
+            disp_lowerbound = compute_disp_lb(candidates, node_order_c, \
+                node_order_a, winner_set, ballots, rem)
             
             if log != None:
                 print("EVALUATING {}/{}".format(node_order_c, node_order_a),\
@@ -538,15 +529,15 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
                 # This represents the original outcome
                 continue
 
-            disp_lowerbound = compute_disp_lb(node_order_c, node_order_a, \
-                winner_set, ballots, new_rem)
+            disp_lowerbound = compute_disp_lb(candidates, node_order_c, \
+                node_order_a, winner_set, ballots, new_rem)
 
             disp_lowerbound = max(disp_lowerbound, fnode.dist)
 
             # Work out the round at which we can stop forming constraints,
             # compute bounds on when candidate could achieve their quotas,
             # solve the distance-to model.
-            LAST_ROUND = compute_last_round(node_order_c,node_order_a,\
+            LAST_ROUND = compute_last_round(node_order_c, node_order_a, \
                 seats, ncands)
 
             order_q = get_order_q(node_order_c, node_order_a, \

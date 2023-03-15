@@ -1,5 +1,5 @@
 from pyscipopt import Model, SCIP_PARAMSETTING, SCIP_PARAMEMPHASIS, \
-    Eventhdlr, SCIP_EVENTTYPE
+    Eventhdlr, SCIP_EVENTTYPE, Sepa
 
 from utils import gen_equivalence_classes, reduce_ballots
 
@@ -242,24 +242,26 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
                 if withindex == lballot:
                     ballotwith = None  
 
-
-#class NodeSolved(Eventhdlr):
-#    """
-#        Event handler used to check whether the current dual bound is 
-#        greater or equal to the current upper bound on the margin. If so,
-#        we terminate the solve early. We could have just added a constraint
-#        on the objective to limit it to the upperbound -- perhaps that would
-#        be a better approach. 
-#    """
-#    def __init__(self, upperbound):
-#        self.upperbound = upperbound
+class TimerHndlr(Eventhdlr):
+    """
+        Handler to terminate MINLP solve a certain time period after the
+        first feasible solution has been found. 
+    """
+    def __init__(self, timelimit):
+        self.timelimit = timelimit
+        self.firstfeasible = -1
     
-#    def eventinit(self):
-#        self.model.catchEvent(SCIP_EVENTTYPE.NODESOLVED, self)
+    def eventinit(self):
+        self.model.catchEvent(SCIP_EVENTTYPE.NODESOLVED, self)
 
-#    def eventexec(self, event):
-#        if self.model.getDualbound() >= self.upperbound:
-#            self.model.interruptSolve()
+    def eventexec(self, event):
+        gap = self.model.getGap()
+        if self.firstfeasible == -1 and gap <= 1:
+            self.firstfeasible = self.model.getSolvingTime()
+        else:
+            if self.model.getSolvingTime() - \
+               self.firstfeasible > self.timelimit:
+               self.model.interruptSolve()
  
 
 def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
@@ -386,7 +388,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     model.setEmphasis(SCIP_PARAMEMPHASIS.OPTIMALITY)
     #model.hideOutput()
     model.setRealParam("limits/gap", args.gap)
-    model.setRealParam("limits/time", args.time)
+    #model.setRealParam("limits/time", args.time)
 
     # VARIABLES
     # 'Signature' here refers to equivalence class rankings.
@@ -597,8 +599,8 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     model.addCons(sum_ps <= upperbound)
     model.addCons(sum_ps >= lowerbound)
 
-    #hdlr = NodeSolved(upperbound)
-    #model.includeEventhdlr(hdlr, "UB reached", "Term on UB reached")
+    model.includeEventhdlr(TimerHndlr(args.time), "TimelimitReached", \
+        "Timelimit reached")
 
     # Weird thing with quicksum introducing an offset for objective, so
     # am avoiding using it.
