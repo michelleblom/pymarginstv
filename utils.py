@@ -465,11 +465,12 @@ def compute_weub(candidates, winners, order_c, order_a, tallies):
                         continue
 
                     if tallies[s][r] + 0.5*change < halfless:
-                        use_test = False
+                        use_half = False
                         break
 
                 if use_half:
                     weub = min(weub, 0.5*change)
+
     return weub
                        
 

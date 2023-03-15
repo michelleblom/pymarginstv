@@ -86,9 +86,7 @@ if __name__ == "__main__":
     weub = compute_weub(candidates, winners, order_c, order_a, tallies)
     simple_ub = compute_simple_ub(candidates, quota, winners)
 
-    # TODO: Error check weub for test3.json 3 seats. 
-
-    upper_bound = simple_ub # min(weub, simple_ub)
+    upper_bound = min(weub, simple_ub)
 
     print("WEUB {}, simple UB {}".format(weub, simple_ub), file=log)
 
@@ -97,3 +95,10 @@ if __name__ == "__main__":
         upper_bound, args.seats, args, quota, totvotes, agap=args.agap,log=log)
 
     log.close()
+
+# TODO: Debug test3.json with 3 seats, 1886 is definitely a manipulation 
+# size that will change the result, see test4.json. BUT, infeasible according
+# to stvdistance.
+# Actual outcome: 0 1 2 3 4 5 8 7 6
+# Actual outcome: 1 1 0 0 0 0 0 0 1
+# Prefix 0/1 should give distance of 0.
