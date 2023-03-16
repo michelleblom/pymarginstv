@@ -23,6 +23,8 @@ from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
 
 from stvtree import treestv
 
+from stvdistance import stvdistance
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -93,6 +95,18 @@ if __name__ == "__main__":
     # Start branch and bound.
     lb, ub = treestv(ballots, candidates, winners, order_c, order_a,\
         upper_bound, args.seats, args, quota, totvotes, agap=args.agap,log=log)
+
+    #test_order_c = [2,3,4,5,8,6,1,0,7]
+    #test_order_a = [0,0,0,0,0,0,0,1,1]
+    #rem = []
+    #winners = [0,7]
+    #order_q = {}
+    #merge_map = {c : c for c in range(9)}
+
+    #_, dist, dist_ub = stvdistance(candidates, ballots, test_order_c, \
+    #    test_order_a, rem, winners, order_q, merge_map, [], totvotes, \
+    #    args, quota, upper_bound, 6, 0, isleaf = False, log=log)
+
 
     log.close()
 

@@ -58,7 +58,11 @@ class Frontier:
         """
             Return first node in frontier, remove it from frontier.
         """
-        return self.nodes.pop(index) if self.nodes != [] else None
+        if self.nodes != []:
+            self.size -= 1
+            return self.nodes.pop(index) 
+
+        return None
 
     def __str__(self):
         """
@@ -144,6 +148,7 @@ class Frontier:
         for i in range(len(self.nodes)):
             if node.dist < self.nodes[i].dist:
                 self.nodes.insert(i, node)
+                self.size += 1 
                 return i
 
         self.nodes.append(node)
@@ -272,7 +277,7 @@ def compute_disp_lb(candidates, node_order_c, node_order_a, winner_set, \
                 og_losers.append(c)
 
     disp_lowerbound = 0
-    if og_losers != []:
+    if og_losers != [] and og_winners != []:
         lprefix = len(node_order_c)
 
         displacement_cost = np.inf
@@ -484,6 +489,8 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
 
     children = []
 
+    node_dist = fnode.dist
+
     # Add a candidate to the end of the outcome prefix represented
     # by the selected node. That candidate can either be seated or 
     # eliminated.
@@ -572,7 +579,7 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
             if frontier.size > 0:
                 running_lb = min(dist, min([n.dist for n in frontier.nodes]))
             else:
-                running_lb = dist
+                running_lb = min(dist, running_ub)
 
             if seats_filled == seats:
                 if log != None and dist_ub < running_ub:
@@ -592,9 +599,13 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
                     node_winners, rem, dist, dist_ub)
 
                 index = frontier.insert(newn, log=log)
-
+                
                 if index != None:
                     children.append((index, dist))
+
+
+    if children == [] and frontier.size == 0:
+        running_lb = running_ub
 
     return running_lb, running_ub, converged, children
 

@@ -8,9 +8,9 @@ import math
 
 epsilon = 0.0001
 
-def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
-    lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, tallies, rem, candpos, \
-    order_q, max_tallies):
+def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, bpapers, caveats, \
+    ys, b, lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, tallies, npapers, \
+    rem, candpos, order_q, max_tallies):
     """
         This function is used to build up a candidates tally at the start of 
         any given round. The 'tallies' structure maps candidate numbers and 
@@ -19,16 +19,21 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
         contain a variable representing their tally at the start of the last
         round. This function is designed to be used recursively. 
 
-        The function is called for a ballot 'b' that, at the start of round 
-        'rstart' is sitting with the candidate 'bw'. That candidate is either
-        elected or eliminated in round 'cp_bw'. The value of the ballot at 
-        this point is expressed by the expression 'bvalue'. That expression may
-        contain a transfer value variable multiplied by a number of qcr/nqcr
-        variables that ensure that particular candidates did/did not have a 
-        quota at the start of certain rounds. These qcr/nqcr variables will be
-        contained in the structure 'caveats'. These 'caveats' are things that
-        must hold for the ballot to have found its way to 'bw' by the start of
-        round 'rstart'.
+        The function is called for a ballot 'b' type that, at the start of 
+        round 'rstart' is sitting with the candidate 'bw'. That candidate is 
+        either elected or eliminated in round 'cp_bw'. The total value of the 
+        ballots at this point is expressed by the expression:
+                bvalue*bpapers*ys[s]
+        where 's' is the number identifier for the ballot type, and ys[s]
+        represents the number of ballots cast of that ballot type. 
+
+        That expression may contain a transfer value variable multiplied by a 
+        number of qcr/nqcr variables that ensure that particular candidates 
+        did/did not have a quota at the start of certain rounds. These qcr/nqcr
+        variables will be contained in the structure 'caveats'. These 'caveats'
+        are things that must hold for the ballot to have found its way to 'bw' 
+        by the start of round 'rstart'. The expression 'bpapers' alone contains
+        the binary multipliers expressed in caveats.
 
         For example,
 
@@ -42,24 +47,24 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
         A ballot type may arrive in a candidate c's tally in two different 
         rounds depending on who has a quota when. This means that the ys[]
         variable for that ballot will appear in two different expressions in
-        tallies[c,].  However, these expressions will have binary variable
-        multipliers that ensure that only one of the expressions will have a non
-        zero value in any solution of our distance-to model. Similarly, a ballot
-        type may arrive in different candidates' tallies in a round depending on
-        who had a quota when. In this case, also, binary multipliers are used to
-        ensure that it will only contribute to the tally of one candidate in any
-        given round.
+        tallies[c,] and npapers[c,].  However, these expressions will have 
+        binary variable multipliers that ensure that only one of the 
+        expressions will have a non zero value in any solution of our 
+        distance-to model. Similarly, a ballot type may arrive in different 
+        candidates' tallies in a round depending on who had a quota when. In 
+        this case, also, binary multipliers are used to ensure that it will 
+        only contribute to the tally of one candidate in any given round.
 
         This function assumes we have stepped through the ballot preferences and
         are currently at index 'wi', where as mentioned, the ballot is currently
         residing with candidate 'bw'. The function continues to step through
         the ballot preferences, and counting rounds, until it reaches a round
-        where it should move to another candidate. The 'tallies' data structure
-        will be updated accordingly. If we reach a point where the ballot may
-        be transferred to a particular candidate (eg. depending on whether
-        certain candidates have/don't have quotas at certain points), we 
-        make a recursive call to this function to 'play out' this particular
-        reality with the appropriate caveats added to 'caveats'.
+        where it should move to another candidate. The 'tallies' and 'npapers'
+        data structures will be updated accordingly. If we reach a point where 
+        the ballot may be transferred to a particular candidate (eg. depending 
+        on whether certain candidates have/don't have quotas at certain 
+        points), we make a recursive call to this function to 'play out' this 
+        particular reality with the appropriate caveats added to 'caveats'.
 
         R          : Length of the current outcome prefix.
 
@@ -92,6 +97,10 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
 
         tallies    : tallies[c,r] returns an expression for the tally of 
                      candidate c at the start of round r.
+
+        npapers    : npapers[c,r] returns an expression for the number of 
+                     ballots in the tally of candidate c at the start of 
+                     round r.
 
         rem        : Candidates that are not in the order_c/order_a for the 
                      outcome being solved for (ie. they are not in the outcome 
@@ -126,8 +135,9 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
     # them for the purposes of this distance-to model). 
     cp_ballotwith = cp_bw
 
-    # Value of ballots of this type, at this point.
+    # To represent total value of ballots of this type, at this point.
     ballot_value = bvalue
+    ballot_papers = bpapers
 
     # Marker for where we are up to in stepping through the ballot preferences
     withindex = wi
@@ -136,7 +146,8 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
     # 'start' (note: we do not include ballots in tallies[c,r] that reached
     # candidate c in a round before r-1, these are already captured by the
     # presence of variable vcr[c,r-1] in the tallies[c,r] expression).
-    tallies[ballotwith,rstart] += ballot_value*ys[b.num]
+    tallies[ballotwith,rstart] += ballot_value*bpapers*ys[b.num]
+    npapers[ballotwith,rstart] += bpapers*ys[b.num]
     
     for r in range(rstart, R):
         if ballotwith != None:
@@ -147,7 +158,8 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
             # move to another candidate in this round.
             if last_ballotwith != ballotwith:
                 # Ballot moved to 'ballotwith' in round r-1. 
-                tallies[ballotwith,r] += ballot_value*ys[b.num]
+                tallies[ballotwith,r] += ballot_value*ballot_papers*ys[b.num]
+                npapers[ballotwith,r] += ballot_papers*ys[b.num]
                 last_ballotwith = ballotwith 
 
             if r == LAST_ROUND:
@@ -156,14 +168,14 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
             if cp_ballotwith == r and ballotwith in winners:
                 # ballot will change in value for subsequent recipients
                 # (depending on caveats).
-                ballot_value = 1
+                ballot_papers = 1
                 for cp, rq, val in caveats:
                     if val == 0:
-                        ballot_value *= nqcr[cp,rq]
+                        ballot_papers *= nqcr[cp,rq]
                     else:
-                        ballot_value *= qcr[cp,rq]
+                        ballot_papers *= qcr[cp,rq]
 
-                ballot_value *= tvalue[r]
+                ballot_value = tvalue[r]
 
 
             # Does the ballot type move to a new person during this round.
@@ -213,19 +225,19 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, caveats, ys, b, \
                                 # ballotwith could get it, but might not
                                 # imagine it does get it, let's play out
                                 # this reality with a recursive call.
-                                nbv = ballot_value*nqcr[ballotwith,r]
+                                nbp = ballot_papers*nqcr[ballotwith,r]
                                 distribute_ballots_t(r+1, R, ballotwith, \
-                                    cp_ballotwith, withindex, nbv, \
-                                    caveats[:] + [(ballotwith, r, 0)], ys, b, \
+                                    cp_ballotwith, withindex, ballot_value, \
+                                    nbp, caveats[:]+[(ballotwith,r,0)],ys,b, \
                                     lballot, LAST_ROUND, winners, tvalue, \
-                                    nqcr, qcr, tallies, rem, candpos, order_q,\
-                                    max_tallies)
+                                    nqcr, qcr, tallies, npapers, rem, candpos,\
+                                    order_q, max_tallies)
 
                                 # Now we are assuming that 'ballotwith' has
                                 # a quota at the start of round 'r', and the
                                 # ballot type is skipping them. We adjust
                                 # the ballot value with this caveat in place.
-                                ballot_value *= qcr[ballotwith, r]
+                                ballot_papers *= qcr[ballotwith,r]
                                 caveats.append((ballotwith, r, 1))
                                 
                                 # Move on to next possibility.
@@ -384,6 +396,9 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     reduce_ballots(len(candidates), order_c, rem, merge_map, ballots, \
         classes, class_map)
 
+    #for c in classes:
+    #    print(c, file=log)
+
     model = Model("STVDISTANCE")
     model.setEmphasis(SCIP_PARAMEMPHASIS.OPTIMALITY)
     #model.hideOutput()
@@ -429,6 +444,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     nonsupers = {c for c in cands if (not c in supers)}
 
     tallies = {}
+    npapers = {}
     for c in cands:
         pos = R+1
         if c in order_c:
@@ -449,9 +465,11 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
                 name="ncr(%s,%s)"%(c,r))
 
             tallies[c,r] = 0
+            npapers[c,r] = 0
 
             if r > 0:
                 tallies[c,r] += vcr[c,r-1]
+                npapers[c,r] += ncr[c,r-1]
 
             # For the winners that get a quota at some point, create
             # quota/not-quota binaries.
@@ -562,9 +580,9 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
 
         # Populate tallies[] expressions, defining who has this ballot
         # in different rounds.
-        distribute_ballots_t(0, R, ballotwith, cp_ballotwith, withindex, 1, \
+        distribute_ballots_t(0, R, ballotwith, cp_ballotwith, withindex, 1, 1,\
             [], ys, b, lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, \
-            tallies, rem, candpos, order_q, max_tallies)
+            tallies, npapers, rem, candpos, order_q, max_tallies)
   
     # Constraint enforces consistency  
     model.addCons(sum_ps == sum_ms)
@@ -575,7 +593,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         pos = candpos[c]
 
         if pos <= LAST_ROUND and c in nonsupers:
-            if order_c[pos] == 1:
+            if order_a[pos] == 1:
                 lowerbound = max(lowerbound, max(0, quota-max_tallies[c][pos]))
             else:
                 cfpvotes = candidates[c].fp_votes
@@ -590,6 +608,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
 
         for r in range(min(LAST_ROUND+1, pos+1)):
             model.addCons(vcr[c,r] == tallies[c,r])  
+            model.addCons(ncr[c,r] == npapers[c,r])  
                
     lowerbound = max(lowerbound, disp_lowerbound)
 
@@ -605,6 +624,8 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     # Weird thing with quicksum introducing an offset for objective, so
     # am avoiding using it.
     model.setObjective(sum_ps, "minimize")
+
+    #model.writeProblem()
 
     model.optimize()
 

@@ -542,6 +542,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
         r = max(0, r)
 
         if standing == nseats - currseat:
+            surpluses = []
             if log != None:
                 print("Number of candidates left standing equals number of "\
                     "remaining seats", file=log)
