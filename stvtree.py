@@ -1,4 +1,6 @@
 from stvdistance import stvdistance
+from utils import merge_outcome
+
 import numpy as np
 
 epsilon = 0.9
@@ -366,8 +368,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
     running_ub = upperbound
     running_lb = 0
-
-    merge_map = {c.num : c.num for c in candidates} 
+            
+    merge_map = {c.num : c.num for c in candidates}  
 
     # Initialise frontier. For each candidate, they can either be elected
     # to a seat or eliminated. Assumption: election involves at least 2
@@ -549,14 +551,19 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
 
             order_q = get_order_q(node_order_c, node_order_a, \
                 LAST_ROUND, node_winners)
+
+            m_order_c, m_order_a, m_order_q, merge_map, supers, round_conv = \
+                merge_outcome(node_order_c, node_order_a, order_q, new_rem)
+
+            LAST_ROUND = round_conv[LAST_ROUND]
         
             if log != None:
                 print("EVALUATING {}/{}".format(node_order_c, \
                     node_order_a), file=log)
                 print("Displacement LB {}".format(disp_lowerbound), file=log)
 
-            _, dist, dist_ub=stvdistance(candidates,ballots,node_order_c, \
-                node_order_a, new_rem, node_winners, order_q, merge_map,[],\
+            _, dist, dist_ub=stvdistance(candidates,ballots,m_order_c, \
+                m_order_a, new_rem, node_winners, order_q, merge_map, supers,\
                 tot_ballots, args, quota, running_ub, LAST_ROUND, \
                 disp_lowerbound, isleaf=isleaf, log=log)
 

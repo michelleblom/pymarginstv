@@ -936,11 +936,11 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
 
     """
         elim_seq    -  A sequence of consecutively eliminated candidates.
-                       If the list is of sufficient length (> 1).
+                       If the list is of sufficient length (> 3).
                        Candidates in elim_seq will be added to merge_map, with 
                        their mapped value being their id in the merged 
                        election outcome. If the list of not of sufficient
-                       length, the candidate(s) will remain as themselve --
+                       length, the candidate(s) will remain as themselves --
                        unmerged in the new outcome representation.
 
         m_order_c   -  Sequence of the candidates who are eliminated/elected
@@ -962,7 +962,7 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
 
         supers      -  Ids of the super candidates.
     """
-    if True: #len(elim_seq) < 3: 
+    if len(elim_seq) < 4: 
         # Do not merge the candidates, add them to m_order_c, and m_order_a
         # as themselves. 
         for e in elim_seq:
@@ -971,9 +971,15 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
             merge_map[e] = e
             segments.append([e])
     else:
-
         mc = elim_seq[0]
-        for sc in elim_seq[:-1]:
+        merge_map[mc] = mc
+        m_order_c.append(mc)
+        m_order_a.append(0)
+        
+        segments.append([mc])
+
+        mc = elim_seq[1]
+        for sc in elim_seq[1:-1]:
             merge_map[sc] = mc
 
         supers.append(mc)
@@ -981,7 +987,7 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
         m_order_c.append(mc)
         m_order_a.append(0)
 
-        segments.append(elim_seq[:-1])
+        segments.append(elim_seq[1:-1])
 
         lc = elim_seq[-1]
         merge_map[lc] = lc
@@ -991,7 +997,7 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
         segments.append([lc])
 
 
-def merge_outcome(order_c, order_a, order_q):
+def merge_outcome(order_c, order_a, order_q, rem):
     merge_map = {}
 
     # We reformulate the prefix order (order_c and order_a) into its merged
@@ -1058,5 +1064,8 @@ def merge_outcome(order_c, order_a, order_q):
     m_order_q = { c : (round_conv[r1],round_conv[r2]) \
         for c,(r1,r2) in order_q.items() }
 
-    return m_order_c, m_order_a, m_order_q, merge_map, supers, segments
+    for r in rem:
+        merge_map[r] = r
+
+    return m_order_c, m_order_a, m_order_q, merge_map, supers, round_conv
  
