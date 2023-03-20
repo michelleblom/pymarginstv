@@ -38,7 +38,10 @@ if __name__ == "__main__":
     # Input: acceptable gap to which to solve MINLPs
     parser.add_argument('-g', dest='gap', type=float, default=0.01)
     parser.add_argument('-agap', dest='agap', type=int, default=1)
-    
+   
+    # Input: whether to merge eliminated candidates or not
+    parser.add_argument('-m', action='store_true', default=False)
+ 
     # Input: max solve time (s) for MINLPs 
     parser.add_argument('-t', dest='time', type=int, default=500)
 

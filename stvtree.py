@@ -542,6 +542,11 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
                 node_order_a, winner_set, ballots, new_rem)
 
             disp_lowerbound = max(disp_lowerbound, fnode.dist)
+            
+            if log != None:
+                print("EVALUATING {}/{}".format(node_order_c, \
+                    node_order_a), file=log)
+                print("Displacement LB {}".format(disp_lowerbound), file=log)
 
             # Work out the round at which we can stop forming constraints,
             # compute bounds on when candidate could achieve their quotas,
@@ -552,20 +557,24 @@ def expand_node(fnode, frontier, ballots, candidates, winner_set, lb, ub,\
             order_q = get_order_q(node_order_c, node_order_a, \
                 LAST_ROUND, node_winners)
 
-            m_order_c, m_order_a, m_order_q, merge_map, supers, round_conv = \
-                merge_outcome(node_order_c, node_order_a, order_q, new_rem)
+            dist, dist_ub = None, None
 
-            LAST_ROUND = round_conv[LAST_ROUND]
+            if args.m:
+                m_order_c,m_order_a,m_order_q,merge_map,supers,round_conv = \
+                    merge_outcome(node_order_c, node_order_a, order_q, new_rem)
+
+                LAST_ROUND = round_conv[LAST_ROUND]
         
-            if log != None:
-                print("EVALUATING {}/{}".format(node_order_c, \
-                    node_order_a), file=log)
-                print("Displacement LB {}".format(disp_lowerbound), file=log)
-
-            _, dist, dist_ub=stvdistance(candidates,ballots,m_order_c, \
-                m_order_a, new_rem, node_winners, order_q, merge_map, supers,\
-                tot_ballots, args, quota, running_ub, LAST_ROUND, \
-                disp_lowerbound, isleaf=isleaf, log=log)
+                _, dist, dist_ub=stvdistance(candidates,ballots,m_order_c, \
+                    m_order_a, new_rem, node_winners, order_q, merge_map, \
+                    supers, tot_ballots, args, quota, running_ub, LAST_ROUND, \
+                    disp_lowerbound, isleaf=isleaf, log=log)
+            else:
+                _, dist, dist_ub=stvdistance(candidates,ballots,node_order_c, \
+                    node_order_a, new_rem, node_winners, order_q, merge_map, \
+                    [], tot_ballots, args, quota, running_ub, LAST_ROUND, \
+                    disp_lowerbound, isleaf=isleaf, log=log)
+                
 
             if log != None:
                 if dist == None:
