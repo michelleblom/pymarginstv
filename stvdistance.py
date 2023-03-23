@@ -401,7 +401,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
 
     model = Model("STVDISTANCE")
     model.setEmphasis(SCIP_PARAMEMPHASIS.OPTIMALITY)
-    #model.hideOutput()
+    model.hideOutput()
     model.setRealParam("limits/gap", args.gap)
     #model.setRealParam("limits/time", args.time)
 

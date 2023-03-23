@@ -962,7 +962,7 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
 
         supers      -  Ids of the super candidates.
     """
-    if len(elim_seq) < 4: 
+    if len(elim_seq) < 2: 
         # Do not merge the candidates, add them to m_order_c, and m_order_a
         # as themselves. 
         for e in elim_seq:
@@ -978,23 +978,22 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
         
         segments.append([mc])
 
-        mc = elim_seq[1]
-        for sc in elim_seq[1:-1]:
+        for sc in elim_seq:
             merge_map[sc] = mc
 
         supers.append(mc)
 
-        m_order_c.append(mc)
-        m_order_a.append(0)
+        #m_order_c.append(mc)
+        #m_order_a.append(0)
 
-        segments.append(elim_seq[1:-1])
+        #segments.append(elim_seq[1:-1])
 
-        lc = elim_seq[-1]
-        merge_map[lc] = lc
-        m_order_c.append(lc)
-        m_order_a.append(0)
+        #lc = elim_seq[-1]
+        #merge_map[lc] = lc
+        #m_order_c.append(lc)
+        #m_order_a.append(0)
 
-        segments.append([lc])
+        #segments.append([lc])
 
 
 def merge_outcome(order_c, order_a, order_q, rem):
