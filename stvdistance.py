@@ -278,7 +278,7 @@ class TimerHndlr(Eventhdlr):
 
 def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     merge_map, supers, tot_ballots, args, quota, upperbound, LAST_ROUND, \
-    disp_lowerbound, isleaf = False, log=None):
+    lowerbound, isleaf = False, log=None):
     """
         Compute the number of ballots we would have to alter in order to 
         achieve the outcome prefix stated in order_c and order_a. 
@@ -345,14 +345,17 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
                        printing out diagnostics.
 
 
-        disp_lowerbound : Displacement lower bound. This represents a lower
-                          bound on the number of votes we have to change
-                          for one of the original losers that is still 
-                          standing after the outcome prefix to displace one
-                          of the original winners that is still standing. It
-                          represents a lower bound on the vote change required
-                          for an original loser to, at some point, have the
-                          chance of having more votes than an original winner.
+        lowerbound   : Max of displacement/quota lower bound. This represents 
+                       a lower bound on the number of votes we have to change
+                       for one of the original losers that is still 
+                       standing after the outcome prefix to displace one
+                       of the original winners that is still standing. It
+                       represents a lower bound on the vote change required
+                       for an original loser to, at some point, have the
+                       chance of having more votes than an original winner.
+                       Quota lower bound represents minimum manipulation
+                       required to give a candidate who needs a quota in
+                       a certain round, a quota.
 
         isleaf       : Flag indicating whether the outcome prefix actually
                        represents a complete outcome. 
@@ -588,32 +591,22 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     model.addCons(sum_ps == sum_ms)
 
     # Connect tally expressions to tally variables. 
-    lowerbound = 0
+    #lowerbound = 0
     for c in cands:
         pos = candpos[c]
 
-        if pos <= LAST_ROUND and c in nonsupers:
-            if order_a[pos] == 1:
-                lowerbound = max(lowerbound, max(0, quota-max_tallies[c][pos]))
-            else:
-                cfpvotes = candidates[c].fp_votes
-                lowerbound = max(lowerbound, max(0, cfpvotes-quota))
-                for ce in nonsupers:
-                    if c == ce or candpos[ce] < pos:
-                        continue
-
-                    # Does this have to be difference div 2?
-                    lowerbound = max(lowerbound,max(0, 0.5*(cfpvotes - \
-                        max_tallies[ce][r])))
+     #   if pos <= LAST_ROUND and c in nonsupers:
+     #       if order_a[pos] == 1:
+     #           lowerbound = max(lowerbound, max(0, quota-max_tallies[c][pos]))
 
         for r in range(min(LAST_ROUND+1, pos+1)):
             model.addCons(vcr[c,r] == tallies[c,r])  
             model.addCons(ncr[c,r] == npapers[c,r])  
                
-    lowerbound = max(lowerbound, disp_lowerbound)
+    #lowerbound = max(lowerbound, disp_lowerbound)
 
-    if lowerbound >= upperbound:
-        return True, lowerbound, lowerbound
+    #if lowerbound >= upperbound:
+    #    return True, lowerbound, lowerbound
 
     model.addCons(sum_ps <= upperbound)
     model.addCons(sum_ps >= lowerbound)

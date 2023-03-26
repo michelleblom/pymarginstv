@@ -60,19 +60,26 @@ class Frontier:
         self.size = 0
 
 
+    #def pop(self, index):
+    #    if self.size == 0:
+    #        return None
+
+    #    self.size -= 1
+    #    return self.nodes.pop(0)
+    
     def pop(self, number):
-        if number <= self.size:
+        if self.size <= number:
             popped = self.nodes[:]
             self.nodes = []
             self.size = 0
             return popped
 
+        self.size -= number
         popped = self.nodes[:number]
         self.nodes = self.nodes[number:]
-        self.size -= number
-
         return popped
-
+            
+    
 
     def __str__(self):
         """
@@ -121,14 +128,6 @@ class Frontier:
                 self.nodes = self.nodes[:i]
                 self.size = len(self.nodes)
 
-    def similar(self, node_order_c, node_order_a, log=None):
-        for node in self.nodes:
-            if self.similar_node(node_order_c, node_order_a, node):
-                if log:
-                    print("Node similar to {}".format(node), file=log)
-                return True
-
-        return False
 
 
     def similar_node(self, inode, node):
@@ -167,7 +166,7 @@ class Frontier:
         """
         for fnode in self.nodes:
             if self.similar_node(node, fnode):
-                print("Node similar to {}".format(fnode), file=log)
+                #print("Node {} similar to {}".format(node, fnode), file=log)
                 return None
 
         for i in range(len(self.nodes)):
@@ -244,8 +243,56 @@ def get_order_q(order_c, order_a, LAST_ROUND, winners):
     return order_q
 
 
+def compute_quota_lb(candidates, ballots, node_order_c, node_order_a, \
+    order_q, quota):
+
+    gone = []
+    quota_lb = 0
+    for i in range(len(node_order_c)):
+        c = node_order_c[i]
+
+        if node_order_a[i] == 1 and c in order_q:
+            # What is maximum vote for 'c' in round i?
+
+            cmax = 0
+            for b in ballots:
+                prefs = []
+                for p in b.prefs:
+                    if not p in gone:
+                        prefs.append(p)
+
+                if prefs != [] and prefs[0] == c:
+                    cmax += b.votes
+
+            quota_lb = max(quota_lb, quota-cmax)
+               
+        gone.append(c) 
+
+    return quota_lb
+                            
+def filterballot(b, order_c):
+    prefs = []
+
+    for p in b.prefs:
+        if p in order_c:
+            continue
+
+        prefs.append(p)
+
+    return prefs
+
+
+def nowinner(prefs, w, winners):
+    for p in prefs:
+        if p == w:
+            return True
+
+        if p in winners:
+            return False
+    
+
 def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
-    winner_set, rem, ag_matrix):
+    winner_set, rem, quota, seats, ag_matrix):
     """
         Consider a prefix where it is clear that at least one original loser 
         still standing has to displace one of the original winners still 
@@ -278,9 +325,11 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
     # Determine if we need an original loser to get seated sometime
     # in the future (past the current outcome prefix
     new_winner = False
+    curr_winners = []
     for i in range(len(node_order_c)):
         if node_order_a[i] == 1:
             w = node_order_c[i]
+            curr_winners.append(w)
             if not (w in winner_set):
                 new_winner = True
                 break
@@ -301,48 +350,86 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
             else:
                 og_losers.append(c)
 
-    disp_lowerbound = 0
+    filtered_ballots = []
+    for b in ballots:
+        prefs = filterballot(b, node_order_c)
+        if prefs != []:
+            filtered_ballots.append((prefs, b.prefs, b.votes))
+
+    sleft = seats - sum(node_order_a)
+    nleft = len(rem)
+
+    lowerbound = 0
     if og_losers != [] and og_winners != []:
         lprefix = len(node_order_c)
 
-        displacement_cost = np.inf
-        # We look for the least cost way of giving an original loser the 
-        # chance of having more votes than one of the original winners at
-        # some point in the future. We do this by comparing the maximum
-        # possible vote the loser could have, while the winner is still 
-        # standing, against the minimum possible vote the winner could have.
-        # For the latter, at present, we use their first preference vote. But,
-        # we could factor in votes that must have passed to them from 
-        # candidates processed in the outcome prefix.
+        lowerbound = np.inf
+        all_elim = sum(node_order_a) == 0
+
         for ogl in og_losers:
+            ogl_lowerbound = 0
+            displacement_cost = np.inf
+            left_at_end_costs = []
             for ogw in og_winners:
-                # What would be the least displacement cost to
-                # displace ogw with ogl? What is the maximum vote
-                # that ogl could have assuming ogw is still standing?
-                if (ogw,ogl) in ag_matrix:
-                    displacement_cost = min(displacement_cost, \
-                        ag_matrix[ogw,ogl])
+                max_l = 0
+                min_w = 0
 
-#                mint_ogw = candidates[ogw].fp_votes
-#                maxt_ogl = 0
-#                for b in ballots:
-                    # Note we cannot assume the elimination of the candidates
-                    # in the prefix as we are basing this computation 
-                    # on the assumption of no manipulation. 
-#                    pos_w = b.prefs.index(ogw) if ogw in b.prefs else -1
-#                    pos_l = b.prefs.index(ogl) if ogl in b.prefs else -1
-                           
-#                    if pos_l != -1 and (pos_w == -1 or pos_l < pos_w):
-#                        maxt_ogl += b.votes
+                for prefs,oprefs,votes in filtered_ballots:
+                    if oprefs[0] == ogw or (node_order_a[-1] == -1 and \
+                        prefs[0] == ogw and nowinner(oprefs,ogw,curr_winners)):
+                        min_w += votes
+                        continue
 
-                # We must at least ensure that we can make maxt_ogl
-#                # greater or equal to mint_ogw 
-#                displacement_cost = min(displacement_cost, 0.5*max(0,\
-#                    mint_ogw - maxt_ogl))
+                    posl = prefs.index(ogl) if ogl in prefs else -1
+                    posw = prefs.index(ogw) if ogw in prefs else -1
 
-        disp_lowerbound = displacement_cost
+                    if posl != -1 and (posw == -1 or posl < posw):
+                        max_l += votes
 
-    return disp_lowerbound
+                dp = max(0, 0.5*(min_w - max_l))
+                displacement_cost = min(displacement_cost, dp)
+                left_at_end_costs.append(dp)
+
+            for r in rem:
+                if r == ogl or r in og_winners:
+                    continue
+    
+                max_l = 0
+                min_r = 0
+
+                for prefs,_,votes in filtered_ballots:
+                    if prefs[0] == r:
+                        min_r += votes
+                        continue
+
+                    posl = prefs.index(ogl) if ogl in prefs else -1
+                    posr = prefs.index(r) if r in prefs else -1
+
+                    if posl != -1 and (posr == -1 or posl < posr):
+                        max_l += votes
+
+                left_at_end_costs.append(max(0, 0.5*(max_l-min_r)))
+               
+            max_l = 0
+            for prefs,_,votes in filtered_ballots:
+                if ogl in prefs:
+                    max_l += votes
+
+            quota_cost = max(0, max_l - quota)
+
+            left_at_end_costs.sort()
+
+            # ogl needs to outlast nleft - sleft candidates 
+            left_at_end_cost = max(left_at_end_costs[:nleft-sleft])
+
+            ogl_lowerbound = max(displacement_cost, min(quota_cost, \
+                left_at_end_cost))
+            
+            lowerbound = min(lowerbound, ogl_lowerbound)
+            
+    return lowerbound
+
+
 
 
 
@@ -391,7 +478,6 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
     tstart = time.time()
 
     winner_set = set(winners)
-
     ncands = len(candidates)
 
     frontier = Frontier()
@@ -453,7 +539,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             order_q = get_order_q(node_order_c, node_order_a, 0, node_winners)
             
             disp_lowerbound = compute_disp_lb(candidates, ballots, \
-                node_order_c, node_order_a, winner_set, rem, ag_matrix)
+                node_order_c, node_order_a, winner_set,  rem, quota, seats, \
+                ag_matrix)
             
             if log != None:
                 print("EVALUATING {}/{}".format(node_order_c, node_order_a),\
@@ -522,67 +609,68 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
         if fnodes == []:
             break
-       
-        arg_list = [] 
-        for fnode in fnodes:
-            arg_list.append((fnode, ballots, candidates, winner_set, \
-                running_lb, running_ub, ncands, args, quota, tot_ballots,\
-                merge_map, ag_matrix,))
+               
 
+        arg_list = []
+        for fn in fnodes:
+            #if log != None:
+            #    print("EXPANDING NODE {}".format(fn), file=log)
+            arg_list.append((fn, ballots, candidates, winner_set, running_ub,\
+                ncands, args, quota, tot_ballots, merge_map, ag_matrix))
+
+        result = []
         with Pool() as pool:
             result = pool.starmap(expand_node, arg_list)
 
-            for fnode, children in result:
-                if log != None:
-                    print("EXPANDING NODE {}".format(fnode), file=log)
 
-                for isleaf, node_order_c, node_order_a, disp_lb, dist, \
-                    dist_ub, new_rem, node_winners in children:
+        for fnode, children in result:
+            for isleaf, node_order_c, node_order_a, disp_lb, dist, \
+                dist_ub, new_rem, node_winners in children:
 
-                   # if log != None:
-                   #     print("EVALUATING {}/{}".format(node_order_c, \
-                   #         node_order_a),file=log)
-                   #     print("Displacement LB {}".format(disp_lb), file=log)
-                
-                   # if dist == None:
-                   #     print("    DISTANCE None/Infeasible", file=log)
-                   # else:
-                   #     print("    DISTANCE {}/{}".format(dist, dist_ub), \
-                   #         file=log)
-            
-                    if dist == None or dist >= running_ub:
-                        continue
-
-                    if frontier.size > 0:
-                        running_lb = min(dist, min([n.dist for n in \
-                            frontier.nodes]))
-                    else:
-                        running_lb = min(dist, running_ub)
-
-                    if isleaf:
-                        if log != None and dist_ub < running_ub:
-                            print("Reducing upper bound to {}".format(dist_ub),\
-                                file=log)
-
-                        running_ub = min(running_ub, dist_ub)
-
-                        if abs(running_ub - running_lb) <= agap:
-                            converged = True
-                            break
-
-                        frontier.prune(running_ub, log=log)
-                    else:
-                        newn = TreeNode(node_order_c, node_order_a, \
-                            node_winners, new_rem, dist, dist_ub)
-
-                        frontier.insert(newn, log=log)
-                
-                    if converged:
-                        break
+                #if log != None:
+                #    print("EVALUATED {}/{}".format(node_order_c, \
+                #        node_order_a),file=log)
+                #    print("Displacement/Quota LB {}".format(disp_lb), \
+                #        file=log)
                     
+                #    if dist == None:
+                #        print("    DISTANCE None/Infeasible", file=log)
+                #    else:
+                #        print("    DISTANCE {}/{}".format(dist, dist_ub), \
+                #            file=log)
+                
+                if dist == None or dist >= running_ub:
+                    continue
+
+                if frontier.size > 0:
+                    running_lb=min(dist,min([n.dist for n in frontier.nodes]))
+                else:
+                    running_lb=min(dist, running_ub)
+
+                if isleaf:
+                    if log != None and dist_ub < running_ub:
+                        print("Reducing upper bound to {}".format(dist_ub),\
+                            file=log)
+
+                    running_ub = min(running_ub, dist_ub)
+
+                    if abs(running_ub - running_lb) <= agap:
+                        converged = True
+                        break
+
+                    frontier.prune(running_ub, log=log)
+                else:
+                    newn = TreeNode(node_order_c, node_order_a, node_winners,\
+                        new_rem, dist, dist_ub)
+
+                    frontier.insert(newn, log=log)
+                    
+            if converged:
+                break
+
         if converged:
             break
-
+                    
         if log != None and frontier.size > 0:
             print("Lower bound {}, upper bound {}".format(running_lb,\
                 running_ub), file=log)
@@ -601,7 +689,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
                
 
-def expand_node(fnode, ballots, candidates, winner_set, lb, ub, ncands,\
+def expand_node(fnode, ballots, candidates, winner_set, ub, ncands,\
     args, quota, tot_ballots, merge_map, ag_matrix):
 
     result = []
@@ -651,12 +739,6 @@ def expand_node(fnode, ballots, candidates, winner_set, lb, ub, ncands,\
                 # This represents the original outcome
                 continue
 
-            disp_lowerbound = compute_disp_lb(candidates, ballots, \
-                node_order_c, node_order_a, winner_set, new_rem, ag_matrix)
-
-            # Don't want to use anything that might have been effected
-            # by order in which eliminated candidates were placed in outcome.
-            disp_lowerbound = max(disp_lowerbound, fnode.dist)
             
             # Work out the round at which we can stop forming constraints,
             # compute bounds on when candidate could achieve their quotas,
@@ -666,6 +748,23 @@ def expand_node(fnode, ballots, candidates, winner_set, lb, ub, ncands,\
 
             order_q = get_order_q(node_order_c, node_order_a, LAST_ROUND, \
                 node_winners)
+
+            disp_lowerbound = compute_disp_lb(candidates, ballots, \
+                node_order_c, node_order_a, winner_set,  new_rem, quota, \
+                args.seats, ag_matrix)
+
+            quota_lb = compute_quota_lb(candidates, ballots, node_order_c, \
+                node_order_a, order_q, quota)
+
+            # Don't want to use anything that might have been effected
+            # by order in which eliminated candidates were placed in outcome.
+            lowerbound = max(quota_lb, max(disp_lowerbound, fnode.dist))
+
+            if lowerbound >= ub:
+                result.append((isleaf, node_order_c, node_order_a, ub, ub, \
+                    ub, new_rem, node_winners))
+                continue
+
 
             dist, dist_ub = None, None
 
@@ -680,15 +779,15 @@ def expand_node(fnode, ballots, candidates, winner_set, lb, ub, ncands,\
                 _, dist, dist_ub=stvdistance(candidates,ballots,m_order_c, \
                     m_order_a, new_rem, node_winners, order_q, merge_map, \
                     supers, tot_ballots, args, quota, ub, LAST_ROUND, \
-                    disp_lowerbound, isleaf=isleaf, log=None)
+                    lowerbound, isleaf=isleaf, log=None)
 
             else:
                 _, dist, dist_ub=stvdistance(candidates,ballots,node_order_c, \
                     node_order_a, new_rem, node_winners, order_q, merge_map, \
                     [], tot_ballots, args, quota, ub, LAST_ROUND, \
-                    disp_lowerbound, isleaf=isleaf, log=None)
+                    lowerbound, isleaf=isleaf, log=None)
 
-            result.append((isleaf,node_order_c,node_order_a,disp_lowerbound,\
+            result.append((isleaf,node_order_c,node_order_a,lowerbound,\
                 dist, dist_ub, new_rem, node_winners))
 
     return fnode, result
