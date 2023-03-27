@@ -270,16 +270,22 @@ def compute_quota_lb(candidates, ballots, node_order_c, node_order_a, \
 
     return quota_lb
                             
-def filterballot(b, order_c):
+def filterballot(b, order_c, order_a):
     prefs = []
 
+    last_winner, widx = None, None
+        
     for p in b.prefs:
-        if p in order_c:
-            continue
+        idx = order_c.index(p) if p in order_c else -1
 
-        prefs.append(p)
+        if idx == -1:
+            prefs.append(p)
+        else:
+            if order_a[idx] == 1 and (widx == None or idx < widx):
+                last_winner = p
+                widx = idx
 
-    return prefs
+    return prefs, last_winner
 
 
 def nowinner(prefs, w, winners):
@@ -352,9 +358,9 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
 
     filtered_ballots = []
     for b in ballots:
-        prefs = filterballot(b, node_order_c)
+        prefs,last_winner = filterballot(b, node_order_c, node_order_a)
         if prefs != []:
-            filtered_ballots.append((prefs, b.prefs, b.votes))
+            filtered_ballots.append((prefs, b.prefs, b.votes, last_winner))
 
     sleft = seats - sum(node_order_a)
     nleft = len(rem)
@@ -364,20 +370,63 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
         lprefix = len(node_order_c)
 
         lowerbound = np.inf
-        all_elim = sum(node_order_a) == 0
+        
+        # Can we establish a transfer value lower bound for each candidate 
+        # seated in node_order_c, based on the original election profile?
+        tvalues = {}
+        for i in range(lprefix):
+            if node_order_a[i] == 1:
+                ci = node_order_c[i]
+                prefix = node_order_c[:i]
+                
+                if prefix == []:
+                    candi = candidates[ci]
+                    tvalues[ci] = max(0, (candi.fp_votes - quota)/\
+                        candi.fp_votes) if candi.fp_votes > 0 else 0
+
+                    continue
+
+                min_ci = 0
+                papers_ci = 0
+                for b in ballots:
+                    if b.prefs[0] == ci:
+                        min_ci += b.votes
+                        papers_ci += b.votes
+                        continue
+
+                    prefs,lwinner = filterballot(b, prefix, node_order_a)
+                    if prefs == []:
+                        continue
+
+                    if prefs[0] == ci:
+                        papers_ci += b.votes
+
+                        # Would 'ci' get these votes at full value?
+                        if lwinner == None:
+                            min_ci += b.votes
+
+                tvalues[ci] = max(0, (min_ci - quota)/papers_ci) if \
+                    papers_ci > 0 else 0
 
         for ogl in og_losers:
             ogl_lowerbound = 0
             displacement_cost = np.inf
             left_at_end_costs = []
+
             for ogw in og_winners:
                 max_l = 0
                 min_w = 0
 
-                for prefs,oprefs,votes in filtered_ballots:
-                    if oprefs[0] == ogw or (node_order_a[-1] == -1 and \
-                        prefs[0] == ogw and nowinner(oprefs,ogw,curr_winners)):
+                for prefs,oprefs,votes,lwinner in filtered_ballots:
+                    if oprefs[0] == ogw:
                         min_w += votes
+                        continue
+
+                    if node_order_a[-1] == -1 and prefs[0] == ogw:
+                        if lwinner == None:
+                            min_w += votes
+                        else:
+                            min_w += votes*tvalues[lwinner]
                         continue
 
                     posl = prefs.index(ogl) if ogl in prefs else -1
@@ -397,9 +446,12 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
                 max_l = 0
                 min_r = 0
 
-                for prefs,_,votes in filtered_ballots:
+                for prefs,_,votes,lwinner in filtered_ballots:
                     if prefs[0] == r:
-                        min_r += votes
+                        if lwinner == None:
+                            min_r += votes
+                        else:
+                            min_r += votes*tvalues[lwinner]
                         continue
 
                     posl = prefs.index(ogl) if ogl in prefs else -1
@@ -408,10 +460,10 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
                     if posl != -1 and (posr == -1 or posl < posr):
                         max_l += votes
 
-                left_at_end_costs.append(max(0, 0.5*(max_l-min_r)))
+                left_at_end_costs.append(max(0, 0.5*(min_r-max_l)))
                
             max_l = 0
-            for prefs,_,votes in filtered_ballots:
+            for prefs,_,votes,_ in filtered_ballots:
                 if ogl in prefs:
                     max_l += votes
 
@@ -605,7 +657,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             break
 
         # Expand node with smallest assigned distance (first in frontier)
-        fnodes = frontier.pop(6)
+        fnodes = frontier.pop(args.p)
 
         if fnodes == []:
             break
@@ -613,8 +665,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
         arg_list = []
         for fn in fnodes:
-            #if log != None:
-            #    print("EXPANDING NODE {}".format(fn), file=log)
+            if args.p == 1 and log != None:
+                print("EXPANDING NODE {}".format(fn), file=log)
             arg_list.append((fn, ballots, candidates, winner_set, running_ub,\
                 ncands, args, quota, tot_ballots, merge_map, ag_matrix))
 
@@ -627,17 +679,17 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             for isleaf, node_order_c, node_order_a, disp_lb, dist, \
                 dist_ub, new_rem, node_winners in children:
 
-                #if log != None:
-                #    print("EVALUATED {}/{}".format(node_order_c, \
-                #        node_order_a),file=log)
-                #    print("Displacement/Quota LB {}".format(disp_lb), \
-                #        file=log)
+                if args.p == 1 and log != None:
+                    print("EVALUATED {}/{}".format(node_order_c, \
+                        node_order_a),file=log)
+                    print("Displacement/Quota LB {}".format(disp_lb), \
+                        file=log)
                     
-                #    if dist == None:
-                #        print("    DISTANCE None/Infeasible", file=log)
-                #    else:
-                #        print("    DISTANCE {}/{}".format(dist, dist_ub), \
-                #            file=log)
+                    if dist == None:
+                        print("    DISTANCE None/Infeasible", file=log)
+                    else:
+                        print("    DISTANCE {}/{}".format(dist, dist_ub), \
+                            file=log)
                 
                 if dist == None or dist >= running_ub:
                     continue

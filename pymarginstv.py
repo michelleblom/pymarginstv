@@ -44,6 +44,9 @@ if __name__ == "__main__":
  
     # Input: max solve time (s) for MINLPs 
     parser.add_argument('-t', dest='time', type=int, default=500)
+    
+    # Input: Number of nodes to expand in parallel, default 1
+    parser.add_argument('-p', type=int, default=1)
 
 
     # Output: Log file 
