@@ -59,6 +59,7 @@ class Frontier:
         self.nodes = []
         self.size = 0
 
+        self.expanded = []
 
     #def pop(self, index):
     #    if self.size == 0:
@@ -70,12 +71,14 @@ class Frontier:
     def pop(self, number):
         if self.size <= number:
             popped = self.nodes[:]
+            self.expanded.extend(popped)
             self.nodes = []
             self.size = 0
             return popped
 
         self.size -= number
         popped = self.nodes[:number]
+        self.expanded.extend(popped)
         self.nodes = self.nodes[number:]
         return popped
             
@@ -165,6 +168,11 @@ class Frontier:
             distance value, smallest first.
         """
         for fnode in self.nodes:
+            if self.similar_node(node, fnode):
+                #print("Node {} similar to {}".format(node, fnode), file=log)
+                return None
+
+        for fnode in self.expanded:
             if self.similar_node(node, fnode):
                 #print("Node {} similar to {}".format(node, fnode), file=log)
                 return None
