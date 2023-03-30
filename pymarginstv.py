@@ -21,7 +21,7 @@ import argparse
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
     simulate_stv, compute_weub, compute_simple_ub, merge_outcome
 
-from stvtree import treestv
+from stvtree import treestv, compute_last_round
 
 from stvdistance import stvdistance
 
@@ -45,8 +45,8 @@ if __name__ == "__main__":
     # Input: max solve time (s) for MINLPs 
     parser.add_argument('-t', dest='time', type=int, default=500)
     
-    # Input: Number of nodes to expand in parallel, default 1
-    parser.add_argument('-p', type=int, default=1)
+    # Input: Number of children to evaluate in parallel, default 1
+    parser.add_argument('-pc', type=int, default=1)
 
 
     # Output: Log file 
@@ -96,29 +96,45 @@ if __name__ == "__main__":
 
     upper_bound = min(weub, simple_ub)
 
-    print("WEUB {}, simple UB {}".format(weub, simple_ub), file=log)
+    print("WEUB {}, simple UB {}".format(weub, simple_ub),file=log,flush=True)
 
     # Start branch and bound.
     lb, ub = treestv(ballots, candidates, winners, order_c, order_a,\
         upper_bound, args.seats, args, quota, totvotes, agap=args.agap,log=log)
 
-    #test_order_c = [2,3,4,5,8,6,1,0,7]
-    #test_order_a = [0,0,0,0,0,0,0,1,1]
-    #rem = []
-    #winners = [0,7]
-    #order_q = {}
-    #merge_map = {c : c for c in range(9)}
+    #node_order_c = [19, 13, 3, 17, 21, 9, 5, 11, 15, 1, 22, 0, 12]
+    #node_order_a = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0] 
 
-    #_, dist, dist_ub = stvdistance(candidates, ballots, test_order_c, \
-    #    test_order_a, rem, winners, order_q, merge_map, [], totvotes, \
-    #    args, quota, upper_bound, 6, 0, isleaf = False, log=log)
+    # Run tests with 2022 ACT data
+    #node_order_c = [19, 13, 3] 
+    #rem = [c.num for c in candidates if not c.num in node_order_c]
 
+    #node_order_a = [0, 0, 0] #, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]
+
+    #order_q = { 0 : (10,10) }
+
+    #m_order_c,m_order_a,m_order_q,merge_map,supers,round_conv = \
+    #    merge_outcome(node_order_c, node_order_a, order_q, rem)
+
+    #print(m_order_c)
+    #print(m_order_a)
+    #print(m_order_q)
+    #print(merge_map)
+    #print(supers)
+    #print(round_conv)
+
+    #LAST_ROUND = compute_last_round(m_order_c, m_order_a, args.seats,\
+    #        len(m_order_c) + len(rem))
+    #print(LAST_ROUND)
+        
+    #_, dist, dist_ub=stvdistance(candidates, ballots, m_order_c, \
+    #    m_order_a, rem, [0], m_order_q, merge_map, \
+    #    supers, totvotes, args, quota, upper_bound, LAST_ROUND, \
+    #    0, isleaf=False, log=None)
+
+    #print(dist)
+    #print(dist_ub)
 
     log.close()
 
-# TODO: Debug test3.json with 3 seats, 1886 is definitely a manipulation 
-# size that will change the result, see test4.json. BUT, infeasible according
-# to stvdistance.
-# Actual outcome: 0 1 2 3 4 5 8 7 6
-# Actual outcome: 1 1 0 0 0 0 0 0 1
-# Prefix 0/1 should give distance of 0.
+

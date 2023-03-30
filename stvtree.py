@@ -61,13 +61,6 @@ class Frontier:
 
         self.expanded = []
 
-    #def pop(self, index):
-    #    if self.size == 0:
-    #        return None
-
-    #    self.size -= 1
-    #    return self.nodes.pop(0)
-    
     def pop(self, number):
         if self.size <= number:
             popped = self.nodes[:]
@@ -132,6 +125,25 @@ class Frontier:
                 self.size = len(self.nodes)
 
 
+    def _compare_elim_seq(self, elim_seq1, elim_seq2):
+        ls1 = len(elim_seq1)
+        ls2 = len(elim_seq2)
+
+        if ls1 != ls2:
+            return False
+
+        if ls1 != 0:
+            if elim_seq1[-1] != elim_seq2[-1]:
+                return False
+
+            if ls1 > 1:
+                start1 = elim_seq1[:-1]
+                start2 = elim_seq2[:-1]
+
+                if set(start1) != set(start2):
+                    return False
+
+        return True
 
     def similar_node(self, inode, node):
         if inode.order_a != node.order_a:
@@ -140,8 +152,8 @@ class Frontier:
         if abs(inode.dist-node.dist) > epsilon:
             return False
 
-        elim_seq1 = set()
-        elim_seq2 = set()
+        elim_seq1 = []
+        elim_seq2 = []
 
         for i in range(len(inode.order_c)):
 
@@ -149,17 +161,17 @@ class Frontier:
                 return False
 
             if inode.order_a[i] == 1:
-                if elim_seq1 != elim_seq2:
+                if not(self._compare_elim_seq(elim_seq1, elim_seq2)):
                     return False
 
-                elim_seq1 = set()
-                elim_seq2 = set()
+                elim_seq1 = []
+                elim_seq2 = []
 
             if inode.order_a[i] == 0:
-                elim_seq1.add(inode.order_c[i])
-                elim_seq2.add(node.order_c[i])
+                elim_seq1.append(inode.order_c[i])
+                elim_seq2.append(node.order_c[i])
 
-        return elim_seq1 == elim_seq2
+        return self._compare_elim_seq(elim_seq1, elim_seq2)
 
 
     def insert(self, node, log=None):
@@ -261,7 +273,6 @@ def compute_quota_lb(candidates, ballots, node_order_c, node_order_a, \
 
         if node_order_a[i] == 1 and c in order_q:
             # What is maximum vote for 'c' in round i?
-
             cmax = 0
             for b in ballots:
                 prefs = []
@@ -277,6 +288,54 @@ def compute_quota_lb(candidates, ballots, node_order_c, node_order_a, \
         gone.append(c) 
 
     return quota_lb
+
+def compute_elim_lb(candidates, ballots, node_order_c, node_order_a, order_q):
+    gone = []
+    elim_lb = 0
+
+    winners = []
+    
+    for i in range(len(node_order_c)):
+        ce = node_order_c[i]
+        if node_order_a[i] == 0:
+            # Compute min vote 'ce' could have at this point, needs to be 
+            # less than max vote of other (non super) candidates at this point
+            min_ce = candidates[ce].fp_votes
+
+            max_others = {c.num : 0 for c in candidates if not c.num in gone\
+                and c.num != ce}
+
+            for b in ballots:
+                prefs = []
+                through_winner = False
+                for p in b.prefs:
+                    if not p in gone:
+                        prefs.append(p)
+
+                    elif p in winners:
+                        through_winner = True
+
+                if prefs == []:
+                    continue
+
+                if prefs[0] != ce:
+                    max_others[prefs[0]] += b.votes
+    
+                elif b.prefs[0] != ce and not through_winner:
+                    # We are giving 'ce' extra votes if all the candidates
+                    # ranked higher than 'ce' have already been eliminated
+                    # according to the given outcome. 
+                    min_ce += b.votes                    
+ 
+            for c,v in max_others.items():
+                elim_lb = max(elim_lb, max(0, 0.5 * (min_ce - v)))
+        
+        else:
+            winners.append(ce)
+
+        gone.append(ce) 
+
+    return elim_lb         
                             
 def filterballot(b, order_c, order_a):
     prefs = []
@@ -306,7 +365,7 @@ def nowinner(prefs, w, winners):
     
 
 def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
-    winner_set, rem, quota, seats, ag_matrix):
+    winner_set, rem, quota, seats):
     """
         Consider a prefix where it is clear that at least one original loser 
         still standing has to displace one of the original winners still 
@@ -378,6 +437,8 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
         lprefix = len(node_order_c)
 
         lowerbound = np.inf
+        #print("OG losers {}, OG winners {}, {}/{}".format(og_losers, \
+        #    og_winners, node_order_c, node_order_a))
         
         # Can we establish a transfer value lower bound for each candidate 
         # seated in node_order_c, based on the original election profile?
@@ -416,6 +477,7 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
                 tvalues[ci] = max(0, (min_ci - quota)/papers_ci) if \
                     papers_ci > 0 else 0
 
+        #print(tvalues)
         for ogl in og_losers:
             ogl_lowerbound = 0
             displacement_cost = np.inf
@@ -444,6 +506,9 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
                         max_l += votes
 
                 dp = max(0, 0.5*(min_w - max_l))
+
+                #print("loser {}, winner {}, max_l {}, min_w {}, dp {}".format(\
+                #    ogl, ogw, max_l, min_w, dp))
                 displacement_cost = min(displacement_cost, dp)
                 left_at_end_costs.append(dp)
 
@@ -469,6 +534,9 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
                         max_l += votes
 
                 left_at_end_costs.append(max(0, 0.5*(min_r-max_l)))
+
+                #print("loser {} left at the end cost against {}, {}".format(\
+                #    ogl, r, 0.5*(min_r-max_l)))
                
             max_l = 0
             for prefs,_,votes,_ in filtered_ballots:
@@ -476,6 +544,8 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
                     max_l += votes
 
             quota_cost = max(0, max_l - quota)
+
+            #print("loser {} quota cost {}".format(ogl, max_l-quota))
 
             left_at_end_costs.sort()
 
@@ -545,41 +615,9 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
     running_ub = upperbound
     running_lb = 0
 
-    # Compute AG relationships
-    ag_matrix = {}
-
-    for i in range(ncands):
-        ci = candidates[i]
-        ci_min = ci.fp_votes
-
-        ci_max = 0
-        for j in range(i+1, ncands):
-            cj = candidates[j]
-            cj_min = cj.fp_votes
-
-            cj_max = 0
-
-            for b in ballots:
-                ci_pos = b.prefs.index(ci.num) if ci.num in b.prefs else -1
-                cj_pos = b.prefs.index(cj.num) if cj.num in b.prefs else -1
-
-                if ci_pos != -1 and (cj_pos == -1 or cj_pos > ci_pos):
-                    ci_max += b.votes
-
-                if cj_pos != -1 and (ci_pos == -1 or ci_pos > cj_pos):
-                    cj_max += b.votes
-
-            if ci_min > cj_max:
-                ag_matrix[ci.num,cj.num] = math.ceil((ci_min-cj_max)/2)
-
-            elif cj_min > ci_max:
-                ag_matrix[cj.num,ci.num] = math.ceil((cj_min-ci_max)/2)
-               
-    print(upperbound, file=log)
-    print(ag_matrix, file=log)
-
-            
     merge_map = {c.num : c.num for c in candidates}  
+
+    children = []
 
     # Initialise frontier. For each candidate, they can either be elected
     # to a seat or eliminated. Assumption: election involves at least 2
@@ -592,65 +630,58 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             node_order_a = [o]
             node_winners = set([cand.num]) if o == 1 else []
 
-            # Compute least number of votes that would need to change to
-            # realise an outcome starting with node_order_c,node_order_a.
+            children.append((node_order_c, node_order_a, node_winners, \
+                winner_set, candidates, ballots, rem, quota, args, merge_map,\
+                tot_ballots, running_ub))
 
-            # Compute order_q map
-            order_q = get_order_q(node_order_c, node_order_a, 0, node_winners)
-            
-            disp_lowerbound = compute_disp_lb(candidates, ballots, \
-                node_order_c, node_order_a, winner_set,  rem, quota, seats, \
-                ag_matrix)
-            
+    with Pool(processes=args.pc) as pool:
+        result = pool.starmap(eval_child_initial, children)
+
+        for lb, dlb, elb, qlb, node in result:
             if log != None:
-                print("EVALUATING {}/{}".format(node_order_c, node_order_a),\
-                    file=log)
-                print("Displacement LB {}".format(disp_lowerbound), file=log)
-                                               
-            # Evaluate distance for our new tree node.
-            _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
-                node_order_a, rem, node_winners, order_q, merge_map, [],\
-                tot_ballots, args, quota, running_ub, 0, disp_lowerbound, \
-                log=log)
+                print("EVALUATING {}/{} LB {} (D {} E {} Q {})".format(\
+                    node.order_c, node.order_a, lb, dlb, elb, qlb), \
+                    file=log, flush=True)
+                           
+                if lb < running_ub:                    
+                    if node.dist == None:
+                        print("    DISTANCE None/Infeasible", file=log, \
+                            flush=True)
+                    elif node.dist == -1:
+                        print("    No solution found by timeout", file=log,\
+                            flush=True)
+                        print("    Margin computation terminated", file=log, \
+                            flush=True)
+                    else:
+                        print("    DISTANCE {:.2f}/{:.2f}".format(node.dist, \
+                            node.dist_ub), file=log, flush=True)
 
-            if log != None:
-                if dist == None:
-                    print("    DISTANCE None/Infeasible", file=log)
-                elif dist == -1:
-                    print("    No solution found by timeout", file=log)
-                    print("    Margin computation terminated", file=log)
-                else:
-                    print("    DISTANCE {:.2f}/{:.2f}".format(dist, dist_ub),\
-                        file=log)
-
-            if dist == -1:
+            if node.dist == -1:
                 return running_lb, running_ub
 
-            if dist == None or dist >= running_ub:
+            if node.dist == None or node.dist >= running_ub:
                 continue
             
             if frontier.size > 0:
-                running_lb = min(dist, min([n.dist for n in frontier.nodes]))
+                running_lb = min(node.dist, min([n.dist \
+                    for n in frontier.nodes]))
             else:
-                running_lb = dist
+                running_lb = node.dist
 
-            # Create and add node to our frontier.
-            newn = TreeNode(node_order_c, node_order_a, node_winners, rem,\
-                dist, dist_ub)
-
-            frontier.insert(newn, log=log)
-
+            frontier.insert(node, log=log)
 
     if log != None:
         print("Lower bound {}, upper bound {}".format(running_lb,\
-            running_ub), file=log)
-        print(frontier, file=log)
+            running_ub), file=log, flush=True)
+
+        print(frontier, file=log, flush=True)
+
 
     converged = False
 
     tnow = time.time()
     if  log != None:
-        print("Time elapsed {}s".format(tnow-tstart), file=log)
+        print("Time elapsed {}s".format(tnow-tstart), file=log, flush=True)
     
 
     while frontier.size > 0:
@@ -658,46 +689,41 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
         if log != None:
             print("Lower bound {}, upper bound {}".format(running_lb,\
-                running_ub), file=log)
+                running_ub), file=log, flush=True)
 
         if abs(running_ub - running_lb) <= agap:
             converged = True
             break
 
         # Expand node with smallest assigned distance (first in frontier)
-        fnodes = frontier.pop(args.p)
+        fnodes = frontier.pop(1)
 
         if fnodes == []:
             break
                
-
         arg_list = []
         for fn in fnodes:
-            if args.p == 1 and log != None:
-                print("EXPANDING NODE {}".format(fn), file=log)
-            arg_list.append((fn, ballots, candidates, winner_set, running_ub,\
-                ncands, args, quota, tot_ballots, merge_map, ag_matrix))
+            if log != None:
+                print("EXPANDING NODE {}".format(fn), file=log, flush=True)
 
-        result = []
-        with Pool() as pool:
-            result = pool.starmap(expand_node, arg_list)
+            _, children = expand_node(fn, ballots, candidates, winner_set, \
+                running_ub, ncands, args, quota, tot_ballots, merge_map)
 
-
-        for fnode, children in result:
-            for isleaf, node_order_c, node_order_a, disp_lb, dist, \
+            for isleaf, node_order_c, node_order_a, lb, dlb, elb, qlb, dist, \
                 dist_ub, new_rem, node_winners in children:
 
-                if args.p == 1 and log != None:
-                    print("EVALUATED {}/{}".format(node_order_c, \
-                        node_order_a),file=log)
-                    print("Displacement/Quota LB {}".format(disp_lb), \
-                        file=log)
+                if log != None:
+                    print("EVALUATED {}/{} LB {} (D {} E {} Q {})".format(\
+                        node_order_c, node_order_a, lb, dlb, elb, qlb), \
+                        file=log, flush=True)
+
                     
                     if dist == None:
-                        print("    DISTANCE None/Infeasible", file=log)
+                        print("    DISTANCE None/Infeasible", file=log, \
+                            flush=True)
                     else:
                         print("    DISTANCE {}/{}".format(dist, dist_ub), \
-                            file=log)
+                            file=log, flush=True)
                 
                 if dist == None or dist >= running_ub:
                     continue
@@ -710,7 +736,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                 if isleaf:
                     if log != None and dist_ub < running_ub:
                         print("Reducing upper bound to {}".format(dist_ub),\
-                            file=log)
+                            file=log, flush=True)
 
                     running_ub = min(running_ub, dist_ub)
 
@@ -733,26 +759,111 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     
         if log != None and frontier.size > 0:
             print("Lower bound {}, upper bound {}".format(running_lb,\
-                running_ub), file=log)
-            print(frontier, file=log)
+                running_ub), file=log, flush=True)
+            print(frontier, file=log, flush=True)
             tnow = time.time()
-            print("Time elapsed {}s".format(tnow-tstart), file=log)
+            print("Time elapsed {}s".format(tnow-tstart), file=log, \
+                flush=True)
 
     if converged or frontier.size == 0:            
         if log != None:
-            print("-------------------------------------------", file=log)
+            print("-------------------------------------------", file=log, \
+                flush=True)
             print("MARGIN COMPUTATION CONVERGED: {}--{}.".format(\
-                running_lb, running_ub), file=log)
-            print("-------------------------------------------", file=log)
+                running_lb, running_ub), file=log, flush=True)
+            print("-------------------------------------------", file=log, \
+                flush=True)
             
     return running_lb, running_ub
 
-               
+           
+def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
+    candidates, ballots, rem, quota, args, merge_map, tot_ballots, running_ub):
 
-def expand_node(fnode, ballots, candidates, winner_set, ub, ncands,\
-    args, quota, tot_ballots, merge_map, ag_matrix):
+    # Compute order_q map
+    order_q = get_order_q(node_order_c, node_order_a, 0, node_winners)
+            
+    disp_lowerbound = compute_disp_lb(candidates, ballots, \
+        node_order_c, node_order_a, winner_set, rem, quota, args.seats)
+                  
+    elim_lb = compute_elim_lb(candidates, ballots, node_order_c, node_order_a,\
+        order_q)
 
-    result = []
+    quota_lb = compute_quota_lb(candidates, ballots, node_order_c, \
+        node_order_a, order_q, quota)
+
+    lb = max(disp_lowerbound, max(quota_lb, elim_lb))
+
+    if lb >= running_ub:
+        return lb, disp_lowerbound, elim_lb, quota_lb, TreeNode(node_order_c,\
+            node_order_a, node_winners, rem, lb, lb)
+                         
+    # Evaluate distance for our new tree node.
+    _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
+        node_order_a, rem, node_winners, order_q, merge_map, [],\
+        tot_ballots, args, quota, running_ub, 0, lb, log=None)
+
+    return lb, disp_lowerbound, elim_lb, quota_lb, TreeNode(node_order_c, \
+        node_order_a, node_winners, rem, dist, dist_ub)     
+
+
+def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
+    node_winners, winner_set, candidates, ballots, tot_ballots, rem, \
+    quota, running_ub):
+
+    # Work out the round at which we can stop forming constraints,
+    # compute bounds on when candidate could achieve their quotas,
+    # solve the distance-to model.
+    LAST_ROUND = compute_last_round(node_order_c,node_order_a,args.seats,ncands)
+
+    order_q = get_order_q(node_order_c, node_order_a, LAST_ROUND, node_winners)
+
+    disp_lowerbound = compute_disp_lb(candidates, ballots, node_order_c, \
+        node_order_a, winner_set, rem, quota, args.seats)
+
+    quota_lb = compute_quota_lb(candidates, ballots, node_order_c, \
+        node_order_a, order_q, quota)
+
+    elim_lb = compute_elim_lb(candidates, ballots, node_order_c, node_order_a,\
+        order_q)
+
+    lowerbound = max(elim_lb, max(quota_lb, max(disp_lowerbound, parent_dist)))
+    
+    dist, dist_ub = None, None
+    isleaf = True if rem == [] else False
+
+    if lowerbound >= running_ub:
+        return (isleaf, node_order_c, node_order_a, lowerbound, \
+            disp_lowerbound, elim_lb, quota_lb, lowerbound, lowerbound, \
+            rem, node_winners)
+
+    if args.m:
+        m_order_c,m_order_a,m_order_q,merge_map,supers,round_conv = \
+            merge_outcome(node_order_c, node_order_a, order_q, rem)
+
+        LAST_ROUND = compute_last_round(m_order_c, m_order_a, args.seats,\
+            len(m_order_c) + len(rem))
+        
+        _, dist, dist_ub=stvdistance(candidates, ballots, m_order_c, \
+            m_order_a, rem, node_winners, m_order_q, merge_map, \
+            supers, tot_ballots, args, quota, running_ub, LAST_ROUND, \
+            lowerbound, isleaf=isleaf, log=None)
+
+    else:
+        _, dist, dist_ub=stvdistance(candidates,ballots,node_order_c, \
+            node_order_a, rem, node_winners, order_q, merge_map, \
+            [], tot_ballots, args, quota, running_ub, LAST_ROUND, \
+            lowerbound, isleaf=isleaf, log=None)
+
+    return isleaf, node_order_c, node_order_a, lowerbound, disp_lowerbound, \
+        elim_lb, quota_lb, dist, dist_ub, rem, node_winners
+
+
+
+def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands,\
+    args, quota, tot_ballots, merge_map):
+
+    children = []
 
     # Add a candidate to the end of the outcome prefix represented
     # by the selected node. That candidate can either be seated or 
@@ -799,59 +910,14 @@ def expand_node(fnode, ballots, candidates, winner_set, ub, ncands,\
                 # This represents the original outcome
                 continue
 
-            
-            # Work out the round at which we can stop forming constraints,
-            # compute bounds on when candidate could achieve their quotas,
-            # solve the distance-to model.
-            LAST_ROUND = compute_last_round(node_order_c, node_order_a, \
-                args.seats, ncands)
+            children.append((fnode.dist, node_order_c, node_order_a, args, \
+                ncands, node_winners, winner_set, candidates, ballots, \
+                tot_ballots, new_rem, quota, running_ub))
 
-            order_q = get_order_q(node_order_c, node_order_a, LAST_ROUND, \
-                node_winners)
-
-            disp_lowerbound = compute_disp_lb(candidates, ballots, \
-                node_order_c, node_order_a, winner_set,  new_rem, quota, \
-                args.seats, ag_matrix)
-
-            quota_lb = compute_quota_lb(candidates, ballots, node_order_c, \
-                node_order_a, order_q, quota)
-
-            # Don't want to use anything that might have been effected
-            # by order in which eliminated candidates were placed in outcome.
-            lowerbound = max(quota_lb, max(disp_lowerbound, fnode.dist))
-
-            if lowerbound >= ub:
-                result.append((isleaf, node_order_c, node_order_a, ub, ub, \
-                    ub, new_rem, node_winners))
-                continue
-
-
-            dist, dist_ub = None, None
-
-            isleaf = True if new_rem == [] else False
-
-            if args.m:
-                m_order_c,m_order_a,m_order_q,merge_map,supers,round_conv = \
-                    merge_outcome(node_order_c, node_order_a, order_q, new_rem)
-
-                LAST_ROUND = round_conv[LAST_ROUND]
-        
-                _, dist, dist_ub=stvdistance(candidates,ballots,m_order_c, \
-                    m_order_a, new_rem, node_winners, order_q, merge_map, \
-                    supers, tot_ballots, args, quota, ub, LAST_ROUND, \
-                    lowerbound, isleaf=isleaf, log=None)
-
-            else:
-                _, dist, dist_ub=stvdistance(candidates,ballots,node_order_c, \
-                    node_order_a, new_rem, node_winners, order_q, merge_map, \
-                    [], tot_ballots, args, quota, ub, LAST_ROUND, \
-                    lowerbound, isleaf=isleaf, log=None)
-
-            result.append((isleaf,node_order_c,node_order_a,lowerbound,\
-                dist, dist_ub, new_rem, node_winners))
+    result = []
+    with Pool(processes=args.pc) as pool:
+        result = pool.starmap(eval_child, children)
 
     return fnode, result
 
-
-
-
+ 

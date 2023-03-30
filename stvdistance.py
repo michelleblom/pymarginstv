@@ -378,6 +378,9 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         computation for STV. [Although there we did not divide by two and I
         think you need to].
 
+        NOTE I have relaxed all integer variables (exc binaries) to be 
+        continuous, as we are looking for lower bounds anyway.
+
     """
 
     R = len(order_c)
@@ -418,7 +421,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     #
     # vcr: Tally of candidate c at the start of round r. 
     # qcr: Binary variable with value 1 if the tally of candidate c at the
-    #      the start of round r and 0 otherwise.
+    #      the start of round r is at least a quota and 0 otherwise.
     # nqcr: not qcr (useful in model building)
 
     ps = {}
@@ -464,7 +467,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
             vcr[c,r] = model.addVar(vtype="C", lb=0, ub=tot_ballots, \
                 name="vcr(%s,%s)"%(c,r))
 
-            ncr[c,r] = model.addVar(vtype="I", lb=0, ub=tot_ballots, \
+            ncr[c,r] = model.addVar(vtype="C", lb=0, ub=tot_ballots, \
                 name="ncr(%s,%s)"%(c,r))
 
             tallies[c,r] = 0
@@ -547,10 +550,10 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
 
 
     for b in classes:
-        ps[b.num] = model.addVar(vtype="I", lb=0, ub=upperbound, \
+        ps[b.num] = model.addVar(vtype="C", lb=0, ub=upperbound, \
             name="ps(%s)"%b.num)
 
-        ms[b.num] = model.addVar(vtype="I", lb=0, ub=min(upperbound,b.votes),\
+        ms[b.num] = model.addVar(vtype="C", lb=0, ub=min(upperbound,b.votes),\
             name="ms(%s)"%b.num)
 
         ys[b.num] = model.addVar(vtype="C", lb=0, ub=tot_ballots, \
@@ -591,23 +594,13 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     model.addCons(sum_ps == sum_ms)
 
     # Connect tally expressions to tally variables. 
-    #lowerbound = 0
     for c in cands:
         pos = candpos[c]
-
-     #   if pos <= LAST_ROUND and c in nonsupers:
-     #       if order_a[pos] == 1:
-     #           lowerbound = max(lowerbound, max(0, quota-max_tallies[c][pos]))
 
         for r in range(min(LAST_ROUND+1, pos+1)):
             model.addCons(vcr[c,r] == tallies[c,r])  
             model.addCons(ncr[c,r] == npapers[c,r])  
                
-    #lowerbound = max(lowerbound, disp_lowerbound)
-
-    #if lowerbound >= upperbound:
-    #    return True, lowerbound, lowerbound
-
     model.addCons(sum_ps <= upperbound)
     model.addCons(sum_ps >= lowerbound)
 
@@ -617,8 +610,6 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     # Weird thing with quicksum introducing an offset for objective, so
     # am avoiding using it.
     model.setObjective(sum_ps, "minimize")
-
-    #model.writeProblem()
 
     model.optimize()
 
@@ -634,5 +625,5 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     else:
         # As we are usually going to stop solving when we get to an 
         # allowed gap, return lower bound on objective.
-        return True, int(math.floor(model.getDualbound())), \
-            int(math.ceil(model.getPrimalbound()))
+        return True, max(0, int(math.ceil(model.getDualbound()))), \
+            max(0, int(math.ceil(model.getPrimalbound())))

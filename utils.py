@@ -483,7 +483,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
 
     totvotes = 0
     if log != None:
-        print("First preference tallies: ", file=log)
+        print("First preference tallies: ", file=log, flush=True)
 
     for cand in candidates:
         cand.sim_votes = 0
@@ -504,13 +504,14 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
         totvotes += cand.sim_votes
 
         if log != None:
-            print(f"    Candidate {cand.id} {cand.sim_votes}", file=log)
+            print(f"    Candidate {cand.id} {cand.sim_votes}",file=log,\
+                flush=True)
 
     # Step 1: Determine quota
     quota = (int)(1.0 + (totvotes/(nseats+1.0))) 
 
     if log != None:
-        print(f"The quota for election is {quota}", file=log)
+        print(f"The quota for election is {quota}", file=log, flush=True)
 
     surpluses = []      
 
@@ -545,7 +546,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
             surpluses = []
             if log != None:
                 print("Number of candidates left standing equals number of "\
-                    "remaining seats", file=log)
+                    "remaining seats", file=log, flush=True)
 
             slist = []
             for cand in candidates:
@@ -565,7 +566,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
 
                 if log != None:
                     print("Candidate {} elected (votes {})".format(\
-                        cand.name, cand.sim_votes), file=log)
+                        cand.name, cand.sim_votes), file=log, flush=True)
 
                 cand.seat = currseat
                 currseat += 1
@@ -586,7 +587,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                 if cand.standing:
                     if log != None:
                         print("Candidate {} has {} votes".format(cand.name,\
-                            cand.sim_votes), file=log)
+                            cand.sim_votes), file=log, flush=True)
                     
                     if leastvotes == -1 or cand.sim_votes < leastvotes:
                         leastvotes = cand.sim_votes
@@ -599,7 +600,8 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
 
                 if log != None:
                     print("Candidate {} eliminated on {} votes".format(\
-                        toeliminate.name, toeliminate.sim_votes), file=log)
+                        toeliminate.name, toeliminate.sim_votes), file=log,\
+                        flush=True)
 
                 eliminate_candidate(toeliminate, candidates, ballots, log)
 
@@ -609,7 +611,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
 
                     if log != None:
                         print("Candidate {} has {} votes".format(cand.name,\
-                            cand.sim_votes), file=log)
+                            cand.sim_votes), file=log, flush=True)
 
                     if cand.standing and cand.sim_votes >= quota:
                         cand.surplus = max(0, cand.sim_votes - quota)
@@ -619,7 +621,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
 
                         if log != None:
                             print(f"Candidate {cand.name} has a quota.", \
-                                file=log) 
+                                file=log, flush=True) 
 
             if r != ncand-1:
                 for cand in candidates:
@@ -644,7 +646,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
 
                 if log != None:
                     print("Candidate {} elected (votes {})".format(elect.name,\
-                        elect.sim_votes), file=log)
+                        elect.sim_votes), file=log, flush=True)
 
                 elect.standing = 0
                 if currseat < nseats:
@@ -706,7 +708,7 @@ def distribute_surplus(elect, candidates, ballots, log):
     tvalue = elect.surplus/totalpapers
 
     if log != None:
-        print("Transfer value is {}".format(tvalue), file=log)
+        print("Transfer value is {}".format(tvalue), file=log, flush=True)
 
     # Each ballot in elect's tally now has value of 'tvalue'
     totransfer = [[] for c in candidates]
@@ -735,7 +737,7 @@ def distribute_surplus(elect, candidates, ballots, log):
 
         if total > 0 and log != None:
             print("{} votes distributed from {} to {}".format(\
-                total, elect.name, cand.name), file=log)
+                total, elect.name, cand.name), file=log, flush=True)
 
     elect.sim_votes -= elect.surplus
     elect.surplus = -1
@@ -772,7 +774,7 @@ def eliminate_candidate(toelim, candidates, ballots, log):
         if total > 0:
             if log != None:
                 print("{} votes distributed from {} to {}".format(\
-                    total, toelim.name, cand.name), file=log)
+                    total, toelim.name, cand.name), file=log, flush=True)
 
 
 def print_summary(candidates,id2group, seats, quota, order_c, order_a,\
@@ -962,9 +964,10 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
 
         supers      -  Ids of the super candidates.
     """
-    if len(elim_seq) < 2: 
+    if len(elim_seq) < 3: 
         # Do not merge the candidates, add them to m_order_c, and m_order_a
         # as themselves. 
+        
         for e in elim_seq:
             m_order_c.append(e)
             m_order_a.append(0)
@@ -976,24 +979,18 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
         m_order_c.append(mc)
         m_order_a.append(0)
         
-        segments.append([mc])
-
-        for sc in elim_seq:
-            merge_map[sc] = mc
-
+        segments.append(elim_seq[:-1])
         supers.append(mc)
 
-        #m_order_c.append(mc)
-        #m_order_a.append(0)
-
-        #segments.append(elim_seq[1:-1])
-
-        #lc = elim_seq[-1]
-        #merge_map[lc] = lc
-        #m_order_c.append(lc)
-        #m_order_a.append(0)
-
-        #segments.append([lc])
+        for sc in elim_seq[:-1]:
+            merge_map[sc] = mc
+        
+        mc = elim_seq[-1]
+        merge_map[mc] = mc
+        segments.append([mc])
+        
+        m_order_c.append(mc)
+        m_order_a.append(0)
 
 
 def merge_outcome(order_c, order_a, order_q, rem):
@@ -1052,14 +1049,21 @@ def merge_outcome(order_c, order_a, order_q, rem):
     # Create a map between old round numbers and new ones
     round_conv = {-1 : -1}
     j = 0
-    
+   
+    #print(segments) 
     for r in range(len(segments)):
         for c in segments[r]:
             round_conv[j] = r
+     #       print("{} -> {}".format(j, r))
             j += 1
 
     # Create merged version of order_q, note no candidates that will end
     # up being merged will have an entry in m_order_q.
+    for c,(r1,r2) in order_q.items():
+        if not r1 in round_conv or not r2 in round_conv:
+            print("{} {} {}, {}/{}, {}/{}".format(r1, r2, round_conv, \
+                m_order_c, m_order_a, order_c, order_a))
+ 
     m_order_q = { c : (round_conv[r1],round_conv[r2]) \
         for c,(r1,r2) in order_q.items() }
 
