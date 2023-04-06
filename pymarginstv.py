@@ -48,6 +48,9 @@ if __name__ == "__main__":
     # Input: Number of children to evaluate in parallel, default 1
     parser.add_argument('-pc', type=int, default=1)
 
+    # Input: max solve time (s) for algorithm 
+    parser.add_argument('-limit', type=int, default=20000)
+
 
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
@@ -100,7 +103,8 @@ if __name__ == "__main__":
 
     # Start branch and bound.
     lb, ub = treestv(ballots, candidates, winners, order_c, order_a,\
-        upper_bound, args.seats, args, quota, totvotes, agap=args.agap,log=log)
+        upper_bound, args.seats, args, quota, totvotes, agap=args.agap,\
+        tlimit=args.limit, log=log)
 
     #node_order_c = [19, 13, 3, 17, 21, 9, 5, 11, 15, 1, 22, 0, 12]
     #node_order_a = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0] 

@@ -934,7 +934,7 @@ def reduce_ballots(ncands, order_c, remainder, merge_map, ballots, rballots,\
 
 
 def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
-    segments, supers, merge=True):
+    segments, supers, merge_all=True):
 
     """
         elim_seq    -  A sequence of consecutively eliminated candidates.
@@ -963,8 +963,20 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
                        candidates 2-4 are merged.
 
         supers      -  Ids of the super candidates.
-    """
-    if len(elim_seq) < 3: 
+    """ 
+    le = len(elim_seq)
+    if merge_all and le > 1:
+        mc = elim_seq[0]
+        m_order_c.append(mc)
+        m_order_a.append(0)
+
+        segments.append(elim_seq[:])
+        supers.append(mc)
+
+        for e in elim_seq:
+            merge_map[e] = mc
+  
+    elif le < 3: 
         # Do not merge the candidates, add them to m_order_c, and m_order_a
         # as themselves. 
         
@@ -978,7 +990,7 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
         merge_map[mc] = mc
         m_order_c.append(mc)
         m_order_a.append(0)
-        
+
         segments.append(elim_seq[:-1])
         supers.append(mc)
 
@@ -1024,7 +1036,7 @@ def merge_outcome(order_c, order_a, order_q, rem):
                 # un-merged, and merge the remainder, to support creating 
                 # a tighter optimisation problem.
                 add_elim_sequence(elim_seq, m_order_c, m_order_a,\
-                    merge_map, segments, supers)
+                    merge_map, segments, supers, merge_all=False)
 
                 elim_seq = []
 
