@@ -17,6 +17,7 @@
 import os
 import sys
 import argparse
+import math
 
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
     simulate_stv, compute_weub, compute_simple_ub, merge_outcome
@@ -97,14 +98,16 @@ if __name__ == "__main__":
     weub = compute_weub(candidates, winners, order_c, order_a, tallies)
     simple_ub = compute_simple_ub(candidates, quota, winners)
 
-    upper_bound = min(weub, simple_ub)
+    upper_bound = math.ceil(min(weub, simple_ub))
 
     print("WEUB {}, simple UB {}".format(weub, simple_ub),file=log,flush=True)
 
     # Start branch and bound.
-    lb, ub = treestv(ballots, candidates, winners, order_c, order_a,\
-        upper_bound, args.seats, args, quota, totvotes, agap=args.agap,\
-        tlimit=args.limit, log=log)
+    lb, ub, nexps, nsolves, ignores = treestv(ballots, candidates, winners, \
+        order_c, order_a, upper_bound, args.seats, args, quota, totvotes, \
+        agap=args.agap, tlimit=args.limit, log=log)
+
+    print("{}--{}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores),file=log)
 
     #node_order_c = [19, 13, 3, 17, 21, 9, 5, 11, 15, 1, 22, 0, 12]
     #node_order_a = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0] 

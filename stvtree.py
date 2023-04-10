@@ -23,7 +23,10 @@ class TreeNode:
                    given outcome prefix.
         
     """
-    def __init__(self, order_c, order_a, winners, rem, distance, dist_ub):
+    def __init__(self, pid, order_c, order_a, winners, rem, distance, dist_ub):
+        self.id = None
+        self.pid = pid
+
         self.order_c = order_c
         self.order_a = order_a
         self.rem = rem
@@ -32,6 +35,8 @@ class TreeNode:
         self.dist_ub = dist_ub # upper bound from MINLP solve
         self.seats_filled = len(winners) # number of seats already filled.
         self.winners = winners
+
+        self.children = [] # List of ids
 
 
     def __str__(self):
@@ -56,10 +61,28 @@ class Frontier:
         possibilities we are searching through.
     """
     def __init__(self):
-        self.nodes = []
+        self.nodes = [] # list of ids
         self.size = 0
 
-        self.expanded = []
+        self.expanded = [] # list of ids
+
+        self.node_map = {} # map between node id and node object
+
+        self.idcntr = 0
+
+        self.ignore_cntr = 0
+
+    def get_node(self, nid):
+        if nid in self.node_map:
+            return self.node_map[nid]
+        return None
+
+    def get_lower_bound(self):
+        lb = np.inf
+        for n in self.nodes:
+            lb = min(lb, self.get_node(n).dist)
+
+        return lb
 
     def pop(self, number):
         if self.size <= number:
@@ -67,13 +90,13 @@ class Frontier:
             self.expanded.extend(popped)
             self.nodes = []
             self.size = 0
-            return popped
+            return [self.get_node(p) for p in popped]
 
         self.size -= number
         popped = self.nodes[:number]
         self.expanded.extend(popped)
         self.nodes = self.nodes[number:]
-        return popped
+        return [self.get_node(p) for p in popped]
             
     
 
@@ -86,16 +109,16 @@ class Frontier:
 
         if self.size > 10:
             for i in range(5):
-                summary += str(self.nodes[i]) + '\n'
+                summary += str(self.get_node(self.nodes[i])) + '\n'
 
             summary += '...\n'
 
             for i in range(self.size-5,self.size):
-                summary += str(self.nodes[i]) + '\n'
+                summary += str(self.get_node(self.nodes[i])) + '\n'
 
         else:
             for node in self.nodes:
-                summary += str(node) + '\n'
+                summary += str(self.get_node(node)) + '\n'
 
         summary += "--------------------------------------------------\n"
         return summary
@@ -108,7 +131,7 @@ class Frontier:
         if self.size > 0:
             i = 0
             while i < self.size:
-                if self.nodes[i].dist >= upperbound:
+                if self.get_node(self.nodes[i]).dist >= upperbound:
                     break
                 i += 1
 
@@ -119,17 +142,21 @@ class Frontier:
             elif i < self.size:
                 if log != None:
                     for n in self.nodes[i:]:
-                        print("Pruning {}".format(str(n)), file=log)
+                        print("Pruning {}".format(str(self.get_node(n))), \
+                            file=log)
 
                 self.nodes = self.nodes[:i]
                 self.size = len(self.nodes)
 
 
-    def similar_node(self, inode, node):
+    def similar_node(self, inode, node, strict=True):
         if inode.order_a != node.order_a:
             return False
 
-        if abs(inode.dist-node.dist) > epsilon:
+        if strict and abs(inode.dist - node.dist) > epsilon:
+            return False
+
+        if not strict and (inode.dist > node.dist + epsilon):
             return False
 
         elim_seq1 = set()
@@ -151,7 +178,11 @@ class Frontier:
                 elim_seq1.add(inode.order_c[i])
                 elim_seq2.add(node.order_c[i])
 
-        return elim_seq1 == elim_seq2
+        if elim_seq1 == elim_seq2:
+            self.ignore_cntr += 1
+            return True
+
+        return False
 
 
     def insert(self, node, log=None):
@@ -160,24 +191,45 @@ class Frontier:
             distance value, smallest first.
         """
         for fnode in self.nodes:
-            if self.similar_node(node, fnode):
-                #print("Node {} similar to {}".format(node, fnode), file=log)
+            if self.similar_node(node, self.get_node(fnode)):
                 return None
 
         for fnode in self.expanded:
-            if self.similar_node(node, fnode):
-                #print("Node {} similar to {}".format(node, fnode), file=log)
+            if self.similar_node(node, self.get_node(fnode), strict=False):
                 return None
+        
+        node.id = self.idcntr
+        self.idcntr += 1
+
+        self.node_map[node.id] = node
 
         for i in range(len(self.nodes)):
-            if node.dist < self.nodes[i].dist:
-                self.nodes.insert(i, node)
+            if node.dist < self.get_node(self.nodes[i]).dist:
+                self.nodes.insert(i, node.id)
                 self.size += 1 
                 return i
-
-        self.nodes.append(node)
+        
+        self.nodes.append(node.id)
         self.size += 1 
         return self.size-1
+
+
+    def back_propagate(self, nid):
+        node = self.node_map[nid]
+
+        lb = np.inf
+        for c in node.children:
+            lb = min(lb, self.get_node(c).dist)
+
+        node.dist = max(lb, node.dist)
+        node.dist_ub = max(lb, node.dist_ub)
+
+        if node.pid != -1:
+            self.back_propagate(node.pid)
+
+
+
+            
 
 
 
@@ -305,7 +357,7 @@ def compute_elim_quota_lb(cands, ballots, order_c, order_a, quota, order_q):
 
         gone.append(ce) 
 
-    return max(elim_lb, quota_lb)         
+    return math.ceil(max(elim_lb, quota_lb))         
          
                    
 def filterballot(b, order_c, order_a):
@@ -478,7 +530,7 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
             
             lowerbound = min(lowerbound, displacement_cost)
             
-    return lowerbound
+    return math.ceil(lowerbound)
 
 
 
@@ -527,6 +579,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
     """
 
     tstart = time.time()
+    
 
     winner_set = set(winners)
     ncands = len(candidates)
@@ -537,6 +590,9 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
     running_lb = 0
 
     merge_map = {c.num : c.num for c in candidates}  
+
+    nexps = 0
+    nsolves = 0
 
     children = []
 
@@ -553,12 +609,15 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
             children.append((node_order_c, node_order_a, node_winners, \
                 winner_set, candidates, ballots, rem, quota, args, merge_map,\
-                tot_ballots, running_ub))
+                tot_ballots, running_ub, order_c, order_a))
 
     with Pool(processes=args.pc) as pool:
         result = pool.starmap(eval_child_initial, children)
 
-        for lb, dlb, eqlb, node in result:
+        for lb, dlb, eqlb, node, solved in result:
+            if solved:
+                nsolves += 1
+
             if log != None:
                 print("EVALUATING {}/{} LB {} (D {} EQ {})".format(\
                     node.order_c, node.order_a, lb, dlb, eqlb), \
@@ -578,13 +637,14 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                             node.dist_ub), file=log, flush=True)
 
             if node.dist == -1:
-                return running_lb, running_ub
+                return running_lb, running_ub, nexps, nsolves, \
+                    frontier.ignore_cntr
 
             if node.dist == None or node.dist >= running_ub:
                 continue
             
             if frontier.size > 0:
-                running_lb = min(node.dist, min([n.dist \
+                running_lb = min(node.dist, min([frontier.get_node(n).dist \
                     for n in frontier.nodes]))
             else:
                 running_lb = node.dist
@@ -608,7 +668,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         return running_lb, running_ub
 
     while frontier.size > 0:
-        running_lb = min([n.dist for n in frontier.nodes])
+        running_lb = frontier.get_lower_bound()
 
         if log != None:
             print("Lower bound {}, upper bound {}".format(running_lb,\
@@ -620,6 +680,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
         # Expand node with smallest assigned distance (first in frontier)
         fnodes = frontier.pop(1)
+        nexps += 1
 
         if fnodes == []:
             break
@@ -630,10 +691,14 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                 print("EXPANDING NODE {}".format(fn), file=log, flush=True)
 
             _, children = expand_node(fn, ballots, candidates, winner_set, \
-                running_ub, ncands, args, quota, tot_ballots, merge_map)
+                running_ub, ncands, args, quota, tot_ballots, merge_map, \
+                order_c, order_a)
 
             for isleaf, node_order_c, node_order_a, lb, dlb, eqlb, dist, \
-                dist_ub, new_rem, node_winners in children:
+                dist_ub, new_rem, node_winners, solved in children:
+
+                if solved:
+                    nsolves += 1
 
                 if log != None:
                     print("EVALUATED {}/{} LB {} (D {} EQ {})".format(\
@@ -652,7 +717,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     continue
 
                 if frontier.size > 0:
-                    running_lb=min(dist,min([n.dist for n in frontier.nodes]))
+                    running_lb=min(dist, frontier.get_lower_bound())
                 else:
                     running_lb=min(dist, running_ub)
 
@@ -669,17 +734,24 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
                     frontier.prune(running_ub, log=log)
                 else:
-                    newn = TreeNode(node_order_c, node_order_a, node_winners,\
-                        new_rem, dist, dist_ub)
+                    newn = TreeNode(fn.id, node_order_c, node_order_a, \
+                        node_winners, new_rem, dist, dist_ub)
 
-                    frontier.insert(newn, log=log)
-                    
+                    idx = frontier.insert(newn, log=log)
+
+                    if idx != None:
+                        fn.children.append(newn.id)
+
             if converged:
                 break
 
+            # Update distances for expanded node (and ancestors) based on 
+            # evaluations of expanded nodes children
+            frontier.back_propagate(fn.id)
+ 
         if converged:
             break
-                    
+
         tnow = time.time()
         if log != None and frontier.size > 0:
             print("Lower bound {}, upper bound {}".format(running_lb,\
@@ -689,23 +761,31 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                 flush=True)
 
         if tlimit != None and tnow-tstart > tlimit:
-            return running_lb, running_ub
+            return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr
 
 
     if converged or frontier.size == 0:            
         if log != None:
             print("-------------------------------------------", file=log, \
                 flush=True)
-            print("MARGIN COMPUTATION CONVERGED: {}--{}.".format(\
-                running_lb, running_ub), file=log, flush=True)
+            print("MARGIN LB: {}--{}, {} nodes expanded, {} solves.".format(\
+                running_lb, running_ub, nexps, nsolves), file=log, flush=True)
             print("-------------------------------------------", file=log, \
                 flush=True)
             
-    return running_lb, running_ub
+    return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr
 
            
 def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
-    candidates, ballots, rem, quota, args, merge_map, tot_ballots, running_ub):
+    candidates, ballots, rem, quota, args, merge_map, tot_ballots, running_ub,\
+    full_order_c, full_order_a):
+
+    # Prefix of original outcome should get 0 evaluation
+    l = len(node_order_c)
+    if node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == \
+        full_order_a[:l]:
+        return 0, 0, 0, TreeNode(-1, node_order_c, node_order_a, node_winners,\
+            rem, 0, 0), False
 
     # Compute order_q map
     order_q = get_order_q(node_order_c, node_order_a, 0, node_winners)
@@ -717,23 +797,31 @@ def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
         node_order_a, quota, order_q)
 
     lb = max(disp_lowerbound, eqlb)
-
-    if lb >= running_ub:
-        return lb, disp_lowerbound, eqlb, TreeNode(node_order_c,\
-            node_order_a, node_winners, rem, lb, lb)
+        
+    if lb >= running_ub or sum(node_order_a) == 0:
+        return lb, disp_lowerbound, eqlb, TreeNode(-1, node_order_c,\
+            node_order_a, node_winners, rem, lb, lb), False
                          
     # Evaluate distance for our new tree node.
     _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
         node_order_a, rem, node_winners, order_q, merge_map, [],\
         tot_ballots, args, quota, running_ub, 0, lb, log=None)
 
-    return lb, disp_lowerbound, eqlb, TreeNode(node_order_c, \
-        node_order_a, node_winners, rem, dist, dist_ub)     
+    return lb, disp_lowerbound, eqlb, TreeNode(-1, node_order_c, \
+        node_order_a, node_winners, rem, dist, dist_ub), True     
 
 
 def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
     node_winners, winner_set, candidates, ballots, tot_ballots, rem, \
-    quota, running_ub):
+    quota, running_ub, full_order_c, full_order_a):
+
+    # Prefix of original outcome should get 0 evaluation
+    l = len(node_order_c)
+    if node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == \
+        full_order_a[:l]:
+        return False, node_order_c, node_order_a, 0, 0, 0, 0, 0, rem, \
+            node_winners, False
+
 
     # Work out the round at which we can stop forming constraints,
     # compute bounds on when candidate could achieve their quotas,
@@ -753,9 +841,10 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
     dist, dist_ub = None, None
     isleaf = True if rem == [] else False
 
-    if lowerbound >= running_ub:
+    if lowerbound >= running_ub or (not isleaf and sum(node_order_a) == 0):
         return (isleaf, node_order_c, node_order_a, lowerbound, \
-            disp_lowerbound, eqlb, lowerbound, lowerbound, rem, node_winners)
+            disp_lowerbound, eqlb, lowerbound, lowerbound, rem, \
+            node_winners, False)
 
     if args.m:
         m_order_c,m_order_a,m_order_q,merge_map,supers,round_conv = \
@@ -774,14 +863,14 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
             node_order_a, rem, node_winners, order_q, merge_map, \
             [], tot_ballots, args, quota, running_ub, LAST_ROUND, \
             lowerbound, isleaf=isleaf, log=None)
-
+    
     return isleaf, node_order_c, node_order_a, lowerbound, disp_lowerbound, \
-        eqlb, dist, dist_ub, rem, node_winners
+        eqlb, dist, dist_ub, rem, node_winners, True
 
 
 
 def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands,\
-    args, quota, tot_ballots, merge_map):
+    args, quota, tot_ballots, merge_map, full_order_c, full_order_a):
 
     children = []
 
@@ -832,7 +921,8 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands,\
 
             children.append((fnode.dist, node_order_c, node_order_a, args, \
                 ncands, node_winners, winner_set, candidates, ballots, \
-                tot_ballots, new_rem, quota, running_ub))
+                tot_ballots, new_rem, quota, running_ub, full_order_c, \
+                full_order_a))
 
     result = []
     with Pool(processes=args.pc) as pool:
