@@ -22,7 +22,7 @@ import math
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
     simulate_stv, compute_weub, compute_simple_ub, merge_outcome
 
-from stvtree import treestv, compute_last_round
+from stvtree import treestv, compute_last_round, get_order_q
 
 from stvdistance import stvdistance
 
@@ -38,19 +38,31 @@ if __name__ == "__main__":
 
     # Input: acceptable gap to which to solve MINLPs
     parser.add_argument('-g', dest='gap', type=float, default=0.01)
+
+    # Input: acceptable difference between running lower and upper bounds
+    # on "margin lower bound", will trigger termination of algorithm.
     parser.add_argument('-agap', dest='agap', type=int, default=1)
    
     # Input: whether to merge eliminated candidates or not
     parser.add_argument('-m', action='store_true', default=False)
  
-    # Input: max solve time (s) for MINLPs 
-    parser.add_argument('-t', dest='time', type=int, default=500)
+    # Input: max solve time (s) for MINLPs for non-leaf nodes
+    parser.add_argument('-t', dest='time', type=int, default=100)
+    
+    # Input: max solve time (s) for MINLPs for leaf nodes
+    parser.add_argument('-thard', dest='thard', type=int, default=150)
     
     # Input: Number of children to evaluate in parallel, default 1
     parser.add_argument('-pc', type=int, default=1)
 
     # Input: max solve time (s) for algorithm 
-    parser.add_argument('-limit', type=int, default=20000)
+    parser.add_argument('-limit', type=int, default=10000)
+
+    # Input: whether to compute displacement lower bound 
+    parser.add_argument('-dlb', action='store_true', default=False)
+
+    # Input: whether to use enhanced pruning strategy
+    parser.add_argument('-ap', action='store_true', default=False)
 
 
     # Output: Log file 
@@ -109,35 +121,35 @@ if __name__ == "__main__":
 
     print("{}--{}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores),file=log)
 
-    #node_order_c = [19, 13, 3, 17, 21, 9, 5, 11, 15, 1, 22, 0, 12]
-    #node_order_a = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0] 
+    # Baillieston
+    #EVALUATED [6, 1, 9, 2, 7, 4, 0, 8, 3, 10, 5]/[1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1] LB 0 (D 0 EQ 0)
+    #DISTANCE 0/0
+    # EVALUATED [6, 1, 9, 2, 8, 10, 4]/[1, 1, 0, 0, 0, 0, 0] LB 0 (D 0 EQ 0)
+    # DISTANCE 0/0 
 
-    # Run tests with 2022 ACT data
-    #node_order_c = [19, 13, 3] 
-    #rem = [c.num for c in candidates if not c.num in node_order_c]
+    #node_order_c = [6, 1, 9, 2, 8, 10, 4]
+    #node_order_a = [1, 1, 0, 0, 0, 0, 0] 
+    #node_winners = [6,1]
+    #rem = [0,3,5,7]
 
-    #node_order_a = [0, 0, 0] #, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]
+    #LAST_ROUND = compute_last_round(node_order_c,node_order_a, args.seats, 11)
 
-    #order_q = { 0 : (10,10) }
-
+    #order_q = get_order_q(node_order_c, node_order_a, LAST_ROUND, node_winners)
+       
     #m_order_c,m_order_a,m_order_q,merge_map,supers,round_conv = \
-    #    merge_outcome(node_order_c, node_order_a, order_q, rem)
+    #        merge_outcome(node_order_c, node_order_a, order_q, rem)
 
     #print(m_order_c)
     #print(m_order_a)
-    #print(m_order_q)
-    #print(merge_map)
-    #print(supers)
-    #print(round_conv)
 
     #LAST_ROUND = compute_last_round(m_order_c, m_order_a, args.seats,\
     #        len(m_order_c) + len(rem))
-    #print(LAST_ROUND)
-        
+    
+    #print(LAST_ROUND)    
     #_, dist, dist_ub=stvdistance(candidates, ballots, m_order_c, \
-    #    m_order_a, rem, [0], m_order_q, merge_map, \
-    #    supers, totvotes, args, quota, upper_bound, LAST_ROUND, \
-    #    0, isleaf=False, log=None)
+    #        m_order_a, rem, node_winners, m_order_q, merge_map, \
+    #        supers, totvotes, args, quota, upper_bound, LAST_ROUND, \
+    #        0, isleaf=True, log=None)
 
     #print(dist)
     #print(dist_ub)

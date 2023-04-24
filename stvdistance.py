@@ -409,7 +409,10 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     model.setEmphasis(SCIP_PARAMEMPHASIS.OPTIMALITY)
     model.hideOutput()
     model.setRealParam("limits/gap", args.gap)
-    #model.setRealParam("limits/time", args.time)
+    if isleaf:
+        model.setRealParam("limits/time", args.thard)
+    else:
+        model.setRealParam("limits/time", args.time)
 
     # VARIABLES
     # 'Signature' here refers to equivalence class rankings.
@@ -604,8 +607,8 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     model.addCons(sum_ps <= upperbound)
     model.addCons(sum_ps >= lowerbound)
 
-    model.includeEventhdlr(TimerHndlr(args.time), "TimelimitReached", \
-        "Timelimit reached")
+    #model.includeEventhdlr(TimerHndlr(args.time), "TimelimitReached", \
+    #    "Timelimit reached")
 
     # Weird thing with quicksum introducing an offset for objective, so
     # am avoiding using it.
@@ -616,12 +619,12 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     if model.getStatus() == "infeasible":
         return False, None, None
 
-    elif model.getStatus() == "timelimit":
-        if model.getNCountedSols() > 0:
-            return True, int(math.floor(model.getDualbound())), \
-                int(math.ceil(model.getPrimalbound()))
-        else:
-            return False, -1, -1
+    #elif model.getStatus() == "timelimit":
+    #    if model.getNCountedSols() > 0:
+    #        return True, int(math.floor(model.getDualbound())), \
+    #            int(math.ceil(model.getPrimalbound()))
+    #    else:
+    #        return False, -1, -1
     else:
         # As we are usually going to stop solving when we get to an 
         # allowed gap, return lower bound on objective.

@@ -151,7 +151,7 @@ def read_ballots_txt(path):
 
         for i in range(len(clist)):
             cand = Candidate(i, clist[i])
-            cand.name = ""
+            cand.name = str(clist[i])
             cand.group_id = -1
             cand.position = -1
 
@@ -461,15 +461,15 @@ def compute_weub(candidates, winners, order_c, order_a, tallies):
 
                 use_half = True
                 for s in standing:
-                    if s == w:
+                    if s == w or s == cnum:
                         continue
 
-                    if tallies[s][r] + 0.5*change < halfless:
+                    if tallies[s][r] < halfless:
                         use_half = False
                         break
 
                 if use_half:
-                    weub = min(weub, 0.5*change)
+                    weub = min(weub, math.ceil(0.5*change))
 
     return weub
                        
@@ -533,7 +533,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
 
             if cand.standing and cand.sim_votes >= quota:
                 cand.surplus = max(0, cand.sim_votes - quota)
-                surpluses.append(cand)
+                insert_surplus(surpluses, cand)
 
                 order_q[cand.num] = r
 
@@ -554,7 +554,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                     inserted = False
                     for i in range(len(slist)):
                         if cand.sim_votes > candidates[slist[i]].sim_votes:
-                            slist.insert(i)
+                            slist.insert(i, cand.num)
                             inserted = True
                             break
 
@@ -653,15 +653,17 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                     # Distribute surplus
                     distribute_surplus(elect, candidates, ballots, log)
 
+                next_surpluses = []
                 for cand in candidates:
                     if cand.surplus != -1 or not cand.standing:
                         continue
 
                     if cand.sim_votes >= quota:
                         cand.surplus = max(0, cand.sim_votes - quota)
-                        new_surpluses.append(cand)
+                        insert_surplus(next_surpluses, cand)
                         order_q[cand.num] = r
 
+                new_surpluses.extend(next_surpluses)
             
                 if r != ncand-1:
                     for cand in candidates:
@@ -695,6 +697,14 @@ def next_candidate(prefs, cnum, candidates):
 
     return -1 
 
+
+def insert_surplus(surpluses, cand):
+    for i in range(len(surpluses)):
+        if cand.surplus >= surpluses[i].surplus:
+            surpluses.insert(i, cand)
+            return
+
+    surpluses.append(cand)
 
 def distribute_surplus(elect, candidates, ballots, log):
     elect.standing = 0
@@ -1036,7 +1046,7 @@ def merge_outcome(order_c, order_a, order_q, rem):
                 # un-merged, and merge the remainder, to support creating 
                 # a tighter optimisation problem.
                 add_elim_sequence(elim_seq, m_order_c, m_order_a,\
-                    merge_map, segments, supers, merge_all=False)
+                    merge_map, segments, supers, merge_all=True)
 
                 elim_seq = []
 
@@ -1056,7 +1066,7 @@ def merge_outcome(order_c, order_a, order_q, rem):
         # un-merged, and merge the remainder, to support creating 
         # a tighter optimisation problem.
         add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
-            segments, supers)
+            segments, supers, merge_all=False)
         
     # Create a map between old round numbers and new ones
     round_conv = {-1 : -1}

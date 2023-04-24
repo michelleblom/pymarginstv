@@ -195,7 +195,9 @@ class Frontier:
                 return None
 
         for fnode in self.expanded:
-            if self.similar_node(node, self.get_node(fnode), strict=False):
+            fnodeobj = self.get_node(fnode)
+            if self.similar_node(node, fnodeobj, strict=False):
+                node.dist = max(node.dist, fnodeobj.dist) 
                 return None
         
         node.id = self.idcntr
@@ -277,7 +279,7 @@ def get_order_q(order_c, order_a, LAST_ROUND, winners):
     """
     order_q = {}
     for w in winners:
-        pos = order_c.index(w)
+        pos = order_c.index(w) if w in order_c else LAST_ROUND
         if pos > LAST_ROUND:
             continue
         
@@ -455,11 +457,11 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
     lowerbound = 0
     if og_losers != [] and og_winners != []:
         lprefix = len(node_order_c)
-
         lowerbound = np.inf
         
         for ogl in og_losers:
             displacement_cost = np.inf
+            left_at_end_costs = []
 
             for ogw in og_winners:
                 max_l = 0
@@ -482,53 +484,43 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
                         max_l += votes
 
                 dp = max(0, 0.5*(min_w - max_l))
-
+                left_at_end_costs.append(dp)
                 displacement_cost = min(displacement_cost, dp)
 
-            #for r in rem:
-            #    if r == ogl or r in og_winners:
-            #        continue
+            for r in rem:
+                if r == ogl or r in og_winners:
+                    continue
     
-            #    max_l = 0
-            #    min_r = 0
+                max_l = 0
+                min_r = 0
 
-            #    for prefs,_,votes,lwinner in filtered_ballots:
-            #        if prefs[0] == r:
-            #            if lwinner == None:
-            #                min_r += votes
-            #            else:
-            #                min_r += votes*tvalues[lwinner]
-            #            continue
+                for prefs,_,votes,winners in filtered_ballots:
+                    if prefs[0] == r:
+                        if winners == []:
+                            min_r += votes
+                        continue
 
-            #        posl = prefs.index(ogl) if ogl in prefs else -1
-            #        posr = prefs.index(r) if r in prefs else -1
+                    posl = prefs.index(ogl) if ogl in prefs else -1
+                    posr = prefs.index(r) if r in prefs else -1
 
-            #        if posl != -1 and (posr == -1 or posl < posr):
-            #            max_l += votes
+                    if posl != -1 and (posr == -1 or posl < posr):
+                        max_l += votes
 
-            #    left_at_end_costs.append(max(0, 0.5*(min_r-max_l)))
-
-                #print("loser {} left at the end cost against {}, {}".format(\
-                #    ogl, r, 0.5*(min_r-max_l)))
+                left_at_end_costs.append(max(0, 0.5*(min_r-max_l)))
                
-            #max_l = 0
-            #for prefs,_,votes,_ in filtered_ballots:
-            #    if ogl in prefs:
-            #        max_l += votes
+            max_l = 0
+            for prefs,_,votes,_ in filtered_ballots:
+                if ogl in prefs:
+                    max_l += votes
 
-            #quota_cost = max(0, max_l - quota)
-
-            #print("loser {} quota cost {}".format(ogl, max_l-quota))
-
-            #left_at_end_costs.sort()
+            quota_cost = max(0, max_l - quota)
+            left_at_end_costs.sort()
 
             # ogl needs to outlast nleft - sleft candidates 
-            #left_at_end_cost = max(left_at_end_costs[:nleft-sleft])
+            left_at_end_cost = max(left_at_end_costs[:nleft-sleft])
 
-            #ogl_lowerbound = max(displacement_cost, min(quota_cost, \
-            #    left_at_end_cost))
-            
-            lowerbound = min(lowerbound, displacement_cost)
+            lowerbound = min(lowerbound, max(displacement_cost, min(\
+                quota_cost, left_at_end_cost)))
             
     return math.ceil(lowerbound)
 
@@ -622,6 +614,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                 print("EVALUATING {}/{} LB {} (D {} EQ {})".format(\
                     node.order_c, node.order_a, lb, dlb, eqlb), \
                     file=log, flush=True)
+                if dlb != 0:
+                    print("D is non-zero.", file=log, flush=True)
                            
                 if lb < running_ub:                    
                     if node.dist == None:
@@ -686,6 +680,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             break
                
         arg_list = []
+        min_lb = running_ub
         for fn in fnodes:
             if log != None:
                 print("EXPANDING NODE {}".format(fn), file=log, flush=True)
@@ -704,6 +699,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     print("EVALUATED {}/{} LB {} (D {} EQ {})".format(\
                         node_order_c, node_order_a, lb, dlb, eqlb), \
                         file=log, flush=True)
+                    if dlb != 0:
+                        print("D is non-zero.", file=log, flush=True)
 
                     
                     if dist == None:
@@ -722,6 +719,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     running_lb=min(dist, running_ub)
 
                 if isleaf:
+                    min_lb = min(min_lb, lb)
+
                     if log != None and dist_ub < running_ub:
                         print("Reducing upper bound to {}".format(dist_ub),\
                             file=log, flush=True)
@@ -741,16 +740,24 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
                     if idx != None:
                         fn.children.append(newn.id)
+                    
+                    min_lb = min(min_lb, newn.dist)
+                        
 
             if converged:
                 break
+            elif frontier.size == 0:
+                running_lb = max(running_lb, min_lb)
 
-            # Update distances for expanded node (and ancestors) based on 
-            # evaluations of expanded nodes children
-            frontier.back_propagate(fn.id)
+
+            if args.ap:
+                # Update distances for expanded node (and ancestors) based on 
+                # evaluations of expanded nodes children
+                frontier.back_propagate(fn.id)
  
         if converged:
             break
+
 
         tnow = time.time()
         if log != None and frontier.size > 0:
@@ -772,6 +779,9 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                 running_lb, running_ub, nexps, nsolves), file=log, flush=True)
             print("-------------------------------------------", file=log, \
                 flush=True)
+
+    if log != None:
+        print("Time to finish: {}s".format(time.time()-tstart), file=log)
             
     return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr
 
@@ -790,15 +800,16 @@ def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
     # Compute order_q map
     order_q = get_order_q(node_order_c, node_order_a, 0, node_winners)
             
-    disp_lowerbound = 0 # compute_disp_lb(candidates, ballots, \
-        #node_order_c, node_order_a, winner_set, rem, quota, args.seats)
+    disp_lowerbound = compute_disp_lb(candidates, ballots, \
+        node_order_c, node_order_a, winner_set, rem, quota, args.seats) if \
+        args.dlb else 0
                   
     eqlb = compute_elim_quota_lb(candidates, ballots, node_order_c, \
         node_order_a, quota, order_q)
 
     lb = max(disp_lowerbound, eqlb)
         
-    if lb >= running_ub or sum(node_order_a) == 0:
+    if lb >= running_ub:
         return lb, disp_lowerbound, eqlb, TreeNode(-1, node_order_c,\
             node_order_a, node_winners, rem, lb, lb), False
                          
@@ -813,7 +824,7 @@ def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
 
 def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
     node_winners, winner_set, candidates, ballots, tot_ballots, rem, \
-    quota, running_ub, full_order_c, full_order_a):
+    quota, running_ub, full_order_c, full_order_a, isleaf):
 
     # Prefix of original outcome should get 0 evaluation
     l = len(node_order_c)
@@ -830,8 +841,9 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
 
     order_q = get_order_q(node_order_c, node_order_a, LAST_ROUND, node_winners)
 
-    disp_lowerbound = 0 # compute_disp_lb(candidates, ballots, node_order_c, \
-        # node_order_a, winner_set, rem, quota, args.seats)
+    disp_lowerbound = compute_disp_lb(candidates, ballots, \
+        node_order_c, node_order_a, winner_set, rem, quota, args.seats) if \
+        args.dlb and (not isleaf) else 0
 
     eqlb = compute_elim_quota_lb(candidates, ballots, node_order_c, \
         node_order_a, quota, order_q)
@@ -839,13 +851,12 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
     lowerbound = max(eqlb, max(disp_lowerbound, parent_dist))
     
     dist, dist_ub = None, None
-    isleaf = True if rem == [] else False
 
-    if lowerbound >= running_ub or (not isleaf and sum(node_order_a) == 0):
+    if lowerbound >= running_ub: # or (not isleaf and sum(node_order_a) == 0):
         return (isleaf, node_order_c, node_order_a, lowerbound, \
             disp_lowerbound, eqlb, lowerbound, lowerbound, rem, \
             node_winners, False)
-
+    
     if args.m:
         m_order_c,m_order_a,m_order_q,merge_map,supers,round_conv = \
             merge_outcome(node_order_c, node_order_a, order_q, rem)
@@ -863,7 +874,7 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
             node_order_a, rem, node_winners, order_q, merge_map, \
             [], tot_ballots, args, quota, running_ub, LAST_ROUND, \
             lowerbound, isleaf=isleaf, log=None)
-    
+
     return isleaf, node_order_c, node_order_a, lowerbound, disp_lowerbound, \
         eqlb, dist, dist_ub, rem, node_winners, True
 
@@ -899,6 +910,7 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands,\
             new_rem = rem
             nrem = len(rem)
             isleaf = False
+
             if seats_filled == args.seats:
                 node_order_c += rem
                 node_order_a += [0]*nrem
@@ -908,11 +920,13 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands,\
             elif args.seats - seats_filled == nrem:
                 # Are we in a situation where the number of seats left
                 # equals the number of candidates in rem?
-                node_order_c += rem
-                node_winners.update(rem)
-                node_order_a += [1]*nrem
-                new_rem = []
-                seats_filled = args.seats
+                if winner_set - node_winners == set(rem):
+                    continue
+                #node_order_c += rem
+                #node_winners.update(rem)
+                #node_order_a += [1]*nrem
+                #new_rem = []
+                #seats_filled = args.seats
                 isleaf = True
 
             if node_winners == winner_set:
@@ -922,7 +936,7 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands,\
             children.append((fnode.dist, node_order_c, node_order_a, args, \
                 ncands, node_winners, winner_set, candidates, ballots, \
                 tot_ballots, new_rem, quota, running_ub, full_order_c, \
-                full_order_a))
+                full_order_a, isleaf))
 
     result = []
     with Pool(processes=args.pc) as pool:
