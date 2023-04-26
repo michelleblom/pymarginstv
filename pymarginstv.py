@@ -62,7 +62,7 @@ if __name__ == "__main__":
     parser.add_argument('-dlb', action='store_true', default=False)
 
     # Input: whether to use enhanced pruning strategy
-    parser.add_argument('-ap', action='store_true', default=False)
+    parser.add_argument('-lse', action='store_true', default=False)
 
 
     # Output: Log file 

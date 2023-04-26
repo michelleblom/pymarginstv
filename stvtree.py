@@ -149,15 +149,16 @@ class Frontier:
                 self.size = len(self.nodes)
 
 
-    def similar_node(self, inode, node, strict=True):
+    def similar_node(self, inode, node, lse=True):
         if inode.order_a != node.order_a:
             return False
 
-        if strict and abs(inode.dist - node.dist) > epsilon:
-            return False
-
-        if not strict and (inode.dist > node.dist + epsilon):
-            return False
+        if lse:
+            if (inode.dist < node.dist - epsilon):
+                return False
+        else:
+            if abs(inode.dist - node.dist) > epsilon:
+                return False
 
         elim_seq1 = set()
         elim_seq2 = set()
@@ -185,20 +186,25 @@ class Frontier:
         return False
 
 
-    def insert(self, node, log=None):
+    def insert(self, node, lse=True,log=None):
         """
             Nodes are inserted into the frontier on the basis of their 
             distance value, smallest first.
         """
-        for fnode in self.nodes:
-            if self.similar_node(node, self.get_node(fnode)):
-                return None
+        if self.size > 0:
+            for fnode in self.nodes:
+                fnodeobj = self.get_node(fnode)
+                if fnodeobj.dist > node.dist + epsilon:
+                    break
 
-        for fnode in self.expanded:
-            fnodeobj = self.get_node(fnode)
-            if self.similar_node(node, fnodeobj, strict=False):
-                node.dist = max(node.dist, fnodeobj.dist) 
-                return None
+                if self.similar_node(node, fnodeobj, lse=lse):
+                    return None
+
+            for fnode in self.expanded:
+                fnodeobj = self.get_node(fnode)
+                if self.similar_node(node, fnodeobj, lse=lse):
+                    #node.dist = max(node.dist, fnodeobj.dist) 
+                    return None
         
         node.id = self.idcntr
         self.idcntr += 1
@@ -216,18 +222,18 @@ class Frontier:
         return self.size-1
 
 
-    def back_propagate(self, nid):
-        node = self.node_map[nid]
+    #def back_propagate(self, nid):
+    #    node = self.node_map[nid]
 
-        lb = np.inf
-        for c in node.children:
-            lb = min(lb, self.get_node(c).dist)
+    #    lb = np.inf
+    #    for c in node.children:
+    #        lb = min(lb, self.get_node(c).dist)
 
-        node.dist = max(lb, node.dist)
-        node.dist_ub = max(lb, node.dist_ub)
+    #    node.dist = max(lb, node.dist)
+    #    node.dist_ub = max(lb, node.dist_ub)
 
-        if node.pid != -1:
-            self.back_propagate(node.pid)
+    #    if node.pid != -1:
+    #        self.back_propagate(node.pid)
 
 
 
@@ -643,7 +649,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             else:
                 running_lb = node.dist
 
-            frontier.insert(node, log=log)
+            frontier.insert(node, lse=args.lse, log=log)
 
     if log != None:
         print("Lower bound {}, upper bound {}".format(running_lb,\
@@ -736,7 +742,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     newn = TreeNode(fn.id, node_order_c, node_order_a, \
                         node_winners, new_rem, dist, dist_ub)
 
-                    idx = frontier.insert(newn, log=log)
+                    idx = frontier.insert(newn, lse=args.lse, log=log)
 
                     if idx != None:
                         fn.children.append(newn.id)
@@ -746,14 +752,15 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
             if converged:
                 break
+
             elif frontier.size == 0:
                 running_lb = max(running_lb, min_lb)
 
 
-            if args.ap:
+            #if args.ap:
                 # Update distances for expanded node (and ancestors) based on 
                 # evaluations of expanded nodes children
-                frontier.back_propagate(fn.id)
+            #    frontier.back_propagate(fn.id)
  
         if converged:
             break
