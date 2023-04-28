@@ -203,7 +203,6 @@ class Frontier:
             for fnode in self.expanded:
                 fnodeobj = self.get_node(fnode)
                 if self.similar_node(node, fnodeobj, lse=lse):
-                    #node.dist = max(node.dist, fnodeobj.dist) 
                     return None
         
         node.id = self.idcntr
@@ -220,20 +219,6 @@ class Frontier:
         self.nodes.append(node.id)
         self.size += 1 
         return self.size-1
-
-
-    #def back_propagate(self, nid):
-    #    node = self.node_map[nid]
-
-    #    lb = np.inf
-    #    for c in node.children:
-    #        lb = min(lb, self.get_node(c).dist)
-
-    #    node.dist = max(lb, node.dist)
-    #    node.dist_ub = max(lb, node.dist_ub)
-
-    #    if node.pid != -1:
-    #        self.back_propagate(node.pid)
 
 
 

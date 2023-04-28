@@ -22,7 +22,7 @@ import math
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
     simulate_stv, compute_weub, compute_simple_ub, merge_outcome
 
-from stvtree import treestv, compute_last_round, get_order_q
+from stvtree import treestv, compute_last_round, get_order_q, eval_child
 
 from stvdistance import stvdistance
 
@@ -64,6 +64,8 @@ if __name__ == "__main__":
     # Input: whether to use enhanced pruning strategy
     parser.add_argument('-lse', action='store_true', default=False)
 
+    # Input: whether to use initial candidate manipulations 
+    parser.add_argument('-icm', action='store_true', default=False)
 
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
@@ -114,6 +116,87 @@ if __name__ == "__main__":
 
     print("WEUB {}, simple UB {}".format(weub, simple_ub),file=log,flush=True)
 
+    if args.icm:
+        #  Try to reduce upper bound on lower bound by evaluating some 
+        # complete alternate outcomes that we think will require the least
+        # amount of manipulation.
+        ncand = len(candidates)
+
+        # Who is the last winner? Last eliminated
+        le = None
+        le_idx = None
+        lw = None
+        lw_idx = None
+
+        filled = 0
+        for r in range(len(order_a)):
+            if filled == args.seats:
+                break
+            if order_a[r] == 1:
+                lw = order_c[r]
+                lw_idx = r
+                filled += 1
+            else:
+                le = order_c[r]
+                le_idx = r
+
+        # Swap position of last winner and last eliminated candidate before 
+        # them
+        cand_manip_c = order_c[:]
+        cand_manip_c[le_idx] = lw
+        cand_manip_c[lw_idx] = le
+
+        new_winners = set(winners)
+        new_winners.remove(lw)
+        new_winners.add(le)
+        rem = []
+
+        if log:
+            print("Testing candidate {}/{}".format(cand_manip_c,order_a),\
+                file=log)
+
+        _, _, _, _, _, _, dist, dist_ub, _, _, _ = eval_child(0, cand_manip_c,\
+            order_a, args, ncand, new_winners, winners, candidates, ballots, \
+            totvotes, rem, quota, upper_bound, order_c, order_a, True)
+
+        if log:
+            print("Candidate upper bound {}".format(dist_ub), file=log)
+
+        if dist_ub != None and dist_ub < upper_bound:
+            upper_bound = dist_ub
+            print("Reducing upper bound to {}".format(dist_ub), file=log)
+
+        if lw_idx < ncand-1:
+            # There are candidates still standing after last winner is 
+            # seated.
+            for i in range(lw_idx+1, ncand):
+                # Swap position of lw and candidate at pos 'i'
+        
+                cand_manip_c = order_c[:]
+                cand_manip_c[lw_idx] = order_c[i]
+                cand_manip_c[i] = lw
+
+                new_winners = set(winners)
+                new_winners.remove(lw)
+                new_winners.add(order_c[i])
+                rem = []
+                if log:
+                    print("Testing candidate {}/{}".format(cand_manip_c, \
+                        order_a), file=log)
+
+                _, _, _, _, _, _, dist, dist_ub, _, _, _ = eval_child(0, \
+                    cand_manip_c, order_a, args, ncand, new_winners, winners, \
+                    candidates, ballots, totvotes, rem, quota, upper_bound, \
+                    order_c, order_a, True)
+
+                if log:
+                    print("Candidate upper bound {}".format(dist_ub), file=log)
+
+                if dist_ub != None and dist_ub < upper_bound:
+                    upper_bound = dist_ub
+                    print("Reducing upper bound to {}".format(dist_ub),file=log)
+            
+
     # Start branch and bound.
     lb, ub, nexps, nsolves, ignores = treestv(ballots, candidates, winners, \
         order_c, order_a, upper_bound, args.seats, args, quota, totvotes, \
@@ -121,38 +204,6 @@ if __name__ == "__main__":
 
     print("{}--{}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores),file=log)
 
-    # Baillieston
-    #EVALUATED [6, 1, 9, 2, 7, 4, 0, 8, 3, 10, 5]/[1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1] LB 0 (D 0 EQ 0)
-    #DISTANCE 0/0
-    # EVALUATED [6, 1, 9, 2, 8, 10, 4]/[1, 1, 0, 0, 0, 0, 0] LB 0 (D 0 EQ 0)
-    # DISTANCE 0/0 
-
-    #node_order_c = [6, 1, 9, 2, 8, 10, 4]
-    #node_order_a = [1, 1, 0, 0, 0, 0, 0] 
-    #node_winners = [6,1]
-    #rem = [0,3,5,7]
-
-    #LAST_ROUND = compute_last_round(node_order_c,node_order_a, args.seats, 11)
-
-    #order_q = get_order_q(node_order_c, node_order_a, LAST_ROUND, node_winners)
-       
-    #m_order_c,m_order_a,m_order_q,merge_map,supers,round_conv = \
-    #        merge_outcome(node_order_c, node_order_a, order_q, rem)
-
-    #print(m_order_c)
-    #print(m_order_a)
-
-    #LAST_ROUND = compute_last_round(m_order_c, m_order_a, args.seats,\
-    #        len(m_order_c) + len(rem))
-    
-    #print(LAST_ROUND)    
-    #_, dist, dist_ub=stvdistance(candidates, ballots, m_order_c, \
-    #        m_order_a, rem, node_winners, m_order_q, merge_map, \
-    #        supers, totvotes, args, quota, upper_bound, LAST_ROUND, \
-    #        0, isleaf=True, log=None)
-
-    #print(dist)
-    #print(dist_ub)
 
     log.close()
 
