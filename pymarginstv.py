@@ -204,6 +204,18 @@ if __name__ == "__main__":
 
     print("{}--{}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores),file=log)
 
+    #winner_set = {0, 1, 5, 4}
+    #node_winners = [0, 1, 3, 5]
+    #node_order_c = [0, 1, 2, 3, 4, 5]
+    #node_order_a = [1, 1, 0, 1, 0, 1]
+    
+    #_, _, _, _, _, _, dist, dist_ub, _, _, _ = eval_child(0, node_order_c, \
+    #    node_order_a, args, len(candidates), node_winners, winner_set, \
+    #    candidates, ballots, totvotes, [], quota, 100000000, [0, 1, 5, 2, 3, 4],\
+    #    [1, 1, 1, 0, 0, 1], True)
+
+    #print(dist)
+    #print(dist_ub)
 
     log.close()
 

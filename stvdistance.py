@@ -12,7 +12,7 @@ epsilon = 0.0001
 # On this branch, we implement the US-style STV model.
 #
 
-def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot,\ 
+def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot, \
     LAST_ROUND, winners, tvalue, nqcr, qcr, tallies, rem, candpos,\
     order_q, max_tallies):
     """
@@ -116,7 +116,7 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot,\
                                 distribute_ballots_t(r+1, R, ballotwith, \
                                     cp_ballotwith, withindex, nbv, b, \
                                     lballot, LAST_ROUND, winners, tvalue, \
-                                    nqcr, qcr, tallies, npapers, rem, candpos,\
+                                    nqcr, qcr, tallies, rem, candpos,\
                                     order_q, max_tallies)
 
                                 # Now we are assuming that 'ballotwith' has
@@ -461,6 +461,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     # Weird thing with quicksum introducing an offset for objective, so
     # am avoiding using it.
     model.setObjective(sum_ps, "minimize")
+    #model.writeProblem()
 
     model.optimize()
 
