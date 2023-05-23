@@ -848,7 +848,13 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
         return (isleaf, node_order_c, node_order_a, lowerbound, \
             disp_lowerbound, eqlb, lowerbound, lowerbound, rem, \
             node_winners, False)
-    
+   
+    if args.nominlps:
+        return isleaf, node_order_c, node_order_a, lowerbound, \
+            disp_lowerbound, eqlb, lowerbound, lowerbound, rem, \
+            node_winners, True
+
+ 
     if args.m:
         m_order_c,m_order_a,m_order_q,merge_map,supers,round_conv = \
             merge_outcome(node_order_c, node_order_a, order_q, rem)
@@ -914,11 +920,6 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands,\
                 # equals the number of candidates in rem?
                 if winner_set - node_winners == set(rem):
                     continue
-                #node_order_c += rem
-                #node_winners.update(rem)
-                #node_order_a += [1]*nrem
-                #new_rem = []
-                #seats_filled = args.seats
                 isleaf = True
 
             if node_winners == winner_set:

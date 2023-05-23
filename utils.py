@@ -135,6 +135,61 @@ def read_outcome(path, cid2num):
 
     return outcome
 
+
+def read_ballots_blt(path): # TODO, TEST
+    ballots = []
+    candidates = []
+    cid2num = {}
+
+    total_votes = 0
+
+    with open(path, "r") as cvr:
+        lines = [l.strip() for l in cvr.readlines() if l.strip() != ""]
+
+        cands,seats = [int(tok) for tok in lines[0].split()]
+
+        split_idx = lines.index("0")
+
+        ballot_strs = lines[:split_idx]
+        cand_strs = lines[split_idx+1:-1]
+
+        for i in range(len(cand_strs)):
+            cand = Candidate(i, cand_strs[i])
+            cand.name = str(clist[i])
+            cand.group_id = -1
+            cand.position = -1
+
+            candidates.append(cand)
+            cid2num[clist[i]] = i
+
+
+        bcntr = 0
+
+        for bline in ballot_strs:
+            toks = [int(t) for t in bline.split()]
+
+            n = toks[0]
+            prefs = toks[1:-1]
+
+            ballot = Ballot(bcntr, n, prefs, atl=False)
+            ballots.append(ballot)
+
+            fpcand = candidates[cprefs[0]]
+            fpcand.ballots.append(bcntr)
+            fpcand.fp_votes += votes
+
+            total_votes += votes
+
+            for p in prefs:
+                candidates[p].mentions.append(bcntr)
+
+            bcntr += 1
+
+    return candidates,ballots,{},cid2num,total_votes
+
+
+
+
 def read_ballots_txt(path):
     ballots = []
     candidates = []

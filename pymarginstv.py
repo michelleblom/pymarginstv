@@ -20,7 +20,8 @@ import argparse
 import math
 
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
-    simulate_stv, compute_weub, compute_simple_ub, merge_outcome
+    read_ballots_blt, simulate_stv, compute_weub, compute_simple_ub, \
+    merge_outcome
 
 from stvtree import treestv, compute_last_round, get_order_q, eval_child
 
@@ -56,7 +57,7 @@ if __name__ == "__main__":
     parser.add_argument('-pc', type=int, default=1)
 
     # Input: max solve time (s) for algorithm 
-    parser.add_argument('-limit', type=int, default=10000)
+    parser.add_argument('-limit', type=int, default=5000)
 
     # Input: whether to compute displacement lower bound 
     parser.add_argument('-dlb', action='store_true', default=False)
@@ -66,6 +67,10 @@ if __name__ == "__main__":
 
     # Input: whether to use initial candidate manipulations 
     parser.add_argument('-icm', action='store_true', default=False)
+
+    # Input: whether to only use heuristic lower bound evaluations
+    parser.add_argument('-nominlps', action='store_true', default=False)
+    
 
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
@@ -83,6 +88,9 @@ if __name__ == "__main__":
 
     elif args.data.endswith(".json"):
         candidates, ballots, _, cid2num, _ = read_ballots_json(args.data)
+
+    elif args.data.endswith(".blt"):
+        candidates, ballots, _, cid2num, _ = read_ballots_blt(args.data)
 
     else:
         candidates, ballots, _, cid2num, _ = read_ballots_txt(args.data)
@@ -117,6 +125,8 @@ if __name__ == "__main__":
     print("WEUB {}, simple UB {}".format(weub, simple_ub),file=log,flush=True)
 
     if args.icm:
+        # THIS PART IS A BIT BUGGY 
+
         #  Try to reduce upper bound on lower bound by evaluating some 
         # complete alternate outcomes that we think will require the least
         # amount of manipulation.
