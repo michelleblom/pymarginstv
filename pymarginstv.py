@@ -69,7 +69,7 @@ if __name__ == "__main__":
     parser.add_argument('-icm', action='store_true', default=False)
 
     # Input: whether to only use lower bounding heuristics during search
-    parset.add_argument("-nominlps", actions='store_true', default=False)
+    parser.add_argument("-nominlps", action='store_true', default=False)
 
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
