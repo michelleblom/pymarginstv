@@ -849,6 +849,11 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
             disp_lowerbound, eqlb, lowerbound, lowerbound, rem, \
             node_winners, False)
     
+    if args.nominlps:
+        return (isleaf, node_order_c, node_order_a, lowerbound, \
+            disp_lowerbound, eqlb, lowerbound, lowerbound, rem, \
+            node_winners, False)
+
     if args.m:
         m_order_c,m_order_a,m_order_q,merge_map,supers,round_conv = \
             merge_outcome(node_order_c, node_order_a, order_q, rem)

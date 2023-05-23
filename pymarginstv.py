@@ -20,7 +20,8 @@ import argparse
 import math
 
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
-    simulate_stv, compute_weub, compute_simple_ub, merge_outcome
+    read_ballots_blt, simulate_stv, compute_weub, compute_simple_ub, \
+    merge_outcome
 
 from stvtree import treestv, compute_last_round, get_order_q, eval_child
 
@@ -67,6 +68,9 @@ if __name__ == "__main__":
     # Input: whether to use initial candidate manipulations 
     parser.add_argument('-icm', action='store_true', default=False)
 
+    # Input: whether to only use lower bounding heuristics during search
+    parset.add_argument("-nominlps", actions='store_true', default=False)
+
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
 
@@ -80,6 +84,9 @@ if __name__ == "__main__":
     # Check for given input data type
     if args.data.endswith(".stv"):
         candidates, ballots, _, cid2num, _ = read_ballots_stv(args.data)
+
+    elif args.data.endswith(".blt"):
+        candidates, ballots, _, cid2num, _ = read_ballots_blt(args.data)
 
     elif args.data.endswith(".json"):
         candidates, ballots, _, cid2num, _ = read_ballots_json(args.data)
@@ -117,6 +124,8 @@ if __name__ == "__main__":
     print("WEUB {}, simple UB {}".format(weub, simple_ub),file=log,flush=True)
 
     if args.icm:
+        # THIS PART IS A BIT BUGGY
+
         #  Try to reduce upper bound on lower bound by evaluating some 
         # complete alternate outcomes that we think will require the least
         # amount of manipulation.
