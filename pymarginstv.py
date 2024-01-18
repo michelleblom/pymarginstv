@@ -70,6 +70,8 @@ if __name__ == "__main__":
 
     # Input: whether to only use lower bounding heuristics during search
     parser.add_argument("-nominlps", action='store_true', default=False)
+    
+    parser.add_argument("-just_sim", action='store_true', default=False)
 
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
@@ -113,6 +115,21 @@ if __name__ == "__main__":
     # the total valid ballots cast.
     quota, tallies, totvotes = simulate_stv(ballots, candidates, args.seats,\
         order_c, order_a, order_q, winners, log=log)
+
+    if args.just_sim:
+        if log != None:
+            print("{}".format(candidates[order_c[0]].id), end='', file=log)
+
+            for i in range(1, len(candidates)):
+                print(",{}".format(candidates[order_c[i]].id), end='',file=log)
+
+            print("", file=log)
+
+            print("{}".format(order_a[0]), end='', file=log)
+            for i in range(1, len(candidates)):
+                print(",{}".format(order_a[i]), end='', file=log)
+
+        exit(0)
 
     # Heuristics for computing initial upper bounds on the margin. 
     # WEUB stands for "winner elimination upper bound".
