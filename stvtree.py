@@ -154,7 +154,7 @@ class Frontier:
             return False
 
         if lse:
-            if (inode.dist < node.dist - epsilon):
+            if (inode.dist <= node.dist): # - epsilon):
                 return False
         else:
             if abs(inode.dist - node.dist) > epsilon:
@@ -650,7 +650,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         print("Time elapsed {}s".format(tnow-tstart), file=log, flush=True)
     
     if tlimit != None and tnow-tstart > tlimit:
-        return running_lb, running_ub
+        return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr
 
     while frontier.size > 0:
         running_lb = frontier.get_lower_bound()
