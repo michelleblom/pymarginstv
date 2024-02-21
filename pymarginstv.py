@@ -137,6 +137,7 @@ if __name__ == "__main__":
     simple_ub = compute_simple_ub(candidates, quota, winners)
 
     upper_bound = math.ceil(min(weub, simple_ub))
+    original_upper_bound = upper_bound
 
     print("WEUB {}, simple UB {}".format(weub, simple_ub),file=log,flush=True)
 
@@ -229,6 +230,8 @@ if __name__ == "__main__":
         agap=args.agap, tlimit=args.limit, log=log)
 
     print("{}--{}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores),file=log)
+    print("{},{}--{}, {}, {}, {}, orig UB, {}".format(args.data, lb, ub, \
+        nexps, nsolves, ignores, original_upper_bound))
 
     #winner_set = {0, 1, 5, 4}
     #node_winners = [0, 1, 3, 5]

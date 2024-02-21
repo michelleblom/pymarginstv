@@ -150,17 +150,17 @@ def read_ballots_blt(path):
 
         split_idx = lines.index("0")
 
-        ballot_strs = lines[:split_idx]
-        cand_strs = lines[split_idx+1:-1]
+        ballot_strs = lines[1:split_idx]
+        cand_strs = lines[split_idx+1:split_idx+1+cands]
 
         for i in range(len(cand_strs)):
-            cand = Candidate(i, cand_strs[i])
-            cand.name = str(clist[i])
+            cand = Candidate(i, i+1)
+            cand.name = cand_strs[i]
             cand.group_id = -1
             cand.position = -1
 
             candidates.append(cand)
-            cid2num[clist[i]] = i
+            cid2num[cand.id] = i
 
 
         bcntr = 0
@@ -169,16 +169,16 @@ def read_ballots_blt(path):
             toks = [int(t) for t in bline.split()]
 
             n = toks[0]
-            prefs = toks[1:-1]
+            prefs = [cid2num[p] for p in toks[1:-1]]
 
             ballot = Ballot(bcntr, n, prefs)
             ballots.append(ballot)
 
-            fpcand = candidates[cprefs[0]]
+            fpcand = candidates[prefs[0]]
             fpcand.ballots.append(bcntr)
-            fpcand.fp_votes += votes
+            fpcand.fp_votes += n
 
-            total_votes += votes
+            total_votes += n
 
             for p in prefs:
                 candidates[p].mentions.append(bcntr)
