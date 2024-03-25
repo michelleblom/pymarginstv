@@ -230,8 +230,8 @@ if __name__ == "__main__":
         agap=args.agap, tlimit=args.limit, log=log)
 
     print("{}--{}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores),file=log)
-    print("{},{}--{}, {}, {}, {}, orig UB, {}".format(args.data, lb, ub, \
-        nexps, nsolves, ignores, original_upper_bound))
+    print("{},{}--{}, {}, {}, {}, MARGIN LB, {}, ORIGINAL UB, {}".format(args.data, lb, ub, \
+        nexps, nsolves, ignores, lb, original_upper_bound))
 
     #winner_set = {0, 1, 5, 4}
     #node_winners = [0, 1, 3, 5]
