@@ -18,6 +18,7 @@ import os
 import sys
 import argparse
 import math
+from time import perf_counter
 
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
     read_ballots_blt, simulate_stv, compute_weub, compute_simple_ub, \
@@ -29,6 +30,7 @@ from stvdistance import stvdistance
 
 
 if __name__ == "__main__":
+    t0_start = perf_counter()
     parser = argparse.ArgumentParser()
 
     # Input: stv data file
@@ -225,13 +227,19 @@ if __name__ == "__main__":
             
 
     # Start branch and bound.
+    tstart = perf_counter()
     lb, ub, nexps, nsolves, ignores = treestv(ballots, candidates, winners, \
         order_c, order_a, upper_bound, args.seats, args, quota, totvotes, \
         agap=args.agap, tlimit=args.limit, log=log)
+    tend = perf_counter()
 
     print("{}--{}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores),file=log)
-    print("{},{}--{}, {}, {}, {}, MARGIN LB, {}, ORIGINAL UB, {}".format(args.data, lb, ub, \
-        nexps, nsolves, ignores, lb, original_upper_bound))
+    # print("{},{}--{}, {}, {}, {}, MARGIN LB, {}, ORIGINAL UB, {}".format(args.data, lb, ub, \
+    #     nexps, nsolves, ignores, lb, original_upper_bound))
+
+    # datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, time(s)
+    print(f"{args.data}, {len(candidates)}, {args.seats}, {quota}, {original_upper_bound}, {lb}, {ub}, {nexps}, {nsolves}, "
+          f"{tend-tstart}, {tend-t0_start}")
 
     #winner_set = {0, 1, 5, 4}
     #node_winners = [0, 1, 3, 5]
