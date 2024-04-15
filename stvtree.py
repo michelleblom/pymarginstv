@@ -306,8 +306,9 @@ def compute_elim_quota_lb(cands, ballots, order_c, order_a, quota, order_q):
                 b_transfer_lb = 1
                 b_transfer_ub = 1
                 for p in b.prefs:
-                    if p not in gone:  # ballot is transferred (seating or elimination, including fp votes)
+                    if p not in gone:  # p still in the race, ballot not exhausted
                         prefs.append(p)
+                        break  # subsequent preferences not to be considered
                     if p in winners:  # ballot is transferred via seating
                         through_winner = True
                         b_transfer_lb *= transfer[p][0]
@@ -332,26 +333,68 @@ def compute_elim_quota_lb(cands, ballots, order_c, order_a, quota, order_q):
                 elim_lb = max(elim_lb, max(0, 0.5 * (min_ce - v)))
 
         else:  # candidate seated
-            if ce in order_q:  # candidate got a quota, else seated by default
+            if ce in order_q:  # candidate got a quota, else seated by default (last round)
                 lb_value = 0  # lb on value of ballots
                 ub_value = 0  # ub on value of ballots (quota <= lb_value <= ub_value <= len(ballots))
                 for b in ballots:
                     prefs = []
-                    through_winner = False
+                    transfer_path = []
                     b_transfer_ub = 1
                     b_transfer_lb = 1
                     for p in b.prefs:
-                        if p not in gone:  # ballot is transferred (seating or elimination, including fp votes)
+                        if p not in gone:  # p still in the race, ballot not exhausted
                             prefs.append(p)
-                        if p in winners:  # ballot is transferred via seating
-                            if not through_winner:
-                                through_winner = True
-                                b_transfer_lb *= 0  # could possibly skip ce if achieved quota at the same time
-                                b_transfer_ub *= transfer[p][1]
-                            # else: ballot could possibly skip all but first seated if achieved quota at the same time
-                            # lb *= 0 and ub *= 1
+                            break  # subsequent preferences not to be considered
+                        if p in winners:
+                            transfer_path.append(p)
+                        else:
+                            transfer_path.append(None)
 
                     if prefs and prefs[0] == ce:  # top preference is for ce
+                        elimination_path = [(p if order_a[i] == 1 else None) for i, p in enumerate(order_c)]
+                        tidx = 0
+                        eidx = 0
+                        final_block = []
+                        if elimination_path[-1] is not None:  # setup final block if it contains ce
+                            for ep in reversed(elimination_path):
+                                if ep is None:
+                                    break
+                                else:
+                                    final_block.append(ep)
+                        elim_block = False
+                        skipped = set()  # skipped due to being eliminated earlier
+                        while tidx < len(transfer_path):  # while ballot not fully transferred
+                            ep = elimination_path[eidx]
+                            tp = transfer_path[tidx]
+                            if tidx < len(transfer_path) and ep is None:  # ballot transfers through eliminated cand
+                                tidx += 1
+                            elif eidx < len(elimination_path) and tp is None:
+                                elim_block = False  # (potential) previous block exited
+                                eidx += 1
+                            elif tp in final_block:  # will enter final block: so ce may be skipped
+                                b_transfer_lb *= 0  # ce is skipped
+                                b_transfer_ub *= transfer[tp][1]  # skips everyone until ce
+                                break  # no more transfer calculations necessary
+                            elif tp == ep:  # ballot is transferred (ce not in block)
+                                if elim_block:  # already in a block
+                                    b_transfer_lb *= transfer[tp][0]  # lb: transfer through every cand in block
+                                else:
+                                    b_transfer_lb *= transfer[tp][0]
+                                    b_transfer_ub *= transfer[tp][1]  # ub: transfer via first only, skips rest of block
+                                elim_block = True  # we have entered a block (possibly size one)
+                                eidx += 1
+                                tidx += 1
+                            elif tp in skipped:  # skipping tp: already reached quota
+                                tidx += 1
+                            else:  # tp refers to candidate eliminated at a later point
+                                skipped.add(ep)
+                                eidx += 1
+
+                        # #
+                        # # else:
+                        # if min(len(transfer_path), len(elimination_path)) > 0:
+                        #     print(transfer_path, elimination_path, final_block)
+
                         lb_value += b.votes * b_transfer_lb
                         ub_value += b.votes * b_transfer_ub
 
