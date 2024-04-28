@@ -281,7 +281,7 @@ def get_order_q(order_c, order_a, LAST_ROUND, winners):
     return order_q
 
 
-def compute_elim_quota_lb(cands, ballots, order_c, order_a, quota, order_q):
+def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
     gone = []
     elim_lb = 0
     quota_lb = 0
@@ -289,16 +289,20 @@ def compute_elim_quota_lb(cands, ballots, order_c, order_a, quota, order_q):
     winners = []
     transfer = dict()
 
+    # print("compute!", [order_c[i] for i in range(len(order_c))], order_a, flush=True)
+
     for i in range(len(order_c)):
         ce = order_c[i]
 
         if order_a[i] == 0:  # candidate eliminated
             # Compute min vote 'ce' could have at this point, needs to be
             # less than max vote of other (non-super) candidates at this point
+            # max_ce = cands[ce].fp_votes
             min_ce = cands[ce].fp_votes
 
             # dict of remaining candidates (eliminated or seated after ce)
             max_others = {c.num: 0 for c in cands if c.num not in gone and c.num != ce}
+            # min_others = {c.num: 0 for c in cands if c.num not in gone and c.num != ce}
 
             for b in ballots:
                 prefs = []
@@ -316,14 +320,21 @@ def compute_elim_quota_lb(cands, ballots, order_c, order_a, quota, order_q):
                     continue
 
                 if prefs[0] != ce:  # transferred to other (including fp votes)
-                    _, ub_add, _ = calc_tallies(b, order_a, order_c, transfer, transfer_path, seated=False)
+                    lb_add, ub_add, _ = calc_tallies(b, order_a, order_c, transfer, transfer_path, seated=False)
+                    # min_others[prefs[0]] += lb_add
                     max_others[prefs[0]] += ub_add
                 elif b.prefs[0] != ce:  # transferred to ce (fp votes already allocated)
-                    lb_add, _, _ = calc_tallies(b, order_a, order_c, transfer, transfer_path, seated=False)
+                    lb_add, ub_add, _ = calc_tallies(b, order_a, order_c, transfer, transfer_path, seated=False)
                     min_ce += lb_add
+                    # max_ce += ub_add
+
+            # if min_ce != max_ce:
+            #     print(" ~ E ~ ", ce, f"{min_ce}--{max_ce}", min([i for i in max_others.values() if i >= min_ce], default=0), min_others, max_others, flush=True)
 
             for c, v in max_others.items():
                 elim_lb = max(elim_lb, max(0, 0.5 * (np.floor(min_ce) - np.ceil(v))))
+                # print(f" ~~ {c}->{ce} costs", max(0, 0.5 * (np.floor(min_ce) - np.ceil(v))), flush=True)
+            # print(" ~~~ elim_lb =", elim_lb, flush=True)
 
         else:  # candidate seated
             if ce in order_q:  # candidate got a quota, else seated by default (last round)
@@ -348,15 +359,21 @@ def compute_elim_quota_lb(cands, ballots, order_c, order_a, quota, order_q):
 
                 winners.append(ce)
 
+                # print(" ~ Q ~ ", ce, lb_value, ub_value, flush=True)
+
+                cmax = ub_value
                 lb_value = max(lb_value, quota)  # restrict lb_value to be at lest quota
                 ub_value = max(lb_value, ub_value)  # restrict ub_value to be at lest lb_value
                 transfer[ce] = ((lb_value - quota)/lb_value, (ub_value - quota)/ub_value)
-                cmax = ub_value
+                # print(" ---> Q ~ ", ce, lb_value, transfer[ce][0], ub_value, transfer[ce][1], flush=True)
                 quota_lb = max(quota_lb, quota - cmax)
+                # print(" ~~~ quota_lb =", quota_lb, flush=True)
 
         gone.append(ce)
 
-    return math.ceil(max(elim_lb, quota_lb))
+    lb = math.ceil(max(elim_lb, quota_lb))
+    # print("   -->>> LB cost: ", lb, flush=True)
+    return max(0, lb)
 
 
 def calc_tallies(b, order_a, order_c, transfer, transfer_path, seated):
@@ -394,6 +411,8 @@ def calc_tallies(b, order_a, order_c, transfer, transfer_path, seated):
             else:
                 b_transfer_lb *= transfer[tp][0]
                 b_transfer_ub *= transfer[tp][1]  # ub: transfer via first only, skips rest of block
+            # b_transfer_ub = 1  # Uncomment for equiv
+            # b_transfer_lb = 0  #   to old version
             elim_block = True  # we have entered a block (possibly size one)
             eidx += 1
             tidx += 1
@@ -405,6 +424,71 @@ def calc_tallies(b, order_a, order_c, transfer, transfer_path, seated):
             eidx += 1
 
     return b.votes * b_transfer_lb, b.votes * b_transfer_ub, multipliers
+
+
+def compute_elim_quota_lb_old(cands, ballots, order_c, order_a, quota, order_q):
+    gone = []
+    elim_lb = 0
+    quota_lb = 0
+
+    winners = []
+
+    for i in range(len(order_c)):
+        ce = order_c[i]
+
+        if order_a[i] == 0:
+            # Compute min vote 'ce' could have at this point, needs to be
+            # less than max vote of other (non super) candidates at this point
+            min_ce = cands[ce].fp_votes
+
+            max_others = {c.num: 0 for c in cands if not c.num in gone \
+                          and c.num != ce}
+
+            for b in ballots:
+                prefs = []
+                through_winner = False
+                for p in b.prefs:
+                    if not p in gone:
+                        prefs.append(p)
+
+                    if p in winners:
+                        through_winner = True
+
+                if prefs == []:
+                    continue
+
+                if prefs[0] != ce:
+                    max_others[prefs[0]] += b.votes
+
+
+                elif b.prefs[0] != ce and not through_winner:
+                    # We are giving 'ce' extra votes if all the candidates
+                    # ranked higher than 'ce' have already been eliminated
+                    # according to the given outcome.
+                    min_ce += b.votes
+
+            for c, v in max_others.items():
+                elim_lb = max(elim_lb, max(0, 0.5 * (min_ce - v)))
+
+        else:
+            winners.append(ce)
+
+            if ce in order_q:
+                cmax = 0
+                for b in ballots:
+                    prefs = []
+                    for p in b.prefs:
+                        if not p in gone:
+                            prefs.append(p)
+
+                    if prefs != [] and prefs[0] == ce:
+                        cmax += b.votes
+
+                quota_lb = max(quota_lb, quota - cmax)
+
+        gone.append(ce)
+
+    return math.ceil(max(elim_lb, quota_lb))
 
 
 def filterballot(b, order_c, order_a):
@@ -748,16 +832,23 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     else:
                         print("    DISTANCE {}/{}".format(dist, dist_ub), \
                               file=log, flush=True)
+                        print(f"    -- sovled? {solved}", file=log, flush=True)
 
                 if dist == None or dist >= running_ub:
+                    print("   ~~~~ PRUNED", file=log, flush=True)
                     continue
 
                 if frontier.size > 0:
+                    print("1", file=log, flush=True)
                     running_lb = min(dist, frontier.get_lower_bound())
                 else:
+                    print("2", file=log, flush=True)
                     running_lb = min(dist, running_ub)
 
+                print(" [RUNNING LB] =", running_lb, dist, running_ub, file=log, flush=True)
+
                 if isleaf:
+                    print("   ~ LEAF", file=log, flush=True)
                     min_lb = min(min_lb, lb)
 
                     if log != None and dist_ub < running_ub:
@@ -776,6 +867,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                                     node_winners, new_rem, dist, dist_ub)
 
                     idx = frontier.insert(newn, lse=args.lse, log=log)
+
+                    print("idx is", idx, file=log, flush=True)
 
                     if idx != None:
                         fn.children.append(newn.id)
@@ -839,8 +932,13 @@ def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
                                       node_order_c, node_order_a, winner_set, rem, quota, args.seats) if \
         args.dlb else 0
 
-    eqlb = compute_elim_quota_lb(candidates, ballots, node_order_c, \
-                                 node_order_a, quota, order_q)
+    if args.eqlb:
+        eqlb = compute_elim_quota_lb_new(candidates, ballots, node_order_c, \
+                                     node_order_a, quota, order_q)
+    else:
+        eqlb = compute_elim_quota_lb_old(candidates, ballots, node_order_c, \
+                                     node_order_a, quota, order_q)
+
 
     lb = max(disp_lowerbound, eqlb)
 
@@ -878,8 +976,13 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
                                       node_order_c, node_order_a, winner_set, rem, quota, args.seats) if \
         args.dlb and (not isleaf) else 0
 
-    eqlb = compute_elim_quota_lb(candidates, ballots, node_order_c, \
-                                 node_order_a, quota, order_q)
+    if args.eqlb:
+        eqlb = compute_elim_quota_lb_new(candidates, ballots, node_order_c, \
+                                     node_order_a, quota, order_q)
+    else:
+        eqlb = compute_elim_quota_lb_old(candidates, ballots, node_order_c, \
+                                     node_order_a, quota, order_q)
+
 
     lowerbound = max(eqlb, max(disp_lowerbound, parent_dist))
 
@@ -908,6 +1011,7 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
                                        lowerbound, isleaf=isleaf, log=None)
 
     else:
+        merge_map = dict()
         _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
                                        node_order_a, rem, node_winners, order_q, merge_map, \
                                        [], tot_ballots, args, quota, running_ub, LAST_ROUND, \
