@@ -18,6 +18,7 @@ import os
 import sys
 import argparse
 import math
+from time import perf_counter
 
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
     read_ballots_blt, simulate_stv, compute_weub, compute_simple_ub, \
@@ -29,6 +30,7 @@ from stvdistance import stvdistance
 
 
 if __name__ == "__main__":
+    t0_start = perf_counter()
     parser = argparse.ArgumentParser()
 
     # Input: stv data file
@@ -68,15 +70,23 @@ if __name__ == "__main__":
     # Input: whether to use initial candidate manipulations 
     parser.add_argument('-icm', action='store_true', default=False)
 
+    # Input: whether to use new eqlb bounding mechanism
+    parser.add_argument('-eqlb', action='store_true', default=False)
+
     # Input: whether to only use lower bounding heuristics during search
     parser.add_argument("-nominlps", action='store_true', default=False)
     
     parser.add_argument("-just_sim", action='store_true', default=False)
 
+    parser.add_argument("-displayname", dest='displayname', default=None)
+
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
 
     args = parser.parse_args()
+
+    if args.displayname is None:
+        args.displayname = args.data
 
     log = open(args.log, "w")
 
@@ -224,14 +234,22 @@ if __name__ == "__main__":
                     print("Reducing upper bound to {}".format(dist_ub),file=log)
             
 
+    # upper_bound = 321  # TODO
+
     # Start branch and bound.
+    tstart = perf_counter()
     lb, ub, nexps, nsolves, ignores = treestv(ballots, candidates, winners, \
         order_c, order_a, upper_bound, args.seats, args, quota, totvotes, \
         agap=args.agap, tlimit=args.limit, log=log)
+    tend = perf_counter()
 
     print("{}--{}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores),file=log)
-    print("{},{}--{}, {}, {}, {}, MARGIN LB, {}, ORIGINAL UB, {}".format(args.data, lb, ub, \
-        nexps, nsolves, ignores, lb, original_upper_bound))
+    # print("{},{}--{}, {}, {}, {}, MARGIN LB, {}, ORIGINAL UB, {}".format(args.data, lb, ub, \
+    #     nexps, nsolves, ignores, lb, original_upper_bound))
+
+    # datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, time(s)
+    print(f"{args.displayname}, {len(candidates)}, {args.seats}, {quota}, {original_upper_bound}, {lb}, {ub}, {nexps}, {nsolves}, "
+          f"{tend-tstart}, {tend-t0_start}, {args.lse}, {args.dlb}, {args.eqlb}")
 
     #winner_set = {0, 1, 5, 4}
     #node_winners = [0, 1, 3, 5]
