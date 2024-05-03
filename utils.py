@@ -618,8 +618,8 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                 cand = candidates[cnum]
 
                 if log != None:
-                    print("Candidate {} elected (votes {})".format(\
-                        cand.name, cand.sim_votes), file=log, flush=True)
+                    print("Candidate {}, {}, elected (votes {})".format(\
+                        cand.id, cand.name, cand.sim_votes), file=log, flush=True)
 
                 cand.seat = currseat
                 currseat += 1
@@ -639,7 +639,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
             for cand in candidates:
                 if cand.standing:
                     if log != None:
-                        print("Candidate {} has {} votes".format(cand.name,\
+                        print("Candidate {}, {}, has {} votes".format(cand.id, cand.name,\
                             cand.sim_votes), file=log, flush=True)
                     
                     if leastvotes == -1 or cand.sim_votes < leastvotes:
@@ -652,8 +652,8 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                 order_a.append(0)
 
                 if log != None:
-                    print("Candidate {} eliminated on {} votes".format(\
-                        toeliminate.name, toeliminate.sim_votes), file=log,\
+                    print("Candidate {}, {}, eliminated on {} votes".format(\
+                        toeliminate.id, toeliminate.name, toeliminate.sim_votes), file=log,\
                         flush=True)
 
                 eliminate_candidate(toeliminate, candidates, ballots, log)
@@ -663,7 +663,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                         continue
 
                     if log != None:
-                        print("Candidate {} has {} votes".format(cand.name,\
+                        print("Candidate {}, {}, has {} votes".format(cand.id, cand.name,\
                             cand.sim_votes), file=log, flush=True)
 
                     if cand.standing and cand.sim_votes >= quota:
@@ -673,7 +673,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                         order_q[cand.num] = r
 
                         if log != None:
-                            print(f"Candidate {cand.name} has a quota.", \
+                            print(f"Candidate {cand.id}, {cand.name}, has a quota.", \
                                 file=log, flush=True) 
 
             if r != ncand-1:
@@ -698,7 +698,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                 winners.append(elect.num)
 
                 if log != None:
-                    print("Candidate {} elected (votes {})".format(elect.name,\
+                    print("Candidate {}, {}, elected (votes {})".format(elect.id, elect.name,\
                         elect.sim_votes), file=log, flush=True)
 
                 elect.standing = 0
@@ -759,30 +759,27 @@ def insert_surplus(surpluses, cand):
 
     surpluses.append(cand)
 
+
 def distribute_surplus(elect, candidates, ballots, log):
     elect.standing = 0
 
     if elect.surplus < 0.001: return
 
-
-    # Compute total number of papers in candidates tally
-    totalpapers = sum([ballots[bid].votes for bid,_ in elect.bweights])
-
-    tvalue = elect.surplus/totalpapers
+    tvalue = elect.surplus/elect.sim_votes
 
     if log != None:
-        print("Transfer value is {}".format(tvalue), file=log, flush=True)
+        print("Transfer value is {}".format(tvalue), file=log)
 
     # Each ballot in elect's tally now has value of 'tvalue'
     totransfer = [[] for c in candidates]
 
-    for bid,_ in elect.bweights:
+    for bid,w in elect.bweights:
         blt = ballots[bid]
 
         nextc = next_candidate(blt.prefs, elect.num, candidates)
 
         if nextc != -1:
-            totransfer[nextc].append((bid, tvalue))
+            totransfer[nextc].append((bid, tvalue*w))
 
     for cand in candidates:
         tlist = totransfer[cand.num]
@@ -798,13 +795,13 @@ def distribute_surplus(elect, candidates, ballots, log):
 
             cand.bweights.append((bid,weight))
 
-        if total > 0 and log != None:
+        if log != None:
             print("{} votes distributed from {} to {}".format(\
-                total, elect.name, cand.name), file=log, flush=True)
+                total, elect.name, cand.name), file=log)
 
     elect.sim_votes -= elect.surplus
     elect.surplus = -1
-        
+
 
 def eliminate_candidate(toelim, candidates, ballots, log):
     toelim.standing = 0
@@ -993,7 +990,7 @@ def reduce_ballots(ncands, order_c, remainder, merge_map, ballots, rballots,\
 
         # Add to vote/paper tally.
         rbal.votes += b.votes
-        rbal.papers += b.papers  
+        rbal.papers += b.papers
 
 
 def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
