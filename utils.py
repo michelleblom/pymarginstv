@@ -185,7 +185,7 @@ def read_ballots_blt(path):
 
             bcntr += 1
 
-    return candidates,ballots,{},cid2num,total_votes
+    return candidates,ballots,{},cid2num,total_votes,seats
 
 
 def read_ballots_txt(path):

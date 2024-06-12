@@ -94,11 +94,12 @@ if __name__ == "__main__":
     candidates, ballots, cid2num = None, None, None
 
     # Check for given input data type
+    # print(args.data.endswith(".blt"))
     if args.data.endswith(".stv"):
         candidates, ballots, _, cid2num, _ = read_ballots_stv(args.data)
 
     elif args.data.endswith(".blt"):
-        candidates, ballots, _, cid2num, _ = read_ballots_blt(args.data)
+        candidates, ballots, _, cid2num, _, _ = read_ballots_blt(args.data)
 
     elif args.data.endswith(".json"):
         candidates, ballots, _, cid2num, _ = read_ballots_json(args.data)
@@ -141,7 +142,7 @@ if __name__ == "__main__":
 
         exit(0)
 
-    # Heuristics for computing initial upper bounds on the margin. 
+    # Heuristics for computing initial upper bounds on the margin.
     # WEUB stands for "winner elimination upper bound".
     weub = compute_weub(candidates, winners, order_c, order_a, tallies)
     simple_ub = compute_simple_ub(candidates, quota, winners)
@@ -154,7 +155,7 @@ if __name__ == "__main__":
     if args.icm:
         # THIS PART IS A BIT BUGGY
 
-        #  Try to reduce upper bound on lower bound by evaluating some 
+        #  Try to reduce upper bound on lower bound by evaluating some
         # complete alternate outcomes that we think will require the least
         # amount of manipulation.
         ncand = len(candidates)
@@ -177,7 +178,7 @@ if __name__ == "__main__":
                 le = order_c[r]
                 le_idx = r
 
-        # Swap position of last winner and last eliminated candidate before 
+        # Swap position of last winner and last eliminated candidate before
         # them
         cand_manip_c = order_c[:]
         cand_manip_c[le_idx] = lw
@@ -204,11 +205,11 @@ if __name__ == "__main__":
             print("Reducing upper bound to {}".format(dist_ub), file=log)
 
         if lw_idx < ncand-1:
-            # There are candidates still standing after last winner is 
+            # There are candidates still standing after last winner is
             # seated.
             for i in range(lw_idx+1, ncand):
                 # Swap position of lw and candidate at pos 'i'
-        
+
                 cand_manip_c = order_c[:]
                 cand_manip_c[lw_idx] = order_c[i]
                 cand_manip_c[i] = lw
@@ -232,7 +233,7 @@ if __name__ == "__main__":
                 if dist_ub != None and dist_ub < upper_bound:
                     upper_bound = dist_ub
                     print("Reducing upper bound to {}".format(dist_ub),file=log)
-            
+
 
     # upper_bound = 321  # TODO
 
@@ -255,7 +256,7 @@ if __name__ == "__main__":
     #node_winners = [0, 1, 3, 5]
     #node_order_c = [0, 1, 2, 3, 4, 5]
     #node_order_a = [1, 1, 0, 1, 0, 1]
-    
+
     #_, _, _, _, _, _, dist, dist_ub, _, _, _ = eval_child(0, node_order_c, \
     #    node_order_a, args, len(candidates), node_winners, winner_set, \
     #    candidates, ballots, totvotes, [], quota, 100000000, [0, 1, 5, 2, 3, 4],\
