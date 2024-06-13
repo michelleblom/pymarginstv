@@ -347,17 +347,17 @@ datafiles = [
 # datafiles = [("Scotland/GCC_07_EastCentre_ballots.txt", 4)]
 # datafiles = [("Scotland/2022/preferenceprofile_v0004_ward-4-oban-south-and-the-isles_06052022_143143.blt", 4)]
 
-reps = 3
+reps = 2
 counter = 0  # 1-135
 versions = [3]
 
 
 if __name__ == "__main__":
-    print("datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s)")
+    print("datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb")
     for (datafile, seats) in datafiles:
         for version in versions:
             counter += 1
-            # if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
+            if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
             path = "../stv-rla/data/" + datafile
             displayname = displaynames[datafile]
             sys.argv = ['', '-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}.log", '-s', str(seats), '-m', '-pc', '8', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname]
