@@ -3,6 +3,10 @@ import os
 import glob
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, read_ballots_blt
 
+from cProfile import Profile
+from pstats import SortKey, Stats
+
+
 displaynames = {
     # SCOTLAND GLASGOW 2007
     "Scotland/GCC_07_Anderson_ballots.txt": "Anderston/City 07",
@@ -164,9 +168,9 @@ displaynames = {
     "FedAus19/FederalSenate2019TAS.json": "TAS 19",
     "FedAus19/FederalSenate2019VIC.json": "VIC 19",
     "FedAus19/FederalSenate2019WA.json": "WA 19",
-    "FedAus22/FederalSenate2022ACT.json": "ACT 22",
+    "FedAus22/2022ACT.json": "ACT 22",
     "FedAus22/FederalSenate2022NSW.json": "NSW 22",
-    "FedAus22/FederalSenate2022NT.json": "NT 22",
+    "FedAus22/2022NT.json": "NT 22",
     "FedAus22/FederalSenate2022QLD.json": "QLD 22",
     "FedAus22/FederalSenate2022SA.json": "SA 22",
     "FedAus22/FederalSenate2022TAS.json": "TAS 22",
@@ -177,6 +181,8 @@ displaynames = {
     "Minneapolis/MPLS-2013-BET_2Seat_ParsedMB.txt": "Minneapolis BET 13",
     "Minneapolis/MPLS-2017-BET_2Seat_ParsedMB.txt": "Minneapolis BET 17",
     "Minneapolis/MPLS-2021-BET_2Seat_ParsedMB.txt": "Minneapolis BET 21",
+    "example.txt": "Example",
+    "example1.txt": "Example1",
 }
 
 datafiles = [
@@ -197,8 +203,8 @@ datafiles = [
     ("FedAus19/FederalSenate2019TAS.json", 6),
     ("FedAus19/FederalSenate2019VIC.json", 6),
     ("FedAus19/FederalSenate2019WA.json", 6),
-    ("FedAus22/FederalSenate2022ACT.json", 2),
-    ("FedAus22/FederalSenate2022NT.json", 2),
+    ("FedAus22/2022ACT.json", 2),
+    ("FedAus22/2022NT.json", 2),
     ("FedAus22/FederalSenate2022NSW.json", 6),
     ("FedAus22/FederalSenate2022QLD.json", 6),
     ("FedAus22/FederalSenate2022SA.json", 6),
@@ -344,23 +350,40 @@ datafiles = [
     ("Minneapolis/MPLS-2021-BET_2Seat_ParsedMB.txt", 2),
 ]
 
+# datafiles = [("FedAus16/FederalSenate2016NT.json", 2)]
+# datafiles = [("example1.txt", 3)]
+
+# datafiles = [("FedAus16/FederalSenate2016ACT.json", 2),
+#              ("FedAus16/FederalSenate2016NT.json", 2)]
+#
+# datafiles = [("FedAus16/FederalSenate2016ACT.json", 2)]
+
 # datafiles = [("Scotland/GCC_07_EastCentre_ballots.txt", 4)]
 # datafiles = [("Scotland/2022/preferenceprofile_v0004_ward-4-oban-south-and-the-isles_06052022_143143.blt", 4)]
 
-reps = 2
-counter = 0  # 1-135
-versions = [3]
+# reps = 1
+# counter = 0  # 1-135
+# versions = [3]
 
 
-if __name__ == "__main__":
-    print("datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb")
+def func():
+    reps = 1
+    counter = 0  # 1-71
+    versions = [3]
+    # global seats
+    print(
+        "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb")
     for (datafile, seats) in datafiles:
         for version in versions:
             counter += 1
             if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
-            path = "../stv-rla/data/" + datafile
+            if "example" in datafile:
+                path = "./data/" + datafile
+            else:
+                path = "../stv-rla/data/" + datafile
             displayname = displaynames[datafile]
-            sys.argv = ['', '-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}.log", '-s', str(seats), '-m', '-pc', '8', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname]
+            sys.argv = ['', '-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}.log", '-s', str(seats),
+                        '-m', '-pc', '8', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname]
             if version >= 1:
                 sys.argv += ['-lse']
             if version >= 2:
@@ -369,8 +392,19 @@ if __name__ == "__main__":
                 sys.argv += ['-dlb']
             for _ in range(reps):
                 # print(" ".join(sys.argv))
+                # with Profile() as profile:
                 exec(open("pymarginstv.py").read())
+                    # (
+                    #     Stats(profile)
+                    #     .strip_dirs()
+                    #     .sort_stats(SortKey.TIME)
+                    #     .print_stats()
+                    # )
 
+
+
+if __name__ == "__main__":
+    func()
 
 # allFiles = glob.glob("/Users/aekk0001/Documents/stv-rla/data/Scotland/2022/*")
 #

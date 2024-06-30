@@ -33,7 +33,7 @@ def step(ballots, candidates, quota, candidate, action, test=False):
             x.papers = b.papers
             ballotsnew += [x]
         if min(tallies.values()) < tallies[candidate]:
-            price += tallies[candidate] - min(tallies.values())
+            price += 0.5 * (tallies[candidate] - min(tallies.values()))
         elif tallies[candidate] >= quota:
             price += tallies[candidate] - quota
     else:  # seat
@@ -56,7 +56,7 @@ def step(ballots, candidates, quota, candidate, action, test=False):
             # else:
             #     tval = min(1, (tallies[candidate]-quota)/tallies_transferable[candidate])
             # tval = min(1, (tallies[candidate]-quota)/tallies_cards[candidate])
-            print(tallies[candidate], quota, tallies[candidate]-quota, tallies_cards[candidate], tval)
+            # print(tallies[candidate], quota, tallies[candidate]-quota, tallies_cards[candidate], tval)
         for b in ballots:
             prefs = deepcopy(b.prefs)
             if candidate in prefs:
@@ -76,43 +76,44 @@ def step(ballots, candidates, quota, candidate, action, test=False):
     return ballotsnew, price
 
 
-candidates, ballots, a, b, c = utils.read_ballots_blt("../stv-rla/data/Scotland/2022/preferenceprofile_v0004_ward-4-oban-south-and-the-isles_06052022_143143.blt")
+# candidates, ballots, a, b, c = utils.read_ballots_json("../stv-rla/data/FedAus16/FederalSenate2016NT.json")
+candidates, ballots, a, b, c = utils.read_ballots_txt("./data/example1.txt")
 order_c = []
 order_a = []
 order_q = {}
 winners = []
-quota, tallies, totvotes = utils.simulate_stv(ballots, candidates, 4, order_c, order_a, order_q, winners, log=None)
+quota, tallies, totvotes = utils.simulate_stv(ballots, candidates, 3, order_c, order_a, order_q, winners, log=None)
 candidates = list(range(len(candidates)))
 #quota = 727
 totprice = 0
-ballotsnew, price = step(ballots, candidates, quota, 7, 1, test=True)
+ballotsnew, price = step(ballots, candidates, quota, 0, 1, test=True)
 totprice += price
-print("7s", price)
-ballotsnew, price = step(ballotsnew, candidates, quota, 10, 0)
+print("0s", price)
+ballotsnew, price = step(ballotsnew, candidates, quota, 1, 1)
 totprice += price
-print("7s 10e", price)
-ballotsnew, price = step(ballotsnew, candidates, quota, 0, 0)
+print("0s 1s", price)
+ballotsnew, price = step(ballotsnew, candidates, quota, 5, 0)
 totprice += price
-print("7s 10e 0e", price)
-ballotsnew, price = step(ballotsnew, candidates, quota, 8, 0)
-totprice += price
-print("7s 10e 0e 8e", price)
+print("0s 1s 5e", price)
 ballotsnew, price = step(ballotsnew, candidates, quota, 2, 0)
-totprice += price
-print("7s 10e 0e 8e 2e", price)
-ballotsnew, price = step(ballotsnew, candidates, quota, 1, 0)
-totprice += price
-print("7s 10e 0e 8e 2e 1e", price)
-ballotsnew, price = step(ballotsnew, candidates, quota, 6, 0)
-totprice += price
-print("7s 10e 0e 8e 2e 1e 6e", price)
-ballotsnew, price = step(ballotsnew, candidates, quota, 4, 1)
-totprice += price
-print("7s 10e 0e 8e 2e 1e 6e 4s", price)
-# ballotsnew, price = step(ballotsnew, candidates, quota, 5, 0)
 # totprice += price
-# print("7s 10e 0e 8e 2e 1e 6e 4s 9e", price)
-print(tally(ballotsnew, candidates))
+# print("7s 10e 0e 8e", price)
+# ballotsnew, price = step(ballotsnew, candidates, quota, 2, 0)
+# totprice += price
+# print("7s 10e 0e 8e 2e", price)
+# ballotsnew, price = step(ballotsnew, candidates, quota, 1, 0)
+# totprice += price
+# print("7s 10e 0e 8e 2e 1e", price)
+# ballotsnew, price = step(ballotsnew, candidates, quota, 6, 0)
+# totprice += price
+# print("7s 10e 0e 8e 2e 1e 6e", price)
+# ballotsnew, price = step(ballotsnew, candidates, quota, 4, 1)
+# totprice += price
+# print("7s 10e 0e 8e 2e 1e 6e 4s", price)
+# # ballotsnew, price = step(ballotsnew, candidates, quota, 5, 0)
+# # totprice += price
+# # print("7s 10e 0e 8e 2e 1e 6e 4s 9e", price)
+# print(tally(ballotsnew, candidates))
 
 # diff = 0.3106941093456044
 #
