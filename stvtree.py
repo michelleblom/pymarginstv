@@ -595,7 +595,6 @@ def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_
     if sleft == nleft or og_losers == [] or og_winners == []:
         return 0
 
-
     winners = {c for i, c in enumerate(node_order_c) if node_order_a[i] == 1}
 
     min_r = {c.num: 0 for c in candidates if c.num in rem}
@@ -1177,7 +1176,8 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
                                        lowerbound, isleaf=isleaf, log=None)
 
     else:
-        merge_map = dict()
+        merge_map = {c.num: c.num for c in candidates}
+        # merge_map = dict()
         _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
                                        node_order_a, rem, node_winners, order_q, merge_map, \
                                        [], tot_ballots, args, quota, running_ub, LAST_ROUND, \
