@@ -440,66 +440,66 @@ displaynames = {
 }
 
 datafiles = [
-    # AUSTRALIA 2-seat, 2016, 2019, 2022
-    ("FedAus16/FederalSenate2016ACT.json", 2),
-    ("FedAus16/FederalSenate2016NT.json", 2),
-    # ("FedAus16/FederalSenate2016NSW.json", 12),
-    # ("FedAus16/FederalSenate2016QLD.json", 12),
-    # ("FedAus16/FederalSenate2016SA.json", 12),
-    # ("FedAus16/FederalSenate2016TAS.json", 12),
-    # ("FedAus16/FederalSenate2016VIC.json", 12),
-    # ("FedAus16/FederalSenate2016WA.json", 12),
-    ("FedAus19/FederalSenate2019ACT.json", 2),
-    ("FedAus19/FederalSenate2019NT.json", 2),
-    # ("FedAus19/FederalSenate2019NSW.json", 6),
-    # ("FedAus19/FederalSenate2019QLD.json", 6),
-    # ("FedAus19/FederalSenate2019SA.json", 6),
-    # ("FedAus19/FederalSenate2019TAS.json", 6),
-    # ("FedAus19/FederalSenate2019VIC.json", 6),
-    # ("FedAus19/FederalSenate2019WA.json", 6),
-    ("FedAus22/2022ACT.json", 2),
-    ("FedAus22/2022NT.json", 2),
-    # ("FedAus22/FederalSenate2022NSW.json", 6),
-    # ("FedAus22/FederalSenate2022QLD.json", 6),
-    # ("FedAus22/FederalSenate2022SA.json", 6),
-    # ("FedAus22/FederalSenate2022TAS.json", 6),
-    # ("FedAus22/FederalSenate2022VIC.json", 6),
-    # ("FedAus22/FederalSenate2022WA.json", 6),
-    # GLASGOW, SCOTLAND 2007
-    ("Scotland/GCC_07_Anderson_ballots.txt", 4), ("Scotland/GCC_07_Baillieston_ballots.txt", 4),
-    ("Scotland/GCC_07_Calton_ballots.txt", 3), ("Scotland/GCC_07_Canal_ballots.txt", 4),
-    ("Scotland/GCC_07_Craigton_ballots.txt", 4), ("Scotland/GCC_07_Drumchapel_ballots.txt", 4),
-    ("Scotland/GCC_07_EastCentre_ballots.txt", 4), ("Scotland/GCC_07_Garscadden_ballots.txt", 4),
-    ("Scotland/GCC_07_Govan_ballots.txt", 4), ("Scotland/GCC_07_GreaterPollock_ballots.txt", 4),
-    ("Scotland/GCC_07_Hillhead_ballots.txt", 4), ("Scotland/GCC_07_Langside_ballots.txt", 3),
-    ("Scotland/GCC_07_Linn_ballots.txt", 4), ("Scotland/GCC_07_Maryhill_ballots.txt", 4),
-    ("Scotland/GCC_07_Newlands_ballots.txt", 3), ("Scotland/GCC_07_NorthEast_ballots.txt", 4),
-    ("Scotland/GCC_07_Partick_ballots.txt", 4), ("Scotland/GCC_07_Pollockshields_ballots.txt", 3),
-    ("Scotland/GCC_07_Shettleston_ballots.txt", 4), ("Scotland/GCC_07_SouthsideCentral_ballots.txt", 4),
-    ("Scotland/GCC_07_Springburn_ballots.txt", 3),
-    # IRELAND 2002
-    ("Ireland/DublinNorth2002_ballots.txt", 4), ("Ireland/DublinWest2002_ballots.txt", 3),
-    ("Ireland/Meath2002_ballots.txt", 5),
-    # MIXED, SCOTLAND 2022, CANDIDATES > 10?
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_11___City_Centre_06052022_155600.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_12___Leith_Walk_06052022_160625.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-3-Greater-Pollok_06052022_163750.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-18-East-Centre_06052022_165259.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-5-Govan_06052022_165258.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-19-mearns_06052022_172124.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0004_ward-4-oban-south-and-the-isles_06052022_143143.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_5___Inverleith_06052022_155559.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_16___Liberton_Gilmerton_06052022_160625.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-6-Pollokshields_06052022_170301.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-4-Dunfermline-South_06052022_151924.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-8-Southside-Central_06052022_165258.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-2-Newlands-Auldburn_06052022_165250.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-14-Drumchapel-Anniesland_06052022_170258.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-3-dunblane-and-bridge-of-allan_06052022_124253.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-6---Arbroath-West-Letham-and-Friockheim_06052022_150511.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-1-West-Fife-and-Coastal-Villages_06052022_145537.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-10-Anderston-City-Yorkhill_06052022_170256.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-16-Canal_06052022_163755.blt", 4),
+    # # AUSTRALIA 2-seat, 2016, 2019, 2022
+    # ("FedAus16/FederalSenate2016ACT.json", 2),
+    # ("FedAus16/FederalSenate2016NT.json", 2),
+    # # ("FedAus16/FederalSenate2016NSW.json", 12),
+    # # ("FedAus16/FederalSenate2016QLD.json", 12),
+    # # ("FedAus16/FederalSenate2016SA.json", 12),
+    # # ("FedAus16/FederalSenate2016TAS.json", 12),
+    # # ("FedAus16/FederalSenate2016VIC.json", 12),
+    # # ("FedAus16/FederalSenate2016WA.json", 12),
+    # ("FedAus19/FederalSenate2019ACT.json", 2),
+    # ("FedAus19/FederalSenate2019NT.json", 2),
+    # # ("FedAus19/FederalSenate2019NSW.json", 6),
+    # # ("FedAus19/FederalSenate2019QLD.json", 6),
+    # # ("FedAus19/FederalSenate2019SA.json", 6),
+    # # ("FedAus19/FederalSenate2019TAS.json", 6),
+    # # ("FedAus19/FederalSenate2019VIC.json", 6),
+    # # ("FedAus19/FederalSenate2019WA.json", 6),
+    # ("FedAus22/2022ACT.json", 2),
+    # ("FedAus22/2022NT.json", 2),
+    # # ("FedAus22/FederalSenate2022NSW.json", 6),
+    # # ("FedAus22/FederalSenate2022QLD.json", 6),
+    # # ("FedAus22/FederalSenate2022SA.json", 6),
+    # # ("FedAus22/FederalSenate2022TAS.json", 6),
+    # # ("FedAus22/FederalSenate2022VIC.json", 6),
+    # # ("FedAus22/FederalSenate2022WA.json", 6),
+    # # GLASGOW, SCOTLAND 2007
+    # ("Scotland/GCC_07_Anderson_ballots.txt", 4), ("Scotland/GCC_07_Baillieston_ballots.txt", 4),
+    # ("Scotland/GCC_07_Calton_ballots.txt", 3), ("Scotland/GCC_07_Canal_ballots.txt", 4),
+    # ("Scotland/GCC_07_Craigton_ballots.txt", 4), ("Scotland/GCC_07_Drumchapel_ballots.txt", 4),
+    # ("Scotland/GCC_07_EastCentre_ballots.txt", 4), ("Scotland/GCC_07_Garscadden_ballots.txt", 4),
+    # ("Scotland/GCC_07_Govan_ballots.txt", 4), ("Scotland/GCC_07_GreaterPollock_ballots.txt", 4),
+    # ("Scotland/GCC_07_Hillhead_ballots.txt", 4), ("Scotland/GCC_07_Langside_ballots.txt", 3),
+    # ("Scotland/GCC_07_Linn_ballots.txt", 4), ("Scotland/GCC_07_Maryhill_ballots.txt", 4),
+    # ("Scotland/GCC_07_Newlands_ballots.txt", 3), ("Scotland/GCC_07_NorthEast_ballots.txt", 4),
+    # ("Scotland/GCC_07_Partick_ballots.txt", 4), ("Scotland/GCC_07_Pollockshields_ballots.txt", 3),
+    # ("Scotland/GCC_07_Shettleston_ballots.txt", 4), ("Scotland/GCC_07_SouthsideCentral_ballots.txt", 4),
+    # ("Scotland/GCC_07_Springburn_ballots.txt", 3),
+    # # IRELAND 2002
+    # ("Ireland/DublinNorth2002_ballots.txt", 4), ("Ireland/DublinWest2002_ballots.txt", 3),
+    # ("Ireland/Meath2002_ballots.txt", 5),
+    # # MIXED, SCOTLAND 2022, CANDIDATES > 10?
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward_11___City_Centre_06052022_155600.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward_12___Leith_Walk_06052022_160625.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-3-Greater-Pollok_06052022_163750.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-18-East-Centre_06052022_165259.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-5-Govan_06052022_165258.blt", 4),
+    # ("Scotland/2022/preferenceprofile_v0001_ward-19-mearns_06052022_172124.blt", 4),
+    # ("Scotland/2022/preferenceprofile_v0004_ward-4-oban-south-and-the-isles_06052022_143143.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward_5___Inverleith_06052022_155559.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward_16___Liberton_Gilmerton_06052022_160625.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-6-Pollokshields_06052022_170301.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-4-Dunfermline-South_06052022_151924.blt", 3),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-8-Southside-Central_06052022_165258.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-2-Newlands-Auldburn_06052022_165250.blt", 3),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-14-Drumchapel-Anniesland_06052022_170258.blt", 4),
+    # ("Scotland/2022/preferenceprofile_v0001_ward-3-dunblane-and-bridge-of-allan_06052022_124253.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-6---Arbroath-West-Letham-and-Friockheim_06052022_150511.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-1-West-Fife-and-Coastal-Villages_06052022_145537.blt", 3),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-10-Anderston-City-Yorkhill_06052022_170256.blt", 4),
+    # ("Scotland/2022/PreferenceProfile_V0001_Ward-16-Canal_06052022_163755.blt", 4),
     # More Scotland 2022, CANDIDATES = 8 to 10
     ("Scotland/2022/PreferenceProfile_V0001_Ward-15-Glenrothes-Central-and-Thornton_06052022_145551.blt", 3),
     ("Scotland/2022/preferenceprofile_v0001_ward-6-stirling-east_06052022_124253.blt", 3),
@@ -737,10 +737,10 @@ datafiles = [
     ("Scotland/2022/PreferenceProfile_V0001_Ward-8---Lochar_06052022_171202.blt", 4),
     ("Scotland/2022/PreferenceProfile_V0001_Ward-3---Dee-and-Glenkens_06052022_171147.blt", 3),
     # Minneapolis
-    ("Minneapolis/MPLS-2009-BET_2Seat_ParsedMB.txt", 2),
-    ("Minneapolis/MPLS-2013-BET_2Seat_ParsedMB.txt", 2),
-    ("Minneapolis/MPLS-2017-BET_2Seat_ParsedMB.txt", 2),
-    ("Minneapolis/MPLS-2021-BET_2Seat_ParsedMB.txt", 2),
+    # ("Minneapolis/MPLS-2009-BET_2Seat_ParsedMB.txt", 2),
+    # ("Minneapolis/MPLS-2013-BET_2Seat_ParsedMB.txt", 2),
+    # ("Minneapolis/MPLS-2017-BET_2Seat_ParsedMB.txt", 2),
+    # ("Minneapolis/MPLS-2021-BET_2Seat_ParsedMB.txt", 2),
 ]
 
 # datafiles = [("FedAus16/FederalSenate2016NT.json", 2)]
@@ -761,14 +761,15 @@ datafiles = [
 
 def func():
     reps = 2
-    counter = 0  # 1-287
-    versions = [0]
+    counter = 0  # 1-234
+    versions = [3]
     # global seats
     print(
         "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb")
     for (datafile, seats) in datafiles:
         for version in versions:
             counter += 1
+            # print(counter); continue
             if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
             if "example" in datafile:
                 path = "./data/" + datafile
