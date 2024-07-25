@@ -339,7 +339,7 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
             #     print(" ~ E ~ ", ce, f"{min_ce}--{max_ce}", min([i for i in max_others.values() if i >= min_ce], default=0), min_others, max_others, flush=True)
 
             for c, v in max_others.items():
-                elim_lb = max(elim_lb, max(0, 0.5 * (np.floor(min_ce) - np.ceil(v))))
+                elim_lb = max(elim_lb, max(0, 0.5 * (min_ce - v)))
                 # print(f" ~~ {c}->{ce} costs", max(0, 0.5 * (np.floor(min_ce) - np.ceil(v))), flush=True)
             # print(" ~~~ elim_lb =", elim_lb, flush=True)
             # print(f"  ELB: {ce=}, {min_ce=}, {elim_lb=} {max_others=}", flush=True)
@@ -370,7 +370,7 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
                 displacement_cost = 0
                 if not gone:  # no eliminations yet
                     fp_others_max = max([cands[c.num].fp_votes for c in cands if c.num not in gone and c.num != ce])
-                    displacement_cost = max(0, 0.5 * (fp_others_max - np.floor(cmax)))  # if someone has reached quota, we need to surpass their votes
+                    displacement_cost = max(0, 0.5 * (fp_others_max - cmax))  # if someone has reached quota, we need to surpass their votes
 
                 # print(f"  QLB: {ce=}, {quota=}, {cmax=}, {fp_others_max=}, {0.5 * (fp_others_max - np.floor(cmax))}, {lb_value=}, {ub_value=}, {transfer[ce]=}, {displacement_cost=}", flush=True)
 
@@ -568,10 +568,12 @@ def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_
     new_winner = False
     for i in range(len(node_order_c)):
         if node_order_a[i] == 1:
-            w = node_order_c[i]
-            if not (w in winner_set):
+            if node_order_c[i] not in winner_set:
                 new_winner = True
                 break
+        elif node_order_c[i] in winner_set:
+            new_winner = True
+            break
 
     # print(f"\t {new_winner=}", flush=True)
     # Compile set of original losers, and winners, that remain standing after
