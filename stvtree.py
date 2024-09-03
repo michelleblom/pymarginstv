@@ -684,16 +684,16 @@ def compute_disp_lb_old(candidates, ballots, node_order_c, node_order_a, \
 
     """
     # Determine if we need an original loser to get seated sometime
-    # in the future (past the current outcome prefix
+    # in the future (past the current outcome prefix)
     new_winner = False
-    curr_winners = []
     for i in range(len(node_order_c)):
         if node_order_a[i] == 1:
-            w = node_order_c[i]
-            curr_winners.append(w)
-            if not (w in winner_set):
+            if node_order_c[i] not in winner_set:
                 new_winner = True
                 break
+        elif node_order_c[i] in winner_set:
+            new_winner = True
+            break
 
     # Compile set of original losers, and winners, that remain standing after
     # the outcome prefix node_order_c/node_order_a. The sets will remain
@@ -841,6 +841,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
     frontier = Frontier()
 
     running_ub = upperbound
+    witness_lb = np.inf
     running_lb = 0
 
     merge_map = {c.num: c.num for c in candidates}
@@ -945,8 +946,9 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         if fnodes == []:
             break
 
-        arg_list = []
-        min_lb = running_ub
+        if len(fnodes) > 1:
+            print("x", flush=True)
+
         for fn in fnodes:
             if log != None:
                 print("EXPANDING NODE {}".format(fn), file=log, flush=True)
@@ -955,6 +957,9 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                                       running_ub, ncands, args, quota, tot_ballots, merge_map, \
                                       order_c, order_a)
 
+            # print(fn, "CHILDREN", children, flush=True)
+
+            min_dist = None
             for isleaf, node_order_c, node_order_a, lb, dlb, eqlb, dist, \
                     dist_ub, new_rem, node_winners, solved in children:
 
@@ -965,8 +970,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     print("EVALUATED {}/{} LB {} (D {} EQ {})".format( \
                         node_order_c, node_order_a, lb, dlb, eqlb), \
                         file=log, flush=True)
-                    if dlb != 0:
-                        print("D is non-zero.", file=log, flush=True)
+                    # if dlb != 0:
+                    #     print("D is non-zero.", file=log, flush=True)
 
                     if dist == None:
                         print("    DISTANCE None/Infeasible", file=log, \
@@ -976,29 +981,23 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                               file=log, flush=True)
 
                 if dist == None or dist >= running_ub:
-                    print("        ~> PRUNED!", file=log, flush=True)
+                    if log != None:
+                        print("        PRUNED!", file=log, flush=True)
                     continue
 
-                old_lb = running_lb
-                if frontier.size > 0:
-                    # print("1", file=log, flush=True)
-                    running_lb = min(dist, frontier.get_lower_bound())
-                else:
-                    # print("Frontier empty", file=log, flush=True)
-                    running_lb = min(dist, running_ub)
-
-                if old_lb < running_lb:
-                    print(f"Reduced lower bound from {old_lb} to {running_lb}, using {dist=}, {running_ub=} ({frontier.size == 0}), {frontier.get_lower_bound()=} ({frontier.size > 0})", file=log, flush=True)
+                min_dist = dist if min_dist is None else min(min_dist, dist)
 
                 if isleaf:
-                    print("        ~> LEAF", file=log, flush=True)
-                    min_lb = min(min_lb, lb)
+                    if log != None:
+                        print("        LEAF", file=log, flush=True)
 
                     if log != None and dist_ub < running_ub:
-                        print("Reducing upper bound to {}".format(dist_ub), \
+                        print("Reducing upper bound from {} to {}".format(running_ub, dist_ub), \
                               file=log, flush=True)
 
+                    # print("LEAF", flush=True)
                     running_ub = min(running_ub, dist_ub)
+                    witness_lb = min(witness_lb, dist)
 
                     if abs(running_ub - running_lb) <= agap:
                         converged = True
@@ -1011,18 +1010,29 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
                     idx = frontier.insert(newn, lse=args.lse, log=log)
 
-                    print("idx is", idx, file=log, flush=True)
+                    if log is not None and idx is None:
+                        print("        SUBSUMED", file=log, flush=True)
 
-                    if idx != None:
+                    if idx is not None:
                         fn.children.append(newn.id)
-
-                    min_lb = min(min_lb, newn.dist)
 
             if converged:
                 break
 
-            elif frontier.size == 0:
-                running_lb = max(running_lb, min_lb)
+            old_lb = running_lb
+            if frontier.size == 0:
+                min_dist = min_dist if min_dist is not None else witness_lb
+                running_lb = max(running_lb, min_dist)
+            else:
+                min_dist = min_dist if min_dist is not None else frontier.get_lower_bound()
+                running_lb = max(running_lb, min(min_dist, frontier.get_lower_bound()))
+
+            if old_lb < running_lb and log != None:
+                print(f"Increasing lower bound from {old_lb} to {running_lb}", file=log, flush=True)
+
+            if abs(running_ub - running_lb) <= agap:
+                converged = True
+                break
 
             # if args.ap:
             # Update distances for expanded node (and ancestors) based on
