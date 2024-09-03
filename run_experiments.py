@@ -740,19 +740,18 @@ datafiles = [
     ("Scotland/2022/PreferenceProfile_V0001_Ward-8---Lochar_06052022_171202.blt", 4),
     ("Scotland/2022/PreferenceProfile_V0001_Ward-3---Dee-and-Glenkens_06052022_171147.blt", 3),
     # Minneapolis
-    # ("Minneapolis/MPLS-2009-BET_2Seat_ParsedMB.txt", 2),
-    # ("Minneapolis/MPLS-2013-BET_2Seat_ParsedMB.txt", 2),
-    # ("Minneapolis/MPLS-2017-BET_2Seat_ParsedMB.txt", 2),
-    # ("Minneapolis/MPLS-2021-BET_2Seat_ParsedMB.txt", 2),
+    ("Minneapolis/MPLS-2009-BET_2Seat_ParsedMB.txt", 2),
+    ("Minneapolis/MPLS-2013-BET_2Seat_ParsedMB.txt", 2),
+    ("Minneapolis/MPLS-2017-BET_2Seat_ParsedMB.txt", 2),
+    ("Minneapolis/MPLS-2021-BET_2Seat_ParsedMB.txt", 2),
 ]
 
 # datafiles = [("FedAus16/FederalSenate2016NT.json", 2)]
 # datafiles = [("example1.txt", 3)]
 
 # datafiles = [
-#     # ("data_election_temp_example.json", 3),
-#     ("Scotland/2022/preferenceprofile_v0001_ward-1-lomond_06052022_120102.blt", 3),
-#
+#     ("data_election_temp_example.json", 4),
+#     ("Scotland/2022/PreferenceProfile_V0001_Thurso_and_Northwest_Caithness_06052022_161528.blt", 4),
 # ]
 
 # datafiles = [("FedAus16/FederalSenate2016ACT.json", 2),
@@ -814,14 +813,14 @@ def func():
 if __name__ == "__main__":
     func()
     # print("datafile, ub")
-    # allFiles = glob.glob("/Users/aekk0001/Documents/stv-rla/data/Scotland/2022/*")
+    # # allFiles = glob.glob("/Users/aekk0001/Documents/stv-rla/data/Scotland/2022/*")
     # for (datafile, _) in datafiles:
     #     path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
     #     if path.endswith(".blt"):
     #         path = path.split(".blt")[0] + ".json"
     #     if path.endswith(".json"):
     #         infile = path.split(".json")[0] + ".vchange"
-    #         if "WestDunbartonshire-ward-1-lomond" not in displaynames[datafile]:
+    #         if "Edinburgh-Ward_2 Pentland_Hills" not in displaynames[datafile]:
     #             continue
     #         print(displaynames[datafile])
     #         with open(infile) as file:
@@ -839,6 +838,9 @@ if __name__ == "__main__":
     #                     return i
     #                 for ballot in change["from"]["ballots"]:
     #                     from_n = ballot["n"]
+    #                     # if ballot["from"] < len(orig["atl"]):
+    #                     #     pass
+    #                     #     # TODO
     #                     orig_n = orig["btl"][ballot["from"]]["n"]
     #                     if from_n != orig_n:
     #                         orig["btl"].append({"n": from_n, "candidates": [f(i) for i in orig["btl"][ballot["from"]]["candidates"]]})
@@ -859,11 +861,11 @@ if __name__ == "__main__":
     #     #     outfile = path.split(".json")[0] + ".vchange"
     #     #     # if outfile not in allFiles:
     #     #     print(f'{path} 1st:')
-    #     #     os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/release/change_outcomes WA2008 "{path}" -o "{outfile}"')
-    #     #     print(f'{path} 2nd:')
-    #     #     os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/release/change_outcomes WA2008 "{outfile}" -o "{outfile}"')
-    #     #     print(f'{path} 3rd:')
-    #     #     os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/release/change_outcomes WA2008 "{outfile}" -o "{outfile}"')
+    #     #     os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes Minimal "{path}" -o "{outfile}"')
+    #     #     # print(f'{path} 2nd:')
+    #     #     # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes ACT2021 "{outfile}" -o "{outfile}"')
+    #     #     # print(f'{path} 3rd:')
+    #     #     # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes ACT2021 "{outfile}" -o "{outfile}"')
     #     #     # with open(outfile) as file:
     #     #     #     res = json.load(file)
     #     #     #     print("X")
