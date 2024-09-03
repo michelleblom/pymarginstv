@@ -261,7 +261,10 @@ def read_ballots_json(path):
         for cand in data["metadata"]["candidates"]:
             name = cand["name"]
             party = int(cand["party"])
-            pos = int(cand["position"])
+            try:
+                pos = int(cand["position"])
+            except KeyError:
+                pos = -1
 
             cobj = Candidate(cid, cid)
             cobj.name = name
