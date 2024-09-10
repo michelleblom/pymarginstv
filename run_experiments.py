@@ -768,8 +768,8 @@ datafiles = [
 
 def func():
     reps = 2
-    counter = 0  # 1-287
-    versions = [3]
+    counter = 0  # 1-574
+    versions = [0, 3]
     # global seats
     print(
         "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb")
