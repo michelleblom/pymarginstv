@@ -949,6 +949,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         if len(fnodes) > 1:
             print("x", flush=True)
 
+        # expand nodes until frontier is empty or we have converged
         for fn in fnodes:
             if log != None:
                 print("EXPANDING NODE {}".format(fn), file=log, flush=True)
@@ -957,8 +958,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                                       running_ub, ncands, args, quota, tot_ballots, merge_map, \
                                       order_c, order_a)
 
-            # print(fn, "CHILDREN", children, flush=True)
-
+            # evaluate children
             min_dist = None
             for isleaf, node_order_c, node_order_a, lb, dlb, eqlb, dist, \
                     dist_ub, new_rem, node_winners, solved in children:
@@ -970,8 +970,6 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     print("EVALUATED {}/{} LB {} (D {} EQ {})".format( \
                         node_order_c, node_order_a, lb, dlb, eqlb), \
                         file=log, flush=True)
-                    # if dlb != 0:
-                    #     print("D is non-zero.", file=log, flush=True)
 
                     if dist == None:
                         print("    DISTANCE None/Infeasible", file=log, \
@@ -980,14 +978,17 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                         print("    DISTANCE {}/{}, MINLP used: {}".format(dist, dist_ub, solved), \
                               file=log, flush=True)
 
-                if dist == None or dist >= running_ub:
+                # skip infeasible nodes
+                if dist == None or dist > running_ub:
                     if log != None:
                         print("        PRUNED!", file=log, flush=True)
                     continue
 
+                # get minimum dist of all feasible children so far
                 min_dist = dist if min_dist is None else min(min_dist, dist)
 
                 if isleaf:
+                    # fully evaluated leaf nodes
                     if log != None:
                         print("        LEAF", file=log, flush=True)
 
@@ -995,9 +996,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                         print("Reducing upper bound from {} to {}".format(running_ub, dist_ub), \
                               file=log, flush=True)
 
-                    # print("LEAF", flush=True)
-                    running_ub = min(running_ub, dist_ub)
-                    witness_lb = min(witness_lb, dist)
+                    running_ub = min(running_ub, dist_ub)  # update running_ub if possible
+                    witness_lb = min(witness_lb, dist)  # save as witness in case search space is exhausted
 
                     if abs(running_ub - running_lb) <= agap:
                         converged = True
@@ -1015,10 +1015,10 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
                     if idx is not None:
                         fn.children.append(newn.id)
-
             if converged:
                 break
 
+            # check if running_lb can be increased
             old_lb = running_lb
             if frontier.size == 0:
                 min_dist = min_dist if min_dist is not None else witness_lb
