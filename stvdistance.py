@@ -275,6 +275,9 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     model.setEmphasis(SCIP_PARAMEMPHASIS.OPTIMALITY)
     model.hideOutput()
     model.setRealParam("limits/gap", args.gap)
+    model.setParam("separating/closecuts/separelint", False)
+    model.setParam("benders/default/cutstrengthenintpoint", 'i')
+
     if isleaf:
         model.setRealParam("limits/time", args.thard)
     else:

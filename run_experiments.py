@@ -750,7 +750,7 @@ datafiles = [
 # datafiles = [("example1.txt", 3)]
 
 # datafiles = [
-#     ("data_election_temp_example.json", 4),
+#     # ("data_election_temp_example.json", 4),
 #     ("Scotland/2022/PreferenceProfile_V0001_Thurso_and_Northwest_Caithness_06052022_161528.blt", 4),
 # ]
 
@@ -766,7 +766,7 @@ datafiles = [
 # counter = 0  # 1-135
 # versions = [3]
 
-def func():
+def run_audit():
     reps = 2
     counter = 0  # 1-574
     versions = [0, 3]
@@ -810,69 +810,93 @@ def func():
                     # )
 
 
+def run_ub():
+    for (datafile, _) in datafiles:
+        path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+        if path.endswith(".blt"):
+            path = path.split(".blt")[0] + ".json"
+        if path.endswith(".json"):
+            outfile = path.split(".json")[0] + ".vchange"
+            # if outfile not in allFiles:
+            print(f'{path} 1st:')
+            os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes Minimal "{path}" -o "{outfile}"')
+            # print(f'{path} 2nd:')
+            # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes ACT2021 "{outfile}" -o "{outfile}"')
+            # print(f'{path} 3rd:')
+            # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes ACT2021 "{outfile}" -o "{outfile}"')
+            # with open(outfile) as file:
+            #     res = json.load(file)
+            #     print("X")
+            # # # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/release/blt_to_stv "{path}" -o "{outfile}"')
+        else:
+            pass
+            # print("path does not end with .blt")
+
+
+def get_ub_csv():
+    print("datafile, ub")
+    for (datafile, _) in datafiles:
+        path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+        if path.endswith(".blt"):
+            path = path.split(".blt")[0] + ".json"
+        if path.endswith(".json"):
+            infile = path.split(".json")[0] + ".vchange"
+            with open(infile) as file:
+                res = json.load(file)
+                min_ub = min([change["ballots"]["n"] for change in res["changes"]])
+                print(f'{displaynames[datafile]}, {min_ub}')
+
+
+def save_ub_changes_to_json():
+    for (datafile, _) in datafiles:
+        path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+        if path.endswith(".blt"):
+            path = path.split(".blt")[0] + ".json"
+        if path.endswith(".json"):
+            infile = path.split(".json")[0] + ".vchange"
+            if "Aberdeenshire-ward-8-mid-formartine" not in displaynames[datafile]:
+                continue
+            # print(displaynames[datafile])
+            with open(infile) as file:
+                res = json.load(file)
+                min_ub = min([change["ballots"]["n"] for change in res["changes"]])
+                print(f'{displaynames[datafile]}, {min_ub}')
+                changeset = res["changes"][0]
+                orig = res["original"]
+                for change in changeset["ballots"]["changes"]:
+                    candto = change["candidate_to"]
+                    candfrom = change["from"]["candidate"]
+                    def f(i):
+                        if i == candfrom: return candto
+                        if i == candto: return candfrom
+                        return i
+                    for ballot in change["from"]["ballots"]:
+                        from_n = ballot["n"]
+                        # if ballot["from"] < len(orig["atl"]):
+                        #     pass
+                        #     # TODO
+                        orig_n = orig["btl"][ballot["from"]]["n"]
+                        if from_n != orig_n:
+                            orig["btl"].append({"n": from_n, "candidates": [f(i) for i in orig["btl"][ballot["from"]]["candidates"]]})
+                            orig["btl"][ballot["from"]]["n"] -= from_n
+                        else:
+                            orig["btl"][ballot["from"]]["candidates"] = [f(i) for i in orig["btl"][ballot["from"]]["candidates"]]
+                            # print(orig["btl"][ballot["from"]]["candidates"])
+                # for change in res["changes"]:
+                #     print(change["ballots"]["n"], change["ballots"]["n"] - min_ub)
+                # with open(path) as file2:
+                #     res2 = json.load(file2)
+                #     pass
+                with open('data/data_election_temp_example.json', 'w') as f:
+                    json.dump(orig, f)
+
+
 if __name__ == "__main__":
-    func()
-    # print("datafile, ub")
-    # # allFiles = glob.glob("/Users/aekk0001/Documents/stv-rla/data/Scotland/2022/*")
-    # for (datafile, _) in datafiles:
-    #     path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
-    #     if path.endswith(".blt"):
-    #         path = path.split(".blt")[0] + ".json"
-    #     if path.endswith(".json"):
-    #         infile = path.split(".json")[0] + ".vchange"
-    #         if "Edinburgh-Ward_2 Pentland_Hills" not in displaynames[datafile]:
-    #             continue
-    #         print(displaynames[datafile])
-    #         with open(infile) as file:
-    #             res = json.load(file)
-    #             min_ub = min([change["ballots"]["n"] for change in res["changes"]])
-    #             print(f'{displaynames[datafile]}, {min_ub}')
-    #             changeset = res["changes"][0]
-    #             orig = res["original"]
-    #             for change in changeset["ballots"]["changes"]:
-    #                 candto = change["candidate_to"]
-    #                 candfrom = change["from"]["candidate"]
-    #                 def f(i):
-    #                     if i == candfrom: return candto
-    #                     if i == candto: return candfrom
-    #                     return i
-    #                 for ballot in change["from"]["ballots"]:
-    #                     from_n = ballot["n"]
-    #                     # if ballot["from"] < len(orig["atl"]):
-    #                     #     pass
-    #                     #     # TODO
-    #                     orig_n = orig["btl"][ballot["from"]]["n"]
-    #                     if from_n != orig_n:
-    #                         orig["btl"].append({"n": from_n, "candidates": [f(i) for i in orig["btl"][ballot["from"]]["candidates"]]})
-    #                         orig["btl"][ballot["from"]]["n"] -= from_n
-    #                     else:
-    #                         orig["btl"][ballot["from"]]["candidates"] = [f(i) for i in orig["btl"][ballot["from"]]["candidates"]]
-    #                         # print(orig["btl"][ballot["from"]]["candidates"])
-    #             # for change in res["changes"]:
-    #             #     print(change["ballots"]["n"], change["ballots"]["n"] - min_ub)
-    #             # with open(path) as file2:
-    #             #     res2 = json.load(file2)
-    #             #     pass
-    #             with open('data_election_temp.json', 'w') as f:
-    #                 json.dump(orig, f)
-    #     # if path.endswith(".blt"):
-    #     #     path = path.split(".blt")[0] + ".json"
-    #     # if path.endswith(".json"):
-    #     #     outfile = path.split(".json")[0] + ".vchange"
-    #     #     # if outfile not in allFiles:
-    #     #     print(f'{path} 1st:')
-    #     #     os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes Minimal "{path}" -o "{outfile}"')
-    #     #     # print(f'{path} 2nd:')
-    #     #     # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes ACT2021 "{outfile}" -o "{outfile}"')
-    #     #     # print(f'{path} 3rd:')
-    #     #     # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes ACT2021 "{outfile}" -o "{outfile}"')
-    #     #     # with open(outfile) as file:
-    #     #     #     res = json.load(file)
-    #     #     #     print("X")
-    #     #     # # # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/release/blt_to_stv "{path}" -o "{outfile}"')
-    #     # else:
-    #     #     pass
-    #     #     # print("path does not end with .blt")
+    run_audit()
+    # run_ub()
+    # get_ub_csv()
+    # save_ub_changes_to_json()
+
 
 # allFiles = glob.glob("/Users/aekk0001/Documents/stv-rla/data/Scotland/2022/*")
 #

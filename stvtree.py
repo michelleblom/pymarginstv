@@ -875,6 +875,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             result.append(eval_child_initial(*c))
 
     for lb, dlb, eqlb, node, solved in result:
+
         if solved:
             nsolves += 1
 
@@ -882,8 +883,6 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             print("EVALUATING {}/{} LB {} (D {} EQ {})".format( \
                 node.order_c, node.order_a, lb, dlb, eqlb), \
                 file=log, flush=True)
-            if dlb != 0:
-                print("D is non-zero.", file=log, flush=True)
 
             if lb < running_ub:
                 if node.dist == None:
@@ -902,8 +901,12 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             return running_lb, running_ub, nexps, nsolves, \
                 frontier.ignore_cntr
 
-        if node.dist == None or node.dist >= running_ub:
+        # skip infeasible nodes
+        if node.dist is None or node.dist > running_ub:
             continue
+        else:
+            if log != None:
+                print("        Added to frontier", file=log, flush=True)
 
         if frontier.size > 0:
             running_lb = min(node.dist, min([frontier.get_node(n).dist \
@@ -946,9 +949,6 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         if fnodes == []:
             break
 
-        if len(fnodes) > 1:
-            print("x", flush=True)
-
         # expand nodes until frontier is empty or we have converged
         for fn in fnodes:
             if log != None:
@@ -979,7 +979,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                               file=log, flush=True)
 
                 # skip infeasible nodes
-                if dist == None or dist > running_ub:
+                if dist is None or dist > running_ub:
                     if log != None:
                         print("        PRUNED!", file=log, flush=True)
                     continue
