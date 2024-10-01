@@ -840,8 +840,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
     frontier = Frontier()
 
-    running_ub = upperbound
-    witness_lb = np.inf
+    running_ub = np.inf
     running_lb = 0
 
     merge_map = {c.num: c.num for c in candidates}
@@ -902,7 +901,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                 frontier.ignore_cntr
 
         # skip infeasible nodes
-        if node.dist is None or node.dist > running_ub:
+        if node.dist is None or node.dist > upperbound:
             continue
         else:
             if log != None:
@@ -979,25 +978,21 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                               file=log, flush=True)
 
                 # skip infeasible nodes
-                if dist is None or dist > running_ub:
+                if dist is None or dist >= min(running_ub, upperbound+1):
                     if log != None:
                         print("        PRUNED!", file=log, flush=True)
                     continue
-
-                # get minimum dist of all feasible children so far
-                min_dist = dist if min_dist is None else min(min_dist, dist)
 
                 if isleaf:
                     # fully evaluated leaf nodes
                     if log != None:
                         print("        LEAF", file=log, flush=True)
 
-                    if log != None and dist_ub < running_ub:
-                        print("Reducing upper bound from {} to {}".format(running_ub, dist_ub), \
+                    if log != None and dist < running_ub:
+                        print("Reducing upper bound from {} to {}".format(running_ub, dist), \
                               file=log, flush=True)
 
-                    running_ub = min(running_ub, dist_ub)  # update running_ub if possible
-                    witness_lb = min(witness_lb, dist)  # save as witness in case search space is exhausted
+                    running_ub = min(running_ub, dist)  # update running_ub if possible
 
                     if abs(running_ub - running_lb) <= agap:
                         converged = True
@@ -1020,14 +1015,14 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
             # check if running_lb can be increased
             old_lb = running_lb
-            if frontier.size == 0:
-                min_dist = min_dist if min_dist is not None else witness_lb
-                running_lb = max(running_lb, min_dist)
+            if frontier.size == 0:  # search space exhausted
+                running_lb = running_ub  # running_ub must be a true lower bound
+                if log is not None:
+                    print("Search space exhausted", file=log, flush=True)
             else:
-                min_dist = min_dist if min_dist is not None else frontier.get_lower_bound()
-                running_lb = max(running_lb, min(min_dist, frontier.get_lower_bound()))
+                running_lb = max(running_lb, frontier.get_lower_bound())
 
-            if old_lb < running_lb and log != None:
+            if old_lb < running_lb and log is not None:
                 print(f"Increasing lower bound from {old_lb} to {running_lb}", file=log, flush=True)
 
             if abs(running_ub - running_lb) <= agap:

@@ -750,7 +750,7 @@ datafiles = [
 # datafiles = [("example1.txt", 3)]
 
 # datafiles = [
-#     # ("data_election_temp_example.json", 4),
+#     ("Scotland/2022/preferenceprofile_v0001_ward-8-mid-formartine_06052022_172123.blt", 4),
 #     ("Scotland/2022/PreferenceProfile_V0001_Thurso_and_Northwest_Caithness_06052022_161528.blt", 4),
 # ]
 
@@ -768,8 +768,8 @@ datafiles = [
 
 def run_audit():
     reps = 2
-    counter = 0  # 1-574
-    versions = [0, 3]
+    counter = 0  # 1-861
+    versions = [0, 2, 3]
     # global seats
     print(
         "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb")
@@ -813,6 +813,12 @@ def run_audit():
 def run_ub():
     for (datafile, _) in datafiles:
         path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+        if path.endswith(".txt"):
+            path = path.split(".txt")[0] + ".blt"
+            # outfile = path.split(".blt")[0] + ".json"
+            # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/blt_to_stv "{path}" --out "{outfile}"')
+        # else:
+        #     continue
         if path.endswith(".blt"):
             path = path.split(".blt")[0] + ".json"
         if path.endswith(".json"):
@@ -837,6 +843,8 @@ def get_ub_csv():
     print("datafile, ub")
     for (datafile, _) in datafiles:
         path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+        if path.endswith(".txt"):
+            path = path.split(".txt")[0] + ".json"
         if path.endswith(".blt"):
             path = path.split(".blt")[0] + ".json"
         if path.endswith(".json"):
@@ -891,11 +899,52 @@ def save_ub_changes_to_json():
                     json.dump(orig, f)
 
 
+def txt_to_blt():
+    for (datafile, seats) in datafiles:
+        path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+        if path.endswith(".txt"):
+            dest = path.split(".txt")[0] + ".blt"
+            output = ""
+            with open(path) as file:
+                cands = file.readline().split(",")
+                assert cands[-1] != "", "error"
+                numcands = len(cands)
+                if int(cands[0]) == 0:
+                    offset = 1
+                else:
+                    offset = 0
+                output += f"{numcands} {seats}\n"
+                names = file.readline().split(",")
+                names[-1] = names[-1][:-1]
+                parties = file.readline().split(",")
+                parties[-1] = parties[-1][:-1]
+                # print(names, parties)
+                file.readline()
+                file.readline()
+                for line in file.readlines():
+                    row = line.split(" : ")
+                    order = row[0][:-1][1:].split(",")
+                    count = int(row[1])
+                    output += f"{count} {' '.join([str(int(i) + offset) for i in order])} 0\n"
+                output += "0\n"
+                for i in range(numcands):
+                    names[i] = names[i].replace('\"', '')
+                    parties[i] = parties[i].replace('\"', '')
+                    output += f'"{names[i]}" "{parties[i]}"\n'
+                output += f'"{displaynames[datafile]}"\n'
+                # print(output)
+                with open(dest, 'w') as file:
+                    file.write(output)
+
+
 if __name__ == "__main__":
     run_audit()
+    # txt_to_blt()
     # run_ub()
     # get_ub_csv()
     # save_ub_changes_to_json()
+
+
 
 
 # allFiles = glob.glob("/Users/aekk0001/Documents/stv-rla/data/Scotland/2022/*")
