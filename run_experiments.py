@@ -750,8 +750,8 @@ datafiles = [
 # datafiles = [("example1.txt", 3)]
 
 # datafiles = [
-#     ("Scotland/2022/preferenceprofile_v0001_ward-8-mid-formartine_06052022_172123.blt", 4),
-#     ("Scotland/2022/PreferenceProfile_V0001_Thurso_and_Northwest_Caithness_06052022_161528.blt", 4),
+#     # ("Scotland/2022/preferenceprofile_v0001_ward-8-mid-formartine_06052022_172123.blt", 4),
+#     ("Scotland/GCC_07_Maryhill_ballots.txt", 4),
 # ]
 
 # datafiles = [("FedAus16/FederalSenate2016ACT.json", 2),
@@ -767,9 +767,9 @@ datafiles = [
 # versions = [3]
 
 def run_audit():
-    reps = 2
-    counter = 0  # 1-861
-    versions = [0, 2, 3]
+    reps = 1
+    counter = 0  # 1-575
+    versions = [0, 3]
     # global seats
     print(
         "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb")

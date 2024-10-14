@@ -19,6 +19,7 @@ import sys
 import argparse
 import math
 from time import perf_counter
+import time
 
 from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
     read_ballots_blt, simulate_stv, compute_weub, compute_simple_ub, \
@@ -238,19 +239,21 @@ if __name__ == "__main__":
     # upper_bound = 321  # TODO
 
     # Start branch and bound.
-    tstart = perf_counter()
+    tstart = time.time()
     lb, ub, nexps, nsolves, ignores = treestv(ballots, candidates, winners, \
         order_c, order_a, upper_bound, args.seats, args, quota, totvotes, \
         agap=args.agap, tlimit=args.limit, log=log)
-    tend = perf_counter()
+    tend = time.time()
 
     print("{}--{}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores),file=log)
     # print("{},{}--{}, {}, {}, {}, MARGIN LB, {}, ORIGINAL UB, {}".format(args.data, lb, ub, \
     #     nexps, nsolves, ignores, lb, original_upper_bound))
 
+    t0_end = perf_counter()
+    # print(tstart_old-tend_old)
     # datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, time(s)
     print(f"{args.displayname}, {len(candidates)}, {args.seats}, {quota}, {original_upper_bound}, {lb}, {ub}, {nexps}, {nsolves}, "
-          f"{tend-tstart}, {tend-t0_start}, {args.lse}, {args.dlb}, {args.eqlb}")
+          f"{tend-tstart}, {t0_end-t0_start}, {args.lse}, {args.dlb}, {args.eqlb}")
 
     #winner_set = {0, 1, 5, 4}
     #node_winners = [0, 1, 3, 5]

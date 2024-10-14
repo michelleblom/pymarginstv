@@ -863,7 +863,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
             children.append((node_order_c, node_order_a, node_winners, \
                              winner_set, candidates, ballots, rem, quota, args, merge_map, \
-                             tot_ballots, running_ub, order_c, order_a))
+                             tot_ballots, upperbound, order_c, order_a))
 
     result = []
     if args.pc > 1:
@@ -883,7 +883,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                 node.order_c, node.order_a, lb, dlb, eqlb), \
                 file=log, flush=True)
 
-            if lb < running_ub:
+            if lb <= upperbound:
                 if node.dist == None:
                     print("    DISTANCE None/Infeasible", file=log, \
                           flush=True)
@@ -954,7 +954,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                 print("EXPANDING NODE {}".format(fn), file=log, flush=True)
 
             _, children = expand_node(fn, ballots, candidates, winner_set, \
-                                      running_ub, ncands, args, quota, tot_ballots, merge_map, \
+                                      min(running_ub, upperbound+1), ncands, args, quota, tot_ballots, merge_map, \
                                       order_c, order_a)
 
             # evaluate children
@@ -1064,7 +1064,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
 
 def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
-                       candidates, ballots, rem, quota, args, merge_map, tot_ballots, running_ub, \
+                       candidates, ballots, rem, quota, args, merge_map, tot_ballots, upperbound, \
                        full_order_c, full_order_a):
     # Is this a prefix of the original outcome?
     l = len(node_order_c)
@@ -1102,14 +1102,14 @@ def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
 
     lb = max(disp_lowerbound, eqlb)
 
-    if lb >= running_ub:
+    if lb > upperbound:
         return lb, disp_lowerbound, eqlb, TreeNode(-1, node_order_c, \
                                                    node_order_a, node_winners, rem, lb, lb), False
 
     # Evaluate distance for our new tree node.
     _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
                                    node_order_a, rem, node_winners, order_q, merge_map, [], \
-                                   tot_ballots, args, quota, running_ub, 0, lb, log=None)
+                                   tot_ballots, args, quota, upperbound, 0, lb, log=None)
 
     return lb, disp_lowerbound, eqlb, TreeNode(-1, node_order_c, \
                                                node_order_a, node_winners, rem, dist, dist_ub), True
