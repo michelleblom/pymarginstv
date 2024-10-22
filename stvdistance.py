@@ -140,7 +140,23 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot, \
                     ballotwith = None  
 
 
- 
+class TerminateAtIntegerSolution(Eventhdlr):
+    def __init__(self, model):
+        Eventhdlr.__init__(model)
+
+    def eventinit(self):
+        self.model.catchEvent(SCIP_EVENTTYPE.BESTSOLFOUND, self)
+
+    def eventexit(self):
+        self.model.dropEvent(SCIP_EVENTTYPE.BESTSOLFOUND, self)
+
+    def eventexec(self, event):
+        primal_bound = self.model.getPrimalbound()
+        dual_bound = self.model.getDualbound()
+        if math.ceil(primal_bound) == math.ceil(dual_bound):
+            # print(f"{primal_bound=}, {dual_bound=}. Optimal integer solution found. Terminating", flush=True)
+            self.model.interruptSolve()
+
 
 def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     merge_map, supers, tot_ballots, args, quota, upperbound, LAST_ROUND, \
@@ -274,14 +290,25 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     model = Model("STVDISTANCE")
     model.setEmphasis(SCIP_PARAMEMPHASIS.OPTIMALITY)
     model.hideOutput()
-    model.setRealParam("limits/gap", args.gap)
     model.setParam("separating/closecuts/separelint", False)
     model.setParam("benders/default/cutstrengthenintpoint", 'i')
 
+    model.includeEventhdlr(TerminateAtIntegerSolution(model), "terminate_at_integer_solution",
+                           "Event handler that terminates solving when ceil(primal) == ceil(dual)")
+
     if isleaf:
         model.setRealParam("limits/time", args.thard)
+        model.setRealParam("limits/gap", 0.0)  # no gap limit for leaf nodes
     else:
         model.setRealParam("limits/time", args.time)
+        model.setRealParam("limits/gap", args.gap)
+
+    # if printmore:
+    #     print(args.gap)
+    #     print(f"PRINTING MORE INFORMATION. {isleaf=}", flush=True)
+    #     model.setParam("display/verblevel", 5)
+    # else:
+    #     model.hideOutput()
 
     # VARIABLES
     # 'Signature' here refers to equivalence class rankings.
