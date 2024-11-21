@@ -746,38 +746,322 @@ datafiles = [
     ("Minneapolis/MPLS-2021-BET_2Seat_ParsedMB.txt", 2),
 ]
 
-# datafiles = [("FedAus16/FederalSenate2016NT.json", 2)]
-# datafiles = [("example1.txt", 3)]
+ubs = {
+    "ACT 16": 18835,
+    "NT 16": 11244,
+    "ACT 19": 12939,
+    "NT 19": 15890,
+    "ACT 22": 11078,
+    "NT 22": 11412,
+    "Anderston/City 07": 99,
+    "Baillieston 07": 105,
+    "Calton 07": 376,
+    "Canal 07": 126,
+    "Craigton 07": 75,
+    "Drumchapel/Anniesland 07": 443,
+    "East Centre 07": 139,
+    "Garscadden/Scotstounhill 07": 396,
+    "Govan 07": 309,
+    "Greater Pollok 07": 237,
+    "Hillhead 07": 105,
+    "Langside 07": 233,
+    "Linn 07": 218,
+    "Maryhill/Kelvin 07": 321,
+    "Newlands/Auldburn 07": 88,
+    "North East 07": 421,
+    "Partick West 07": 193,
+    "Pollokshields 07": 3,
+    "Shettleston 07": 353,
+    "Southside Central 07": 229,
+    "Springburn 07": 528,
+    "Dublin North": 211,
+    "Dublin West": 366,
+    "Meath": 1113,
+    "Edinburgh-Ward_11 City_Centre": 10,
+    "Edinburgh-Ward_12 Leith_Walk": 174,
+    "Glasgow-Ward-3-Greater-Pollok": 437,
+    "Glasgow-Ward-18-East-Centre": 255,
+    "Glasgow-Ward-5-Govan": 73,
+    "Aberdeenshire-ward-19-mearns": 18,
+    "ArgyllAndBute-ward-4-oban-south-and-the-isles": 1,
+    "Edinburgh-Ward_5 Inverleith": 1,
+    "Edinburgh-Ward_16 Liberton_Gilmerton": 63,
+    "Glasgow-Ward-6-Pollokshields": 89,
+    "Fife-Ward-4-Dunfermline-South": 264,
+    "Glasgow-Ward-8-Southside-Central": 27,
+    "Glasgow-Ward-2-Newlands-Auldburn": 20,
+    "Glasgow-Ward-14-Drumchapel-Anniesland": 327,
+    "Stirling-ward-3-dunblane-and-bridge-of-allan": 51,
+    "Angus-Ward-6 Arbroath-West-Letham-and-Friockheim": 2,
+    "Fife-Ward-1-West-Fife-and-Coastal-Villages": 130,
+    "Glasgow-Ward-10-Anderston-City-Yorkhill": 59,
+    "Glasgow-Ward-16-Canal": 107,
+    "Fife-Ward-15-Glenrothes-Central-and-Thornton": 271,
+    "Stirling-ward-6-stirling-east": 175,
+    "DumfriesAndGalloway-Ward-3 West-End": 87,
+    "DumfriesAndGalloway-Ward-8 The-Ferry": 210,
+    "Edinburgh-Ward_17 Portobello_Craigmillar": 111,
+    "Glasgow-Ward-1-Linn": 111,
+    "SouthLanarkshire-Ward_7 East_Kilbride_Central_South": 62,
+    "Fife-Ward-7-Cowdenbeath": 3,
+    "EastLothian-Ward_1 Musselburgh": 13,
+    "SouthAyrshire-Ward-3 Ayr-North": 203,
+    "Angus-Ward-3 Forfar-and-District": 125,
+    "SouthLanarkshire-Ward_14 Cambuslang_East": 63,
+    "Inverclyde-Ward-4": 19,
+    "Aberdeenshire-ward-5-peterhead-north-and-rattray": 38,
+    "ArgyllAndBute-ward-8-isle-of-bute": 1,
+    "Edinburgh-Ward_4 Forth": 11,
+    "Fife-Ward-2-Dunfermline-North": 73,
+    "DumfriesAndGalloway-Ward-1 Strathmartine": 532,
+    "Fife-Ward-3-Dunfermline-Central": 95,
+    "EastLothian-Ward_4 North_Berwick_Coastal": 52,
+    "Glasgow-Ward-19-Shettleston": 21,
+    "ShetlandIslands-Ward_3 Shetland_West": 4,
+    "Highland-Black_Isle": 123,
+    "SouthAyrshire-Ward-1 Troon": 71,
+    "Aberdeenshire-ward-4-central-buchan": 6,
+    "Fife-Ward-10-Kirkcaldy-North": 46,
+    "Glasgow-Ward-15-Maryhill": 130,
+    "DumfriesAndGalloway-Ward-2 Lochee": 231,
+    "Glasgow-Ward-4-Cardonald": 496,
+    "Aberdeen-Torry-Ferryhill": 186,
+    "Angus-Ward-4 Monifieth-and-Sidlaw": 25,
+    "Highland-Inverness_West": 1,
+    "Fife-Ward-19-East-Neuk-and-Landward": 289,
+    "Comhairle nan Eilean Siar-Ward 09": 43,
+    "Fife-Ward-14-Glenrothes-North-Leslie-and-Markinch": 101,
+    "Aberdeen-Tillydrone-Seaton-Old-Aberdeen": 85,
+    "WestDunbartonshire-ward-3-dumbarton": 322,
+    "SouthLanarkshire-Ward_9 East_Kilbride_West": 3,
+    "Falkirk-Ward 9": 270,
+    "DumfriesAndGalloway-Ward-5 Maryfield": 231,
+    "Fife-Ward-20-Cupar": 500,
+    "Glasgow-Ward-7-Langside": 30,
+    "SouthLanarkshire-Ward_3 Clydesdale_East": 145,
+    "WestDunbartonshire-ward-2-leven": 57,
+    "Angus-Ward-8 Montrose-and-District": 87,
+    "SouthAyrshire-Ward-4 Ayr-East": 159,
+    "OrkneyIslands-Ward 2": 10,
+    "Aberdeen-Northfield-Mastrick-North": 335,
+    "Highland-Badenoch_and_Strathspey": 97,
+    "Highland-Nairn_and_Cawdor": 66,
+    "Aberdeen-Bridge-of-Don": 107,
+    "Midlothian-Ward_6_Midlothian_South_Dalkeith": 49,
+    "Fife-Ward-17-Tay-Bridgehead": 659,
+    "Fife-Ward-5-Rosyth": 13,
+    "EastLothian-Ward_5 Haddington_and_Lammermuir": 105,
+    "Glasgow-Ward-17-Springburn-Robroyston": 424,
+    "Fife-Ward-21-Leven-Kennoway-and-Largo": 362,
+    "Highland-Cromarty_Firth": 72,
+    "Stirling-ward-7-bannockburn": 79,
+    "Aberdeenshire-ward-10-west-garioch": 92,
+    "SouthAyrshire-Ward-5 Ayr-West": 203,
+    "Aberdeenshire-ward-18-stonehaven-and-lower-deeside": 7,
+    "EastLothian-Ward_3 Tranent_Wallyford_and_Macmerry": 34,
+    "DumfriesAndGalloway-Ward-4 Coldside": 78,
+    "Falkirk-Ward 2": 5,
+    "Highland-Inverness_Central": 140,
+    "EastLothian-Ward_2 Preston_Seton_and_Gosford": 184,
+    "SouthAyrshire-Ward-2 Prestwick": 90,
+    "Glasgow-Ward-9-Calton": 71,
+    "Edinburgh-Ward_13 Leith": 814,
+    "Stirling-ward-1-trossachs-and-teith": 53,
+    "Aberdeen-Dyce-Bucksburn-Danestone": 280,
+    "Edinburgh-Ward_2 Pentland_Hills": 7,
+    "Fife-Ward-9-Burntisland-Kinghorn-and-Western-Kirkcaldy": 213,
+    "Aberdeenshire-ward-1-banff-and-district": 268,
+    "Glasgow-Ward-23-Partick-East-Kelvindale": 60,
+    "ArgyllAndBute-ward-3-mid-argyll": 3,
+    "SouthLanarkshire-Ward_6 East_Kilbride_South": 97,
+    "Fife-Ward-6-Inverkeithing-and-Dalgety-Bay": 216,
+    "Comhairle nan Eilean Siar-Ward 02": 24,
+    "Aberdeen-Kincorth-Nigg-Cove": 285,
+    "Stirling-ward-2-forth-and-endrick": 58,
+    "Edinburgh-Ward_7 Sighthill_Gorgie": 129,
+    "Glasgow-Ward-21-North-East": 103,
+    "Highland-Eilean_a__Che": 8,
+    "Fife-Ward-22-Buckhaven-Methil-and-Wemyss-Villages": 413,
+    "Clackmannanshire-Ward 2_North_2022_6694": 260,
+    "DumfriesAndGalloway-Ward-4 Castle-Douglas-and-Crocketford": 21,
+    "SouthLanarkshire-Ward_20 Larkhall": 45,
+    "Fife-Ward-12-Kirkcaldy-East": 10,
+    "Edinburgh-Ward_3 Drum_Brae_Gyle": 596,
+    "Edinburgh-Ward_1 Almond": 728,
+    "ArgyllAndBute-ward-5-oban-north-and-lorn": 75,
+    "Aberdeenshire-ward-17-north-kincardine": 125,
+    "Fife-Ward-8-Lochgelly-Cardenden-and-Benarty": 401,
+    "SouthLanarkshire-Ward_4 Clydesdale_South": 67,
+    "Glasgow-Ward-13-Garscadden-Scotstounhill": 8,
+    "Inverclyde-Ward-3": 134,
+    "Midlothian-Ward_2 Bonnyrigg": 85,
+    "Angus-Ward-5 Carnoustie-and-District": 80,
+    "DumfriesAndGalloway-Ward-1 Stranraer-and-the-Rhins": 101,
+    "Aberdeenshire-ward-11-inverurie-and-district": 277,
+    "Comhairle nan Eilean Siar-Ward 07": 28,
+    "Inverclyde-Ward-2": 40,
+    "Comhairle nan Eilean Siar-Ward 05": 112,
+    "Highland-Culloden_and_Ardersier": 64,
+    "Midlothian-Ward_1_Penicuik": 44,
+    "ShetlandIslands-Ward_6 Lerwick_South": 37,
+    "Aberdeenshire-ward-3-fraserburgh-and-district": 49,
+    "ArgyllAndBute-ward-6-cowal": 131,
+    "Inverclyde-Ward-5": 493,
+    "ShetlandIslands-Ward_5 Lerwick_North_and_Bressay": 24,
+    "SouthAyrshire-Ward-6 Kyle": 97,
+    "ArgyllAndBute-ward-1-south-kintyre": 115,
+    "OrkneyIslands-Ward 1": 138,
+    "Highland-North_West_and_Central_Sutherland": 166,
+    "Fife-Ward-16-Howe-Of-Fife-and-Tay-Coast": 326,
+    "Aberdeen-Lower-Deeside": 165,
+    "ArgyllAndBute-ward-11-helensburgh-and-lomond-south": 27,
+    "Inverclyde-Ward-6": 100,
+    "Aberdeenshire-ward-12-east-garioch": 13,
+    "WestDunbartonshire-ward-4-kilpatrick": 278,
+    "SouthAyrshire-Ward-8 Girvan-and-South-Carrick": 10,
+    "Inverclyde-Ward-7": 194,
+    "Aberdeenshire-ward-8-mid-formartine": 12,
+    "ArgyllAndBute-ward-7-dunoon": 35,
+    "Stirling-ward-4-stirling-north": 29,
+    "Angus-Ward-2 Brechin-and-Edzell": 312,
+    "Aberdeen-Hilton-Woodside-Stockethill": 48,
+    "Clackmannanshire-Ward 1_West_2022_6693": 299,
+    "Moray-Ward 8": 24,
+    "SouthLanarkshire-Ward_18 Hamilton_West_and_Earnock": 64,
+    "EastLothian-Ward_6 Dunbar_and_East_Linton": 140,
+    "SouthLanarkshire-Ward_5 Avondale_and_Stonehouse": 79,
+    "Highland-Inverness_South": 14,
+    "Edinburgh-Ward_9 Fountainbridge_Craiglockhart": 60,
+    "DumfriesAndGalloway-Ward-11 Annandale-North": 243,
+    "Aberdeenshire-ward-9-ellon-and-district": 78,
+    "Glasgow-Ward-20-Baillieston": 63,
+    "Highland-Fort_William_and_Ardnamurchan": 77,
+    "Edinburgh-Ward_14 Craigentinny_Duddingston": 60,
+    "Aberdeenshire-ward-14-huntly-strathbogie-and-howe-of-alford": 180,
+    "Highland-Aird_and_Loch_Ness": 76,
+    "Highland-Thurso_and_Northwest_Caithness": 94,
+    "Comhairle nan Eilean Siar-Ward 03": 74,
+    "DumfriesAndGalloway-Ward-12 Annandale-East-and-Eskdale": 14,
+    "SouthLanarkshire-Ward_8 East_Kilbride_Central_North": 69,
+    "Aberdeen-Kingswells-Sheddocksley-Summerhill": 138,
+    "DumfriesAndGalloway-Ward-6 North-West-Dumfries": 15,
+    "Midlothian-Ward_4_Midlothian_West": 9,
+    "ShetlandIslands-Ward_4 Shetland_Central": 111,
+    "DumfriesAndGalloway-Ward-5 Abbey": 270,
+    "Aberdeen-Hazlehead-Queens-Cross-Countesswells": 70,
+    "WestDunbartonshire-ward-1-lomond": 89,
+    "Fife-Ward-13-Glenrothes-West-and-Kinglassie": 221,
+    "Falkirk-Ward 8": 157,
+    "SouthLanarkshire-Ward_17 Hamilton_North_and_East": 117,
+    "Midlothian-Ward_5_Midlothian_East": 223,
+    "SouthLanarkshire-Ward_10 East_Kilbride_East": 65,
+    "Comhairle nan Eilean Siar-Ward 04": 65,
+    "Edinburgh-Ward_10 Morningside": 94,
+    "Highland-East_Sutherland_and_Edderton": 100,
+    "Falkirk-Ward 5": 122,
+    "Moray-Ward 1": 199,
+    "Falkirk-Ward 4": 253,
+    "OrkneyIslands-Ward 3": 21,
+    "Fife-Ward-11-Kirkcaldy-Central": 128,
+    "Angus-Ward-1 Kirriemuir-and-Dean": 64,
+    "Edinburgh-Ward_15 Southside_Newington": 89,
+    "Highland-Wester_Ross_Strathpeffer_and_Lochalsh": 36,
+    "Fife-Ward-18-St-Andrews": 10,
+    "Falkirk-Ward 6": 10,
+    "Aberdeenshire-ward-7-turriff-and-district": 23,
+    "Falkirk-Ward 7": 239,
+    "Moray-Ward 2": 30,
+    "Angus-Ward-7 Arbroath-East-and-Lunan": 46,
+    "Aberdeenshire-ward-6-peterhead-south-and-cruden": 101,
+    "Highland-Inverness_Millburn": 49,
+    "Comhairle nan Eilean Siar-Ward 10": 20,
+    "DumfriesAndGalloway-Ward-7 Mid-and-Upper-Nithsdale": 9,
+    "DumfriesAndGalloway-Ward-6 North-East": 494,
+    "OrkneyIslands-Ward 4": 54,
+    "Moray-Ward 6": 347,
+    "Falkirk-Ward 3": 8,
+    "Glasgow-Ward-11-Hillhead": 713,
+    "SouthLanarkshire-Ward_13 Cambuslang_West": 48,
+    "Moray-Ward 7": 387,
+    "OrkneyIslands-Ward 5": 15,
+    "Clackmannanshire-Ward 3_Central_2022_6695": 22,
+    "Clackmannanshire-Ward 4_South_2022_6696": 30,
+    "ShetlandIslands-Ward_7 Shetland_South": 82,
+    "Aberdeenshire-ward-13-westhill-and-district": 196,
+    "ArgyllAndBute-ward-9-lomond-north": 4,
+    "Aberdeenshire-ward-15-aboyne-upper-deeside-and-donside": 14,
+    "DumfriesAndGalloway-Ward-2 Mid-Galloway-and-Wigtown-West": 36,
+    "Moray-Ward 5": 111,
+    "Moray-Ward 4": 8,
+    "Falkirk-Ward 1": 202,
+    "OrkneyIslands-Ward 6": 93,
+    "ArgyllAndBute-ward-10-helensburgh-central": 36,
+    "Midlothian-Ward_3_Dalkeith": 261,
+    "WestDunbartonshire-ward-5-clydebank-central": 374,
+    "Aberdeen-George-St-Harbour": 16,
+    "SouthLanarkshire-Ward_1 Clydesdale_West": 235,
+    "DumfriesAndGalloway-Ward-9 Nith": 42,
+    "WestDunbartonshire-ward-6-clydebank-waterfront": 281,
+    "SouthLanarkshire-Ward_2 Clydesdale_North": 547,
+    "SouthLanarkshire-Ward_16 Bothwell_and_Uddingston": 53,
+    "ShetlandIslands-North_Isles_Ward": 305,
+    "Aberdeen-Midstocket-Rosemount": 218,
+    "Highland-Wick_and_East_Caithness": 43,
+    "SouthLanarkshire-Ward_19 Hamilton_South": 265,
+    "Glasgow-Ward-12-Victoria-Park": 447,
+    "SouthLanarkshire-Ward_15 Blantyre": 163,
+    "SouthAyrshire-Ward-7 Maybole-North-Carrick-and-Coylton": 137,
+    "Highland-Dingwall_and_Seaforth": 38,
+    "SouthLanarkshire-Ward_11 Rutherglen_South": 623,
+    "ArgyllAndBute-ward-2-kintyre-and-the-islands": 24,
+    "DumfriesAndGalloway-Ward-10 Annandale-South": 46,
+    "Aberdeenshire-ward-2-troup": 76,
+    "Edinburgh-Ward_6 Corstorphine_Murrayfield": 464,
+    "Glasgow-Ward-22-Dennistoun": 390,
+    "Highland-Tain_and_Easter_Ross": 104,
+    "DumfriesAndGalloway-Ward-7 East-End": 384,
+    "SouthLanarkshire-Ward_12 Rutherglen_Central_and_North": 1,
+    "Edinburgh-Ward_8 Colinton_Fairmilehead": 143,
+    "Clackmannanshire-Ward 5_East_2022_6697": 237,
+    "Aberdeenshire-ward-16-banchory-and-mid-deeside": 176,
+    "Comhairle nan Eilean Siar-Ward 08": 51,
+    "Stirling-ward-5-stirling-west": 223,
+    "Highland-Inverness_Ness_side": 23,
+    "Aberdeen-Airyhall-Broomhill-Garthdee": 224,
+    "DumfriesAndGalloway-Ward-8 Lochar": 152,
+    "DumfriesAndGalloway-Ward-3 Dee-and-Glenkens": 52,
+    "Minneapolis BET 09": 2098,
+    "Minneapolis BET 13": 6713,
+    "Minneapolis BET 17": 16863,
+    "Minneapolis BET 21": 2703,
+}
 
 # datafiles = [
 #     # ("Scotland/2022/preferenceprofile_v0001_ward-8-mid-formartine_06052022_172123.blt", 4),
-#     ("Scotland/GCC_07_Maryhill_ballots.txt", 4),
+#     ("Scotland/GCC_07_Anderson_ballots.txt", 4),
 # ]
 
-# datafiles = [("FedAus16/FederalSenate2016ACT.json", 2),
-#              ("FedAus16/FederalSenate2016NT.json", 2)]
-#
-# datafiles = [("FedAus16/FederalSenate2016ACT.json", 2)]
-
-# datafiles = [("Scotland/GCC_07_EastCentre_ballots.txt", 4)]
-# datafiles = [("Scotland/2022/preferenceprofile_v0004_ward-4-oban-south-and-the-isles_06052022_143143.blt", 4)]
-
-# reps = 1
-# counter = 0  # 1-135
-# versions = [3]
 
 def run_audit():
-    reps = 1
-    counter = 0  # 1-575
-    versions = [0, 3]
+    reps = 3
+    counter = 0  # 1-5166
+
+    # -3 == new without new ub
+    # -1 == baseline without new ub
+    # 0 == baseline (with new ub)
+    # 3 == new
+    # 4 == new without lse
+    # 5 == new without dlb
+    versions = [4, 5, 0, 3, -1, -3]
+
     # global seats
     print(
-        "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb")
-    for (datafile, seats) in datafiles:
-        for version in versions:
-            counter += 1
+        "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb, new_ub")
+    for version in versions:
+        for (datafile, seats) in datafiles:
+            # counter += 1
             # print(counter); continue
-            if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
+            # if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
             if "example" in datafile:
                 path = "./data/" + datafile
             else:
@@ -789,16 +1073,19 @@ def run_audit():
             #     candidates, ballots, _, cid2num, totvotes, seats = read_ballots_blt(path)
             # print(f"{displayname}, {len(candidates)}, {seats}, {counter}"); continue
             sys.argv = ['', '-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}.log", '-s', str(seats),
-                        '-pc', '8', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname]
-            if version != -1:
-                sys.argv += ['-m']
-            if version >= 1:
-                sys.argv += ['-lse']
-            if version >= 2:
-                sys.argv += ['-eqlb']
-            if version >= 3:
-                sys.argv += ['-dlb']
+                        '-pc', '1', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
+            if version >= 0:  # new ub
+                sys.argv += ['-ub', str(ubs[displayname])]
+            if abs(version) == 3:  # new
+                sys.argv += ['-lse', '-eqlb', '-dlb']
+            if version == 4:
+                sys.argv += ['-dlb', '-eqlb']
+            if version == 5:
+                sys.argv += ['-eqlb', '-lse']
             for _ in range(reps):
+                counter += 1
+                # print(version, datafile, counter); continue
+                if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
                 # print(" ".join(sys.argv))
                 # with Profile() as profile:
                 exec(open("pymarginstv.py").read())
@@ -943,8 +1230,6 @@ if __name__ == "__main__":
     # run_ub()
     # get_ub_csv()
     # save_ub_changes_to_json()
-
-
 
 
 # allFiles = glob.glob("/Users/aekk0001/Documents/stv-rla/data/Scotland/2022/*")
