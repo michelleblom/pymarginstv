@@ -241,9 +241,6 @@ if __name__ == "__main__":
                     upper_bound = dist_ub
                     print("Reducing upper bound to {}".format(dist_ub),file=log)
 
-
-    # upper_bound = 321  # TODO
-
     # Start branch and bound.
     tstart = time.time()
     lb, ub, nexps, nsolves, ignores = treestv(ballots, candidates, winners, \
