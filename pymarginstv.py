@@ -81,6 +81,8 @@ if __name__ == "__main__":
 
     parser.add_argument("-displayname", dest='displayname', default=None)
 
+    parser.add_argument("-ub", type=int, default=None)
+
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
 
@@ -149,6 +151,8 @@ if __name__ == "__main__":
     simple_ub = compute_simple_ub(candidates, quota, winners)
 
     upper_bound = math.ceil(min(weub, simple_ub))
+    if args.ub is not None:
+        upper_bound = math.ceil(min(upper_bound, args.ub))
     original_upper_bound = upper_bound
 
     print("WEUB {}, simple UB {}".format(weub, simple_ub),file=log,flush=True)
