@@ -151,7 +151,9 @@ if __name__ == "__main__":
     simple_ub = compute_simple_ub(candidates, quota, winners)
 
     upper_bound = math.ceil(min(weub, simple_ub))
+    external_upper_bound = False
     if args.ub is not None:
+        external_upper_bound = True
         upper_bound = math.ceil(min(upper_bound, args.ub))
     original_upper_bound = upper_bound
 
@@ -257,7 +259,7 @@ if __name__ == "__main__":
     # print(tstart_old-tend_old)
     # datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, time(s)
     print(f"{args.displayname}, {len(candidates)}, {args.seats}, {quota}, {original_upper_bound}, {lb}, {ub}, {nexps}, {nsolves}, "
-          f"{tend-tstart}, {t0_end-t0_start}, {args.lse}, {args.dlb}, {args.eqlb}")
+          f"{tend-tstart}, {t0_end-t0_start}, {args.lse}, {args.dlb}, {args.eqlb}, {external_upper_bound}")
 
     #winner_set = {0, 1, 5, 4}
     #node_winners = [0, 1, 3, 5]
