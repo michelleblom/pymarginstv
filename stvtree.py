@@ -638,12 +638,31 @@ def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_
             if ogl in prefs:
                 max_l += ub
 
-        quota_cost = max(0, max_l - quota)
+        new_quota_cost = max(0, quota - max_l)  # TODO: check if this is correct (fixed???)
+        old_quota_cost = max(0, max_l - quota)  # TODO: check if this is correct (original)
+        quota_cost = new_quota_cost  # TODO: check if this is correct (original)
         left_at_end_costs.sort()
 
         # ogl needs to outlast nleft - sleft candidates
         # print(f"\t left_at_end_costs={left_at_end_costs}, nleft={nleft}, sleft={sleft}, rem={rem}, og_losers={og_losers}, og_winner={og_winners}", flush=True)
         left_at_end_cost = max(left_at_end_costs[:nleft - sleft])
+        states = []
+        if old_quota_cost < left_at_end_cost:
+            if old_quota_cost > displacement_cost:
+                states.append('old quota_cost < left_at_end_cost  and  > displacement_cost')
+                if old_quota_cost < lowerbound:
+                    states.append('old quota_cost < lowerbound. LOWEBOUND CHANGED DUE TO OLD QUOTA')
+
+        if new_quota_cost < left_at_end_cost:
+            if new_quota_cost > displacement_cost:
+                states.append('fixed quota_cost < left_at_end_cost  and  > displacement_cost')
+                if new_quota_cost < lowerbound:
+                    states.append('fixed quota_cost < lowerbound. LOWEBOUND CHANGED DUE TO FIXED QUOTA')
+
+        if states:
+            print(f' --> {node_order_c}/{node_order_a}, {ogl=}, {max_l=}, {quota=}.   {lowerbound=}, max({displacement_cost=}, min({new_quota_cost=}, {old_quota_cost=}, {left_at_end_cost=}))',
+                    flush=True)
+            print(", ".join(states), flush=True)
 
         # print(f"\t {ogl=}, {lowerbound=}, {displacement_cost=}, {quota_cost=}, {left_at_end_cost=}", flush=True)
         lowerbound = min(lowerbound, max(displacement_cost, min(quota_cost, left_at_end_cost)))
@@ -1016,9 +1035,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             # check if running_lb can be increased
             old_lb = running_lb
             if frontier.size == 0:  # search space exhausted
-                running_lb = running_ub  # running_ub must be a true lower bound
-                if log is not None:
-                    print("Search space exhausted", file=log, flush=True)
+                break  # no need to continue search
             else:
                 running_lb = max(running_lb, frontier.get_lower_bound())
 
@@ -1033,6 +1050,11 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             # Update distances for expanded node (and ancestors) based on
             # evaluations of expanded nodes children
             #    frontier.back_propagate(fn.id)
+
+        if frontier.size == 0:  # search space exhausted
+            running_lb = running_ub  # running_ub must be a true lower bound
+            if log is not None:
+                print("Search space exhausted", file=log, flush=True)
 
         if converged:
             break
@@ -1224,7 +1246,9 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands, \
             nrem = len(rem)
             isleaf = False
 
-            if seats_filled == args.seats:
+            if seats_filled > args.seats:
+                continue  # invalid outcome (too many seats filled)
+            elif seats_filled == args.seats:
                 node_order_c += rem
                 node_order_a += [0] * nrem
                 new_rem = []
