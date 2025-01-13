@@ -713,7 +713,7 @@ datafiles = [
     ("Scotland/2022/preferenceprofile_v0001_ward-6-clydebank-waterfront_06052022_120103.blt", 4),
     ("Scotland/2022/PreferenceProfile_V0001_Ward_2___Clydesdale_North.blt", 3),
     ("Scotland/2022/PreferenceProfile_V0001_Ward_16___Bothwell_and_Uddingston.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_North_Isles_Ward_05082022_112827.blt", 1),
+    # ("Scotland/2022/PreferenceProfile_V0001_North_Isles_Ward_05082022_112827.blt", 1),  # ignore, only 1 seat
     ("Scotland/2022/PreferenceProfile_V0001_Midstocket-Rosemount-Ward_06052022_160545.blt", 3),
     ("Scotland/2022/PreferenceProfile_V0001_Wick_and_East_Caithness_06052022_161532.blt", 4),
     ("Scotland/2022/PreferenceProfile_V0001_Ward_19___Hamilton_South.blt", 4),
@@ -1034,11 +1034,14 @@ ubs = {
     "Minneapolis BET 13": 6713,
     "Minneapolis BET 17": 16863,
     "Minneapolis BET 21": 2703,
+    "Example": 65,
 }
 
 # datafiles = [
 #     # ("Scotland/2022/preferenceprofile_v0001_ward-8-mid-formartine_06052022_172123.blt", 4),
-#     ("Scotland/GCC_07_Anderson_ballots.txt", 4),
+#     # ("Scotland/GCC_07_Anderson_ballots.txt", 4),
+#     # ("Scotland/2022/PreferenceProfile_V0001_North_Isles_Ward_05082022_112827.blt", 1),
+#     ("example.txt", 3)
 # ]
 
 
@@ -1052,21 +1055,22 @@ def run_audit():
     # 3 == new
     # 4 == new without lse
     # 5 == new without dlb
-    versions = [4, 5, 0, 3, -1, -3]
+    # 6 == new without dlb+lse
+    versions = [4, 5, 6, 0, 3, -1, -3]
 
     # global seats
     print(
         "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb, new_ub")
     for version in versions:
         for (datafile, seats) in datafiles:
-            # counter += 1
-            # print(counter); continue
-            # if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
             if "example" in datafile:
                 path = "./data/" + datafile
             else:
                 path = "../stv-rla/data/" + datafile
             displayname = displaynames[datafile]
+            if displayname not in ["Comhairle nan Eilean Siar-Ward 03", "Comhairle nan Eilean Siar-Ward 04"] and version != 6:
+                continue
+
             # candidates = [0]
             # seats = 0
             # if path.endswith(".blt"):
@@ -1082,12 +1086,15 @@ def run_audit():
                 sys.argv += ['-dlb', '-eqlb']
             if version == 5:
                 sys.argv += ['-eqlb', '-lse']
+            if version == 6:
+                sys.argv += ['-eqlb']
             for _ in range(reps):
                 counter += 1
                 # print(version, datafile, counter); continue
                 if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
                 # print(" ".join(sys.argv))
                 # with Profile() as profile:
+                # print(displayname)
                 exec(open("pymarginstv.py").read())
                     # (
                     #     Stats(profile)
@@ -1099,7 +1106,10 @@ def run_audit():
 
 def run_ub():
     for (datafile, _) in datafiles:
-        path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+        if "example" in datafile:
+            path = "./data/" + datafile
+        else:
+            path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
         if path.endswith(".txt"):
             path = path.split(".txt")[0] + ".blt"
             # outfile = path.split(".blt")[0] + ".json"
@@ -1129,7 +1139,10 @@ def run_ub():
 def get_ub_csv():
     print("datafile, ub")
     for (datafile, _) in datafiles:
-        path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+        if "example" in datafile:
+            path = "./data/" + datafile
+        else:
+            path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
         if path.endswith(".txt"):
             path = path.split(".txt")[0] + ".json"
         if path.endswith(".blt"):
@@ -1144,7 +1157,10 @@ def get_ub_csv():
 
 def save_ub_changes_to_json():
     for (datafile, _) in datafiles:
-        path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+        if "example" in datafile:
+            path = "./data/" + datafile
+        else:
+            path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
         if path.endswith(".blt"):
             path = path.split(".blt")[0] + ".json"
         if path.endswith(".json"):
@@ -1188,7 +1204,10 @@ def save_ub_changes_to_json():
 
 def txt_to_blt():
     for (datafile, seats) in datafiles:
-        path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+        if "example" in datafile:
+            path = "./data/" + datafile
+        else:
+            path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
         if path.endswith(".txt"):
             dest = path.split(".txt")[0] + ".blt"
             output = ""
