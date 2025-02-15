@@ -351,10 +351,14 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
                 for b in ballots:
                     prefs = [p for p in b.prefs if p not in gone]
 
-                    if prefs and prefs[0] == ce:  # top preference is for ce
+                    if prefs:  # ballot is not exhausted
                         slb_add, _, ub_add = calc_tallies(b, gone, transfer, winners)
-                        lb_value += slb_add
-                        ub_value += ub_add
+                        if prefs[0] == ce:
+                            lb_value += slb_add
+                        if i >= 1 and order_a[i-1] == 1 and ce in prefs:  # ambiguous case: ballot could be in any pile
+                            ub_value += ub_add
+                        elif prefs[0] == ce:
+                            ub_value += ub_add
 
                 winners.append(ce)
 

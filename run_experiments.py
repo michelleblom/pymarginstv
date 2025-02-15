@@ -1050,13 +1050,15 @@ def run_audit():
     counter = 0  # 1-5166
 
     # -3 == new without new ub
-    # -1 == baseline without new ub
-    # 0 == baseline (with new ub)
-    # 3 == new
-    # 4 == new without lse
-    # 5 == new without dlb
-    # 6 == new without dlb+lse
-    versions = [4, 5, 6, 0, 3, -1, -3]
+    # -1 == baseline without new ub, aka Baseline
+    # 0 == baseline (with new ub), aka Baseline+U
+    # 3 == new, aka New+Both
+    # 4 == new without lse, aka New+DLB
+    # 5 == new without dlb, aka New+LSE
+    # 6 == new without dlb+lse, aka New
+    # versions = [4, 5, 6, 0, 3, -1, -3]
+    versions = [4, 5, 6, 0, 3, -1]
+    # versions = [4]
 
     # global seats
     print(
@@ -1068,8 +1070,6 @@ def run_audit():
             else:
                 path = "../stv-rla/data/" + datafile
             displayname = displaynames[datafile]
-            if displayname not in ["Comhairle nan Eilean Siar-Ward 03", "Comhairle nan Eilean Siar-Ward 04"] and version != 6:
-                continue
 
             # candidates = [0]
             # seats = 0
@@ -1090,7 +1090,7 @@ def run_audit():
                 sys.argv += ['-eqlb']
             for _ in range(reps):
                 counter += 1
-                # print(version, datafile, counter); continue
+                print(version, datafile, counter); continue
                 if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
                 # print(" ".join(sys.argv))
                 # with Profile() as profile:
