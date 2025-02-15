@@ -1047,7 +1047,7 @@ ubs = {
 
 def run_audit():
     reps = 3
-    counter = 0  # 1-5166
+    counter = 0  # 1-5148
 
     # -3 == new without new ub
     # -1 == baseline without new ub, aka Baseline
@@ -1090,7 +1090,7 @@ def run_audit():
                 sys.argv += ['-eqlb']
             for _ in range(reps):
                 counter += 1
-                print(version, datafile, counter); continue
+                # print(version, datafile, counter); continue
                 if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
                 # print(" ".join(sys.argv))
                 # with Profile() as profile:
