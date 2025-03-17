@@ -953,6 +953,11 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
     if tlimit != None and tnow - tstart > tlimit:
         return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr
 
+    if frontier.size == 0:  # search space exhausted
+        running_lb = running_ub  # running_ub must be a true lower bound
+        if log is not None:
+            print("Search space exhausted", file=log, flush=True)
+
     while frontier.size > 0:
         running_lb = frontier.get_lower_bound()
 
