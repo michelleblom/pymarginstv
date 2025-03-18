@@ -1117,6 +1117,9 @@ def run_audit():
 
 
 def run_ub():
+    """
+    Requires https://github.com/AndrewConway/ConcreteSTV installed in `../ConcreteSTV/target/debug`
+    """
     for (datafile, _) in datafiles:
         if "example" in datafile:
             path = "./data/" + datafile
@@ -1140,7 +1143,7 @@ def get_ub_csv():
         if "example" in datafile:
             path = "./data/" + datafile
         else:
-            path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+            path = "../stv-rla/data/" + datafile
         if path.endswith(".txt"):
             path = path.split(".txt")[0] + ".json"
         if path.endswith(".blt"):
@@ -1158,7 +1161,7 @@ def save_ub_changes_to_json():
         if "example" in datafile:
             path = "./data/" + datafile
         else:
-            path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+            path = "../stv-rla/data/" + datafile
         if path.endswith(".blt"):
             path = path.split(".blt")[0] + ".json"
         if path.endswith(".json"):
@@ -1205,7 +1208,7 @@ def txt_to_blt():
         if "example" in datafile:
             path = "./data/" + datafile
         else:
-            path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+            path = "../stv-rla/data/" + datafile
         if path.endswith(".txt"):
             dest = path.split(".txt")[0] + ".blt"
             output = ""
