@@ -3,7 +3,7 @@ from pstats import SortKey, Stats
 from run_experiments import *
 
 with Profile() as profile:
-    func()
+    run_audit()
     (
         Stats(profile)
         .strip_dirs()
