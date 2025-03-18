@@ -282,14 +282,28 @@ def get_order_q(order_c, order_a, LAST_ROUND, winners):
 
 
 def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
+    """
+    This function calculates the lower bound on the number of votes that need to be changed
+    to alter the outcome of an election prefix. It does this by considering the elimination and quota
+    constraints of the election.
+
+    Parameters:
+    cands (list): A list of Candidate objects representing the candidates in the election.
+    ballots (list): A list of Ballot objects representing the ballots cast in the election.
+    order_c (list): A list representing the order in which candidates were eliminated or seated.
+    order_a (list): A list of 0s and 1s indicating whether a candidate was eliminated (0) or seated (1) in each round.
+    quota (int): The quota for the election, i.e., the minimum number of votes a candidate needs to win a seat.
+    order_q (dict): A dictionary mapping candidates to their quota values.
+
+    Returns:
+    int: The lower bound on the number of votes that need to be changed to alter the outcome of the election prefix.
+    """
     gone = []
     elim_lb = 0
     quota_lb = 0
 
     winners = []
     transfer = dict()
-
-    # print("compute!", [order_c[i] for i in range(len(order_c))], order_a, flush=True)
 
     for i in range(len(order_c)):
         ce = order_c[i]
@@ -305,125 +319,116 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
             # min_others = {c.num: 0 for c in cands if c.num not in gone and c.num != ce}
 
             for b in ballots:
-                prefs = []
-                transfer_path = []
-                for p in b.prefs:
-                    if p not in gone:  # p still in the race, ballot not exhausted
-                        prefs.append(p)
-                        break  # subsequent preferences not to be considered
-                    if p in winners:
-                        transfer_path.append(p)
-                    else:
-                        transfer_path.append(None)
+                prefs = [p for p in b.prefs if p not in gone]
 
                 if not prefs:  # ballot is exhausted
                     continue
 
+                _, elb_add, ub_add = calc_tallies(b, gone, transfer, winners)
+
                 if prefs[0] != ce:  # transferred to other (including fp votes)
-                    lb_add, ub_add, _ = calc_tallies(b, order_a, order_c, transfer, transfer_path, seated=False)
-                    # min_others[prefs[0]] += lb_add
                     max_others[prefs[0]] += ub_add
                 elif b.prefs[0] != ce:  # transferred to ce (fp votes already allocated)
-                    lb_add, ub_add, _ = calc_tallies(b, order_a, order_c, transfer, transfer_path, seated=False)
-                    min_ce += lb_add
+                    min_ce += elb_add
                     # max_ce += ub_add
 
-            # if min_ce != max_ce:
-            #     print(" ~ E ~ ", ce, f"{min_ce}--{max_ce}", min([i for i in max_others.values() if i >= min_ce], default=0), min_others, max_others, flush=True)
-
             for c, v in max_others.items():
-                elim_lb = max(elim_lb, max(0, 0.5 * (np.floor(min_ce) - np.ceil(v))))
-                # print(f" ~~ {c}->{ce} costs", max(0, 0.5 * (np.floor(min_ce) - np.ceil(v))), flush=True)
-            # print(" ~~~ elim_lb =", elim_lb, flush=True)
+                elim_lb = max(elim_lb, max(0, 0.5 * (min_ce - v)))
 
         else:  # candidate seated
             if ce in order_q:  # candidate got a quota, else seated by default (last round)
                 lb_value = 0  # lb on value of ballots
                 ub_value = 0  # ub on value of ballots (quota <= lb_value <= ub_value <= len(ballots))
                 for b in ballots:
-                    prefs = []
-                    transfer_path = []
-                    for p in b.prefs:
-                        if p not in gone:  # p still in the race, ballot not exhausted
-                            prefs.append(p)
-                            break  # subsequent preferences not to be considered
-                        if p in winners:
-                            transfer_path.append(p)
-                        else:
-                            transfer_path.append(None)
+                    prefs = [p for p in b.prefs if p not in gone]
 
-                    if prefs and prefs[0] == ce:  # top preference is for ce
-                        lb_add, ub_add, _ = calc_tallies(b, order_a, order_c, transfer, transfer_path, seated=True)
-                        lb_value += lb_add
-                        ub_value += ub_add
+                    if prefs:  # ballot is not exhausted
+                        slb_add, _, ub_add = calc_tallies(b, gone, transfer, winners)
+                        if prefs[0] == ce:
+                            lb_value += slb_add
+                        if i >= 1 and order_a[i-1] == 1 and ce in prefs:  # ambiguous case: ballot could be in any pile
+                            ub_value += ub_add
+                        elif prefs[0] == ce:
+                            ub_value += ub_add
 
                 winners.append(ce)
-
-                # print(" ~ Q ~ ", ce, lb_value, ub_value, flush=True)
 
                 cmax = ub_value
                 lb_value = max(lb_value, quota)  # restrict lb_value to be at lest quota
                 ub_value = max(lb_value, ub_value)  # restrict ub_value to be at lest lb_value
                 transfer[ce] = ((lb_value - quota)/lb_value, (ub_value - quota)/ub_value)
-                # print(" ---> Q ~ ", ce, lb_value, transfer[ce][0], ub_value, transfer[ce][1], flush=True)
-                quota_lb = max(quota_lb, quota - cmax)
-                # print(" ~~~ quota_lb =", quota_lb, flush=True)
+
+                # cost to displace the candidate with largest tally that is also above quota 0nly active if
+                # no eliminations/seatings has happened
+                displacement_cost = 0
+                if not gone:  # no eliminations yet
+                    fp_others_max = max([cands[c.num].fp_votes for c in cands if c.num not in gone and c.num != ce])
+                    displacement_cost = max(0, 0.5 * (fp_others_max - cmax))  # if someone has reached quota, we need to surpass their votes
+
+                quota_lb = max(quota_lb, quota - cmax, displacement_cost)
 
         gone.append(ce)
 
     lb = math.ceil(max(elim_lb, quota_lb))
-    # print("   -->>> LB cost: ", lb, flush=True)
-    return max(0, lb)
+    return max(0, lb), transfer
 
 
-def calc_tallies(b, order_a, order_c, transfer, transfer_path, seated):
-    b_transfer_lb = 1
-    b_transfer_ub = 1
-    elimination_path = [(p if order_a[i] == 1 else None) for i, p in enumerate(order_c)]
-    multipliers = set()
-    tidx = 0
-    eidx = 0
+def calc_tallies(b, gone, transfer, winners):
+    """
+    This function calculates the lower and upper bounds on the value of a ballot after transfers.
+
+    Parameters:
+    b (Ballot): The ballot type for which the value bounds are being calculated.
+    gone (list): A list of candidates that have been eliminated or seated.
+    transfer (dict): A dictionary mapping candidates to their transfer values.
+    winners (list): A list of candidates that have won, must be contained in gone
+
+    Returns:
+    tuple: A tuple containing the seating-based lower bound, elimination-based lower bound, and upper bound on the
+           value of the ballot after transfers.
+    """
+    b_value_slb = b.votes  # seating lower bound
+    b_value_elb = b.votes  # elimination lower bound
+    b_value_ub = b.votes  # upper bound
     final_block = []
-    if elimination_path[-1] is not None and seated:  # setup final block if it contains ce (only for seated ce)
-        for ep in reversed(elimination_path):
-            if ep is None:
-                break
-            else:
-                final_block.append(ep)
-    elim_block = False
-    skipped = set()  # skipped due to being eliminated earlier
-    while tidx < len(transfer_path):  # while ballot not fully transferred
-        ep = elimination_path[eidx]
-        tp = transfer_path[tidx]
-        if tidx < len(transfer_path) and ep is None:  # ballot transfers through eliminated cand
-            tidx += 1
-        elif eidx < len(elimination_path) and tp is None:
-            elim_block = False  # (potential) previous block exited
+    for ep in reversed(gone):
+        if ep in winners:
+            final_block.append(ep)
+        else:
+            break
+
+    eliminated = set()
+    seated = set()
+    bidx = 0
+    eidx = 0
+    seat_block = False
+    while bidx < len(b.prefs) and eidx < len(gone):  # while ballot not fully transferred
+        bp = b.prefs[bidx]
+        ep = gone[eidx]
+        if ep not in winners:  # eliminated candidate
+            eliminated.add(ep)
             eidx += 1
-        elif tp in final_block:  # will enter final block: so ce may be skipped
-            b_transfer_lb *= 0  # ce is skipped
-            b_transfer_ub *= transfer[tp][1]  # skips everyone until ce
-            # TODO: insert the correct set of multipliers FIXME
-            break  # no more transfer calculations necessary
-        elif tp == ep:  # ballot is transferred (ce not in block)
-            if elim_block:  # already in a block
-                b_transfer_lb *= transfer[tp][0]  # lb: transfer through every cand in block
+        elif bp in eliminated:  # full transfer: candidate eliminated
+            seat_block = False  # (potential) previous seating block exited
+            bidx += 1
+        elif bp == ep:  # ballot is transferred through seating
+            b_value_elb *= transfer[bp][0]  # lb: transfer through every cand in seating block
+            if bp in final_block:
+                b_value_slb *= 0  # lb: cand in question is skipped if we're trying to seat them
             else:
-                b_transfer_lb *= transfer[tp][0]
-                b_transfer_ub *= transfer[tp][1]  # ub: transfer via first only, skips rest of block
-            # b_transfer_ub = 1  # Uncomment for equiv
-            # b_transfer_lb = 0  #   to old version
-            elim_block = True  # we have entered a block (possibly size one)
+                b_value_slb *= transfer[bp][0]
+            if not seat_block:  # not in a block
+                b_value_ub *= transfer[bp][1]  # ub: transfer via first only, skips rest of seating block
+            seat_block = True  # we have entered a block (possibly size one)
             eidx += 1
-            tidx += 1
-            multipliers.add(tp)
-        elif tp in skipped:  # skipping tp: already reached quota
-            tidx += 1
-        else:  # tp refers to candidate eliminated at a later point
-            skipped.add(ep)
+            bidx += 1
+        elif bp in seated:  # skipping: bp already seated
+            bidx += 1
+        else:  # ep is seated before reached by ballot
+            seated.add(ep)
             eidx += 1
 
-    return b.votes * b_transfer_lb, b.votes * b_transfer_ub, multipliers
+    return b_value_slb, b_value_elb, b_value_ub
 
 
 def compute_elim_quota_lb_old(cands, ballots, order_c, order_a, quota, order_q):
@@ -515,7 +520,119 @@ def nowinner(prefs, w, winners):
             return False
 
 
-def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
+def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota, seats, transfer):
+    """
+        Consider a prefix where it is clear that at least one original loser
+        still standing has to displace one of the original winners still
+        standing (e.g., our prefix contains just eliminations or only original
+        winners getting seated). In this case, we need to ensure that at least
+        one of the original losers will not be eliminated before one of the
+        original winners. We can put a lower bound on the number of vote
+        changes required to ensure this by taking the difference between
+        the maximum tallies of the remaining original losers and the minimum
+        tallies of the remaining original winners. We then take the minimum of
+        these vote changes as a lower bound.
+
+
+        node_order_c : Outcome prefix, list of candidates in the order that
+                       they are either elected or eliminated.
+
+        node_order_a : Outcome prefix, list of 0s/1s for each round of the
+                       prefix indicating whether a candidate was eliminated
+                       in that round (0) or elected (1).
+
+        winner_set   : Set of original winners of the election.
+
+        ballots      : List of Ballot data structures representing ballot
+                       types cast in the election and how many instances of
+                       that type are present (reported).
+
+        rem          : List of candidates not present in node_order_c.
+
+    """
+    # Determine if we need an original loser to get seated sometime
+    # in the future (past the current outcome prefix)
+    new_winner = False
+    for i in range(len(node_order_c)):
+        if node_order_a[i] == 1:
+            if node_order_c[i] not in winner_set:
+                new_winner = True
+                break
+        elif node_order_c[i] in winner_set:
+            new_winner = True
+            break
+
+    # Compile set of original losers, and winners, that remain standing after
+    # the outcome prefix node_order_c/node_order_a. The sets will remain
+    # empty if we have already changed who won the election in the outcome
+    # prefix.
+    og_losers = []
+    og_winners = []
+    if not new_winner:
+        for c in rem:
+            if c in winner_set:
+                og_winners.append(c)
+            else:
+                og_losers.append(c)
+
+    sleft = seats - sum(node_order_a)
+    nleft = len(rem)
+
+    if sleft == nleft or og_losers == [] or og_winners == []:
+        return 0
+
+    winners = {c for i, c in enumerate(node_order_c) if node_order_a[i] == 1}
+
+    min_r = {c.num: 0 for c in candidates if c.num in rem}
+    filtered_ballots = []
+    for b in ballots:
+        prefs = [p for p in b.prefs if p in rem]
+        if not prefs:
+            continue
+        _, elb, ub = calc_tallies(b, node_order_c, transfer, winners)
+        filtered_ballots.append((prefs, elb, ub))
+        min_r[prefs[0]] += elb
+
+    # calculate how much it costs to seat ogl
+    lowerbound = np.inf
+    for ogl in og_losers:
+        displacement_cost = np.inf
+        left_at_end_costs = []
+
+        # calculate how much it costs to displace ogw with ogl
+        for r in rem:
+            if r == ogl:
+                continue
+            max_l = 0
+
+            for prefs, elb, ub in filtered_ballots:
+                posl = prefs.index(ogl) if ogl in prefs else -1
+                posw = prefs.index(r) if r in prefs else -1
+                if posl != -1 and (posw == -1 or posl < posw):  # ogl ranked above ogw
+                    max_l += ub
+
+            dp = max(0.0, 0.5 * (min_r[r] - max_l))
+            left_at_end_costs.append(dp)
+            if r in og_winners:
+                displacement_cost = min(displacement_cost, dp)
+
+        max_l = 0
+        for prefs, elb, ub in filtered_ballots:
+            if ogl in prefs:
+                max_l += ub
+
+        quota_cost = max(0, quota - max_l)
+        left_at_end_costs.sort()
+
+        # ogl needs to outlast nleft - sleft candidates
+        left_at_end_cost = max(left_at_end_costs[:nleft - sleft])
+
+        lowerbound = min(lowerbound, max(displacement_cost, min(quota_cost, left_at_end_cost)))
+
+    return math.ceil(lowerbound)
+
+
+def compute_disp_lb_old(candidates, ballots, node_order_c, node_order_a, \
                     winner_set, rem, quota, seats):
     """
         Consider a prefix where it is clear that at least one original loser 
@@ -547,16 +664,16 @@ def compute_disp_lb(candidates, ballots, node_order_c, node_order_a, \
 
     """
     # Determine if we need an original loser to get seated sometime
-    # in the future (past the current outcome prefix
+    # in the future (past the current outcome prefix)
     new_winner = False
-    curr_winners = []
     for i in range(len(node_order_c)):
         if node_order_a[i] == 1:
-            w = node_order_c[i]
-            curr_winners.append(w)
-            if not (w in winner_set):
+            if node_order_c[i] not in winner_set:
                 new_winner = True
                 break
+        elif node_order_c[i] in winner_set:
+            new_winner = True
+            break
 
     # Compile set of original losers, and winners, that remain standing after
     # the outcome prefix node_order_c/node_order_a. The sets will remain
@@ -728,47 +845,55 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                              winner_set, candidates, ballots, rem, quota, args, merge_map, \
                              tot_ballots, running_ub, order_c, order_a))
 
-    with Pool(processes=args.pc) as pool:
-        result = pool.starmap(eval_child_initial, children)
+    result = []
+    if args.pc > 1:
+        with Pool(processes=args.pc) as pool:
+            result = pool.starmap(eval_child_initial, children)
+    else:
+        for c in children:
+            result.append(eval_child_initial(*c))
 
-        for lb, dlb, eqlb, node, solved in result:
-            if solved:
-                nsolves += 1
+    for lb, dlb, eqlb, node, solved in result:
 
+        if solved:
+            nsolves += 1
+
+        if log != None:
+            print("EVALUATING {}/{} LB {} (D {} EQ {})".format( \
+                node.order_c, node.order_a, lb, dlb, eqlb), \
+                file=log, flush=True)
+
+            if lb < running_ub:
+                if node.dist == None:
+                    print("    DISTANCE None/Infeasible", file=log, \
+                          flush=True)
+                elif node.dist == -1:
+                    print("    No solution found by timeout", file=log, \
+                          flush=True)
+                    print("    Margin computation terminated", file=log, \
+                          flush=True)
+                else:
+                    print("    DISTANCE {:.2f}/{:.2f}".format(node.dist, \
+                                                              node.dist_ub), file=log, flush=True)
+
+        if node.dist == -1:
+            return running_lb, running_ub, nexps, nsolves, \
+                frontier.ignore_cntr
+
+        # skip infeasible nodes
+        if node.dist is None or node.dist >= running_ub:
+            continue
+        else:
             if log != None:
-                print("EVALUATING {}/{} LB {} (D {} EQ {})".format( \
-                    node.order_c, node.order_a, lb, dlb, eqlb), \
-                    file=log, flush=True)
-                if dlb != 0:
-                    print("D is non-zero.", file=log, flush=True)
+                print("        Added to frontier", file=log, flush=True)
 
-                if lb < running_ub:
-                    if node.dist == None:
-                        print("    DISTANCE None/Infeasible", file=log, \
-                              flush=True)
-                    elif node.dist == -1:
-                        print("    No solution found by timeout", file=log, \
-                              flush=True)
-                        print("    Margin computation terminated", file=log, \
-                              flush=True)
-                    else:
-                        print("    DISTANCE {:.2f}/{:.2f}".format(node.dist, \
-                                                                  node.dist_ub), file=log, flush=True)
+        if frontier.size > 0:
+            running_lb = min(node.dist, min([frontier.get_node(n).dist \
+                                             for n in frontier.nodes]))
+        else:
+            running_lb = node.dist
 
-            if node.dist == -1:
-                return running_lb, running_ub, nexps, nsolves, \
-                    frontier.ignore_cntr
-
-            if node.dist == None or node.dist >= running_ub:
-                continue
-
-            if frontier.size > 0:
-                running_lb = min(node.dist, min([frontier.get_node(n).dist \
-                                                 for n in frontier.nodes]))
-            else:
-                running_lb = node.dist
-
-            frontier.insert(node, lse=args.lse, log=log)
+        frontier.insert(node, lse=args.lse, log=log)
 
     if log != None:
         print("Lower bound {}, upper bound {}".format(running_lb, \
@@ -784,6 +909,11 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
     if tlimit != None and tnow - tstart > tlimit:
         return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr
+
+    if frontier.size == 0:  # search space exhausted
+        running_lb = running_ub  # running_ub must be a true lower bound
+        if log is not None:
+            print("Search space exhausted", file=log, flush=True)
 
     while frontier.size > 0:
         running_lb = frontier.get_lower_bound()
@@ -803,8 +933,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         if fnodes == []:
             break
 
-        arg_list = []
-        min_lb = running_ub
+        # expand nodes until frontier is empty or we have converged
         for fn in fnodes:
             if log != None:
                 print("EXPANDING NODE {}".format(fn), file=log, flush=True)
@@ -813,6 +942,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                                       running_ub, ncands, args, quota, tot_ballots, merge_map, \
                                       order_c, order_a)
 
+            # evaluate children
+            min_dist = None
             for isleaf, node_order_c, node_order_a, lb, dlb, eqlb, dist, \
                     dist_ub, new_rem, node_winners, solved in children:
 
@@ -823,39 +954,30 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     print("EVALUATED {}/{} LB {} (D {} EQ {})".format( \
                         node_order_c, node_order_a, lb, dlb, eqlb), \
                         file=log, flush=True)
-                    if dlb != 0:
-                        print("D is non-zero.", file=log, flush=True)
 
                     if dist == None:
                         print("    DISTANCE None/Infeasible", file=log, \
                               flush=True)
                     else:
-                        print("    DISTANCE {}/{}".format(dist, dist_ub), \
+                        print("    DISTANCE {}/{}, MINLP used: {}".format(dist, dist_ub, solved), \
                               file=log, flush=True)
-                        print(f"    -- sovled? {solved}", file=log, flush=True)
 
-                if dist == None or dist >= running_ub:
-                    print("   ~~~~ PRUNED", file=log, flush=True)
+                # skip infeasible nodes
+                if dist is None or dist >= running_ub:
+                    if log != None:
+                        print("        PRUNED!", file=log, flush=True)
                     continue
 
-                if frontier.size > 0:
-                    print("1", file=log, flush=True)
-                    running_lb = min(dist, frontier.get_lower_bound())
-                else:
-                    print("2", file=log, flush=True)
-                    running_lb = min(dist, running_ub)
-
-                print(" [RUNNING LB] =", running_lb, dist, running_ub, file=log, flush=True)
-
                 if isleaf:
-                    print("   ~ LEAF", file=log, flush=True)
-                    min_lb = min(min_lb, lb)
+                    # fully evaluated leaf nodes
+                    if log != None:
+                        print("        LEAF", file=log, flush=True)
 
-                    if log != None and dist_ub < running_ub:
-                        print("Reducing upper bound to {}".format(dist_ub), \
+                    if log != None and dist < running_ub:
+                        print("Reducing upper bound from {} to {}".format(running_ub, dist), \
                               file=log, flush=True)
 
-                    running_ub = min(running_ub, dist_ub)
+                    running_ub = min(running_ub, dist)  # update running_ub if possible
 
                     if abs(running_ub - running_lb) <= agap:
                         converged = True
@@ -868,23 +990,37 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
                     idx = frontier.insert(newn, lse=args.lse, log=log)
 
-                    print("idx is", idx, file=log, flush=True)
+                    if log is not None and idx is None:
+                        print("        SUBSUMED", file=log, flush=True)
 
-                    if idx != None:
+                    if idx is not None:
                         fn.children.append(newn.id)
-
-                    min_lb = min(min_lb, newn.dist)
-
             if converged:
                 break
 
-            elif frontier.size == 0:
-                running_lb = max(running_lb, min_lb)
+            # check if running_lb can be increased
+            old_lb = running_lb
+            if frontier.size == 0:  # search space exhausted
+                break  # no need to continue search
+            else:
+                running_lb = max(running_lb, frontier.get_lower_bound())
+
+            if old_lb < running_lb and log is not None:
+                print(f"Increasing lower bound from {old_lb} to {running_lb}", file=log, flush=True)
+
+            if abs(running_ub - running_lb) <= agap:
+                converged = True
+                break
 
             # if args.ap:
             # Update distances for expanded node (and ancestors) based on
             # evaluations of expanded nodes children
             #    frontier.back_propagate(fn.id)
+
+        if frontier.size == 0:  # search space exhausted
+            running_lb = running_ub  # running_ub must be a true lower bound
+            if log is not None:
+                print("Search space exhausted", file=log, flush=True)
 
         if converged:
             break
@@ -918,27 +1054,37 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
                        candidates, ballots, rem, quota, args, merge_map, tot_ballots, running_ub, \
                        full_order_c, full_order_a):
-    # Prefix of original outcome should get 0 evaluation
+    # Is this a prefix of the original outcome?
     l = len(node_order_c)
-    if node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == \
-            full_order_a[:l]:
-        return 0, 0, 0, TreeNode(-1, node_order_c, node_order_a, node_winners, \
-                                 rem, 0, 0), False
+    orig_prefix = node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == full_order_a[:l]
+
+    # if node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == \
+    #         full_order_a[:l]:
+    #     return 0, 0, 0, TreeNode(-1, node_order_c, node_order_a, node_winners, \
+    #                              rem, 0, 0), False
 
     # Compute order_q map
     order_q = get_order_q(node_order_c, node_order_a, 0, node_winners)
 
-    disp_lowerbound = compute_disp_lb(candidates, ballots, \
-                                      node_order_c, node_order_a, winner_set, rem, quota, args.seats) if \
-        args.dlb else 0
-
+    transfer = None
     if args.eqlb:
-        eqlb = compute_elim_quota_lb_new(candidates, ballots, node_order_c, \
+        eqlb, transfer = compute_elim_quota_lb_new(candidates, ballots, node_order_c, \
                                      node_order_a, quota, order_q)
     else:
         eqlb = compute_elim_quota_lb_old(candidates, ballots, node_order_c, \
                                      node_order_a, quota, order_q)
 
+    if orig_prefix:
+        eqlb = 0
+
+    if False: #args.dlbmb:
+        disp_lowerbound = compute_disp_lb_old(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota,
+                                              args.seats)
+    elif args.dlb and transfer is not None:
+        disp_lowerbound = compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota,
+                                              args.seats, transfer)
+    else:
+        disp_lowerbound = 0
 
     lb = max(disp_lowerbound, eqlb)
 
@@ -958,12 +1104,15 @@ def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
 def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
                node_winners, winner_set, candidates, ballots, tot_ballots, rem, \
                quota, running_ub, full_order_c, full_order_a, isleaf):
-    # Prefix of original outcome should get 0 evaluation
+
+    # Is this a prefix of the original outcome?
     l = len(node_order_c)
-    if node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == \
-            full_order_a[:l]:
-        return False, node_order_c, node_order_a, 0, 0, 0, 0, 0, rem, \
-            node_winners, False
+    orig_prefix = node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == full_order_a[:l]
+
+    # if node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == \
+    #         full_order_a[:l]:
+    #     return False, node_order_c, node_order_a, 0, 0, 0, 0, 0, rem, \
+    #         node_winners, False
 
     # Work out the round at which we can stop forming constraints,
     # compute bounds on when candidate could achieve their quotas,
@@ -972,17 +1121,26 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
 
     order_q = get_order_q(node_order_c, node_order_a, LAST_ROUND, node_winners)
 
-    disp_lowerbound = compute_disp_lb(candidates, ballots, \
-                                      node_order_c, node_order_a, winner_set, rem, quota, args.seats) if \
-        args.dlb and (not isleaf) else 0
-
+    transfer = None
     if args.eqlb:
-        eqlb = compute_elim_quota_lb_new(candidates, ballots, node_order_c, \
+        eqlb, transfer = compute_elim_quota_lb_new(candidates, ballots, node_order_c, \
                                      node_order_a, quota, order_q)
     else:
         eqlb = compute_elim_quota_lb_old(candidates, ballots, node_order_c, \
                                      node_order_a, quota, order_q)
 
+    if orig_prefix:
+        assert eqlb == 0, f"eqlb is {eqlb}, should be 0. {node_order_c[:l]}/{node_order_a[:l]}"
+        eqlb = 0
+
+    if False: #args.dlbmb:
+        disp_lowerbound = compute_disp_lb_old(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota,
+                                              args.seats)
+    elif args.dlb and transfer:
+        disp_lowerbound = compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota,
+                                              args.seats, transfer)
+    else:
+        disp_lowerbound = 0
 
     lowerbound = max(eqlb, max(disp_lowerbound, parent_dist))
 
@@ -1011,7 +1169,8 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
                                        lowerbound, isleaf=isleaf, log=None)
 
     else:
-        merge_map = dict()
+        merge_map = {c.num: c.num for c in candidates}
+        # merge_map = dict()
         _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
                                        node_order_a, rem, node_winners, order_q, merge_map, \
                                        [], tot_ballots, args, quota, running_ub, LAST_ROUND, \
@@ -1051,7 +1210,9 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands, \
             nrem = len(rem)
             isleaf = False
 
-            if seats_filled == args.seats:
+            if seats_filled > args.seats:
+                continue  # invalid outcome (too many seats filled)
+            elif seats_filled == args.seats:
                 node_order_c += rem
                 node_order_a += [0] * nrem
                 new_rem = []
@@ -1079,7 +1240,11 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands, \
                              full_order_a, isleaf))
 
     result = []
-    with Pool(processes=args.pc) as pool:
-        result = pool.starmap(eval_child, children)
+    if args.pc > 1:
+        with Pool(processes=args.pc) as pool:
+            result = pool.starmap(eval_child, children)
+    else:
+        for c in children:
+            result.append(eval_child(*c))
 
     return fnode, result
