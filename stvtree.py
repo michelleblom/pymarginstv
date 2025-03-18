@@ -305,9 +305,6 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
     winners = []
     transfer = dict()
 
-    # print("compute!", [order_c[i] for i in range(len(order_c))], order_a, flush=True)
-    # print(f"compute_elim_quota_lb_new: {order_c}/{order_a}, {order_q=}", flush=True)
-
     for i in range(len(order_c)):
         ce = order_c[i]
 
@@ -335,14 +332,8 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
                     min_ce += elb_add
                     # max_ce += ub_add
 
-            # if min_ce != max_ce:
-            #     print(" ~ E ~ ", ce, f"{min_ce}--{max_ce}", min([i for i in max_others.values() if i >= min_ce], default=0), min_others, max_others, flush=True)
-
             for c, v in max_others.items():
                 elim_lb = max(elim_lb, max(0, 0.5 * (min_ce - v)))
-                # print(f" ~~ {c}->{ce} costs", max(0, 0.5 * (np.floor(min_ce) - np.ceil(v))), flush=True)
-            # print(" ~~~ elim_lb =", elim_lb, flush=True)
-            # print(f"  ELB: {ce=}, {min_ce=}, {elim_lb=} {max_others=}", flush=True)
 
         else:  # candidate seated
             if ce in order_q:  # candidate got a quota, else seated by default (last round)
@@ -362,8 +353,6 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
 
                 winners.append(ce)
 
-                # print(" ~ Q ~ ", ce, lb_value, ub_value, flush=True)
-
                 cmax = ub_value
                 lb_value = max(lb_value, quota)  # restrict lb_value to be at lest quota
                 ub_value = max(lb_value, ub_value)  # restrict ub_value to be at lest lb_value
@@ -376,16 +365,11 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
                     fp_others_max = max([cands[c.num].fp_votes for c in cands if c.num not in gone and c.num != ce])
                     displacement_cost = max(0, 0.5 * (fp_others_max - cmax))  # if someone has reached quota, we need to surpass their votes
 
-                # print(f"  QLB: {ce=}, {quota=}, {cmax=}, {fp_others_max=}, {0.5 * (fp_others_max - np.floor(cmax))}, {lb_value=}, {ub_value=}, {transfer[ce]=}, {displacement_cost=}", flush=True)
-
-                # print(" ---> Q ~ ", ce, lb_value, transfer[ce][0], ub_value, transfer[ce][1], flush=True)
                 quota_lb = max(quota_lb, quota - cmax, displacement_cost)
-                # print(" ~~~ quota_lb =", quota_lb, flush=True)
 
         gone.append(ce)
 
     lb = math.ceil(max(elim_lb, quota_lb))
-    # print("  RET <--", lb, flush=True)
     return max(0, lb), transfer
 
 
@@ -566,7 +550,6 @@ def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_
         rem          : List of candidates not present in node_order_c.
 
     """
-    # print(f"compute_disp_lb_new: {node_order_c}/{node_order_a}, {winner_set=}, {rem=}, {quota=}, {seats=}, {transfer=}", flush=True)
     # Determine if we need an original loser to get seated sometime
     # in the future (past the current outcome prefix)
     new_winner = False
@@ -579,7 +562,6 @@ def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_
             new_winner = True
             break
 
-    # print(f"\t {new_winner=}", flush=True)
     # Compile set of original losers, and winners, that remain standing after
     # the outcome prefix node_order_c/node_order_a. The sets will remain
     # empty if we have already changed who won the election in the outcome
@@ -592,8 +574,6 @@ def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_
                 og_winners.append(c)
             else:
                 og_losers.append(c)
-
-    # print(f"\t {og_losers=}, {og_winners=}", flush=True)
 
     sleft = seats - sum(node_order_a)
     nleft = len(rem)
@@ -634,7 +614,6 @@ def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_
             dp = max(0.0, 0.5 * (min_r[r] - max_l))
             left_at_end_costs.append(dp)
             if r in og_winners:
-                # print(f"\t\t\t {dp=}, {displacement_cost=}", flush=True)
                 displacement_cost = min(displacement_cost, dp)
 
         max_l = 0
@@ -642,36 +621,14 @@ def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_
             if ogl in prefs:
                 max_l += ub
 
-        new_quota_cost = max(0, quota - max_l)  # TODO: check if this is correct (fixed???)
-        old_quota_cost = max(0, max_l - quota)  # TODO: check if this is correct (original)
-        quota_cost = new_quota_cost  # TODO: check if this is correct (original)
+        quota_cost = max(0, quota - max_l)
         left_at_end_costs.sort()
 
         # ogl needs to outlast nleft - sleft candidates
-        # print(f"\t left_at_end_costs={left_at_end_costs}, nleft={nleft}, sleft={sleft}, rem={rem}, og_losers={og_losers}, og_winner={og_winners}", flush=True)
         left_at_end_cost = max(left_at_end_costs[:nleft - sleft])
-        states = []
-        if old_quota_cost < left_at_end_cost:
-            if old_quota_cost > displacement_cost:
-                states.append('old quota_cost < left_at_end_cost  and  > displacement_cost')
-                if old_quota_cost < lowerbound:
-                    states.append('old quota_cost < lowerbound. LOWEBOUND CHANGED DUE TO OLD QUOTA')
 
-        if new_quota_cost < left_at_end_cost:
-            if new_quota_cost > displacement_cost:
-                states.append('fixed quota_cost < left_at_end_cost  and  > displacement_cost')
-                if new_quota_cost < lowerbound:
-                    states.append('fixed quota_cost < lowerbound. LOWEBOUND CHANGED DUE TO FIXED QUOTA')
-
-        if states:
-            print(f' --> {node_order_c}/{node_order_a}, {ogl=}, {max_l=}, {quota=}.   {lowerbound=}, max({displacement_cost=}, min({new_quota_cost=}, {old_quota_cost=}, {left_at_end_cost=}))',
-                    flush=True)
-            print(", ".join(states), flush=True)
-
-        # print(f"\t {ogl=}, {lowerbound=}, {displacement_cost=}, {quota_cost=}, {left_at_end_cost=}", flush=True)
         lowerbound = min(lowerbound, max(displacement_cost, min(quota_cost, left_at_end_cost)))
 
-    # print(f"   RET <--- {lowerbound}", flush=True)
     return math.ceil(lowerbound)
 
 
@@ -1118,8 +1075,6 @@ def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
                                      node_order_a, quota, order_q)
 
     if orig_prefix:
-        if eqlb != 0:
-            print("HEY")
         eqlb = 0
 
     if False: #args.dlbmb:

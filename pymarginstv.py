@@ -1,5 +1,5 @@
 #
-#    Copyright (C) 2023  Michelle Blom
+#    Copyright (C) 2025  Michelle Blom, Alexander Ek
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU Affero General Public License as published
@@ -97,18 +97,17 @@ if __name__ == "__main__":
     candidates, ballots, cid2num = None, None, None
 
     # Check for given input data type
-    # print(args.data.endswith(".blt"))
     if args.data.endswith(".stv"):
-        candidates, ballots, _, cid2num, _ = read_ballots_stv(args.data)
+        candidates, ballots, _, cid2num, nballots = read_ballots_stv(args.data)
 
     elif args.data.endswith(".blt"):
-        candidates, ballots, _, cid2num, _, _ = read_ballots_blt(args.data)
+        candidates, ballots, _, cid2num, nballots, _ = read_ballots_blt(args.data)
 
     elif args.data.endswith(".json"):
-        candidates, ballots, _, cid2num, _ = read_ballots_json(args.data)
+        candidates, ballots, _, cid2num, nballots = read_ballots_json(args.data)
 
     else:
-        candidates, ballots, _, cid2num, _ = read_ballots_txt(args.data)
+        candidates, ballots, _, cid2num, nballots = read_ballots_txt(args.data)
 
     # Simulated election outcome: order_c contains candidates in order
     # of when they are elected/eliminated; order_a contains a series of 1s/0s
@@ -121,7 +120,7 @@ if __name__ == "__main__":
     # a candidate who may have had a quota on first preferences. For example,
     # order_q[w] = (-1,0) says that w could have had their quota on first
     # preferences or they could have achieved it through the vote transfers
-    # in round 0. 
+    # in round 0.
     order_q = {}
     winners = []
 
@@ -253,7 +252,7 @@ if __name__ == "__main__":
     #     nexps, nsolves, ignores, lb, original_upper_bound))
 
     t0_end = perf_counter()
-    # print(tstart_old-tend_old)
+
     # datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, time(s)
     print(f"{args.displayname}, {len(candidates)}, {args.seats}, {quota}, {original_upper_bound}, {lb}, {ub}, {nexps}, {nsolves}, "
           f"{tend-tstart}, {t0_end-t0_start}, {args.lse}, {args.dlb}, {args.eqlb}, {external_upper_bound}")
@@ -267,9 +266,6 @@ if __name__ == "__main__":
     #    node_order_a, args, len(candidates), node_winners, winner_set, \
     #    candidates, ballots, totvotes, [], quota, 100000000, [0, 1, 5, 2, 3, 4],\
     #    [1, 1, 1, 0, 0, 1], True)
-
-    #print(dist)
-    #print(dist_ub)
 
     log.close()
 

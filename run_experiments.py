@@ -1,3 +1,24 @@
+#
+#    Copyright (C) 2025  Michelle Blom, Alexander Ek
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU Affero General Public License as published
+#    by the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU Affero General Public License for more details.
+#
+#    You should have received a copy of the GNU Affero General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+This script is used to compare the results of margin calculation implementations and comparing various contests.
+It assumes that the ballot files are in `../stv-rla/data`, which can be found at https://github.com/michelleblom/stv-rla
+"""
+
 import sys
 import os
 import glob
@@ -1037,13 +1058,6 @@ ubs = {
     "Example": 65,
 }
 
-# datafiles = [
-#     # ("Scotland/2022/preferenceprofile_v0001_ward-8-mid-formartine_06052022_172123.blt", 4),
-#     # ("Scotland/GCC_07_Anderson_ballots.txt", 4),
-#     # ("Scotland/2022/PreferenceProfile_V0001_North_Isles_Ward_05082022_112827.blt", 1),
-#     ("example.txt", 3)
-# ]
-
 
 def run_audit():
     reps = 3
@@ -1055,12 +1069,10 @@ def run_audit():
     # 3 == new, aka New+Both
     # 4 == new without lse, aka New+DLB
     # 5 == new without dlb, aka New+LSE
-    # 6 == new without dlb+lse, aka New
+    # 6 == new without dlb and lse, aka New
     # versions = [4, 5, 6, 0, 3, -1, -3]
     versions = [4, 5, 6, 0, 3, -1]
-    # versions = [4]
 
-    # global seats
     print(
         "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb, new_ub")
     for version in versions:
@@ -1109,31 +1121,17 @@ def run_ub():
         if "example" in datafile:
             path = "./data/" + datafile
         else:
-            path = "/Users/aekk0001/Documents/stv-rla/data/" + datafile
+            path = "../stv-rla/data/" + datafile
         if path.endswith(".txt"):
             path = path.split(".txt")[0] + ".blt"
-            # outfile = path.split(".blt")[0] + ".json"
-            # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/blt_to_stv "{path}" --out "{outfile}"')
-        # else:
-        #     continue
         if path.endswith(".blt"):
             path = path.split(".blt")[0] + ".json"
         if path.endswith(".json"):
             outfile = path.split(".json")[0] + ".vchange"
-            # if outfile not in allFiles:
             print(f'{path} 1st:')
-            os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes Minimal "{path}" -o "{outfile}"')
-            # print(f'{path} 2nd:')
-            # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes ACT2021 "{outfile}" -o "{outfile}"')
-            # print(f'{path} 3rd:')
-            # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/debug/change_outcomes ACT2021 "{outfile}" -o "{outfile}"')
-            # with open(outfile) as file:
-            #     res = json.load(file)
-            #     print("X")
-            # # # os.system(f'/Users/aekk0001/Documents/ConcreteSTV/target/release/blt_to_stv "{path}" -o "{outfile}"')
+            os.system(f'../ConcreteSTV/target/debug/change_outcomes Minimal "{path}" -o "{outfile}"')
         else:
-            pass
-            # print("path does not end with .blt")
+            print("path does not end with .txt, .blt, or .json")
 
 
 def get_ub_csv():
@@ -1249,408 +1247,3 @@ if __name__ == "__main__":
     # run_ub()
     # get_ub_csv()
     # save_ub_changes_to_json()
-
-
-# allFiles = glob.glob("/Users/aekk0001/Documents/stv-rla/data/Scotland/2022/*")
-#
-# for file in allFiles:
-#     if file.endswith(".stv"):
-#         candidates, ballots, _, cid2num, totvotes = read_ballots_stv(file)
-#     elif file.endswith(".blt"):
-#         candidates, ballots, _, cid2num, totvotes, seats = read_ballots_blt(file)
-#     elif file.endswith(".json"):
-#         candidates, ballots, _, cid2num, totvotes = read_ballots_json(file)
-#     elif file.endswith(".txt"):
-#         candidates, ballots, _, cid2num, totvotes = read_ballots_txt(file)
-#     else:
-#         continue
-#     # print(len(candidates), len(ballots), totvotes, file.split("/")[-1])
-#     if 10 >= len(candidates) >= 8:
-#         # print(f'("{file}", {seats})')
-#         pass
-#     elif len(candidates) < 8:
-#         print(f'("{file.split("/data/")[1]}", {seats}),', flush=True)
-
-# #
-# txt = """Aberdeen/PreferenceProfile_V0001_Airyhall-Broomhill-Garthdee-Ward_06052022_160546.txt
-# Aberdeen/PreferenceProfile_V0001_Bridge-of-Don-Ward_06052022_160546.txt
-# Aberdeen/PreferenceProfile_V0001_Dyce-Bucksburn-Danestone-Ward_06052022_160545.txt
-# Aberdeen/PreferenceProfile_V0001_George-St-Harbour-Ward_06052022_160545.txt
-# Aberdeen/PreferenceProfile_V0001_Hazlehead-Queens-Cross-Countesswells-Ward_06052022_160545.txt
-# Aberdeen/PreferenceProfile_V0001_Hilton-Woodside-Stockethill-Ward_06052022_160546.txt
-# Aberdeen/PreferenceProfile_V0001_Kincorth-Nigg-Cove-Ward_06052022_160546.txt
-# Aberdeen/PreferenceProfile_V0001_Kingswells-Sheddocksley-Summerhill-Ward_06052022_160546.txt
-# Aberdeen/PreferenceProfile_V0001_Lower-Deeside-Ward_06052022_160546.txt
-# Aberdeen/PreferenceProfile_V0001_Midstocket-Rosemount-Ward_06052022_160545.txt
-# Aberdeen/PreferenceProfile_V0001_Northfield-Mastrick-North-Ward_06052022_160545.txt
-# Aberdeen/PreferenceProfile_V0001_Tillydrone-Seaton-Old-Aberdeen-Ward_06052022_160546.txt
-# Aberdeen/PreferenceProfile_V0001_Torry-Ferryhill-Ward_06052022_160545.txt
-# Aberdeenshire/preferenceprofile_v0001_ward-1-banff-and-district_06052022_172114.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-10-west-garioch_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-11-inverurie-and-district_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-12-east-garioch_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-13-westhill-and-district_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-14-huntly-strathbogie-and-howe-of-alford_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-15-aboyne-upper-deeside-and-donside_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-16-banchory-and-mid-deeside_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-17-north-kincardine_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-18-stonehaven-and-lower-deeside_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-19-mearns_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-2-troup_06052022_172123.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-3-fraserburgh-and-district_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-4-central-buchan_06052022_172124.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-5-peterhead-north-and-rattray_06052022_172118.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-6-peterhead-south-and-cruden_06052022_172115.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-7-turriff-and-district_06052022_172118.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-8-mid-formartine_06052022_172123.csv
-# Aberdeenshire/preferenceprofile_v0001_ward-9-ellon-and-district_06052022_172124.csv
-# Angus/PreferenceProfile_V0001_Ward-1---Kirriemuir-and-Dean_06052022_150515 (1).txt
-# Angus/PreferenceProfile_V0001_Ward-2---Brechin-and-Edzell_06052022_150515.txt
-# Angus/PreferenceProfile_V0001_Ward-3---Forfar-and-District_06052022_150515.txt
-# Angus/PreferenceProfile_V0001_Ward-4---Monifieth-and-Sidlaw_06052022_150515.txt
-# Angus/PreferenceProfile_V0001_Ward-5---Carnoustie-and-District_06052022_150514 (1).txt
-# Angus/PreferenceProfile_V0001_Ward-6---Arbroath-West-Letham-and-Friockheim_06052022_150511.txt
-# Angus/PreferenceProfile_V0001_Ward-7---Arbroath-East-and-Lunan_06052022_150515.txt
-# Angus/PreferenceProfile_V0001_Ward-8---Montrose-and-District_06052022_150515.txt
-# ArgyllAndBute/preferenceprofile_v0001_ward-1-south-kintyre_06052022_120128.blt
-# ArgyllAndBute/preferenceprofile_v0002_ward-2-kintyre-and-the-islands_06052022_130502.blt
-# ArgyllAndBute/preferenceprofile_v0003_ward-3-mid-argyll_06052022_133803.blt
-# ArgyllAndBute/preferenceprofile_v0004_ward-4-oban-south-and-the-isles_06052022_143143.blt
-# ArgyllAndBute/preferenceprofile_v0005_ward-5-oban-north-and-lorn_06052022_151453.blt
-# ArgyllAndBute/preferenceprofile_v0007_ward-6-cowal_06052022_160055.blt
-# ArgyllAndBute/preferenceprofile_v0008_ward-7-dunoon_06052022_163322.blt
-# ArgyllAndBute/preferenceprofile_v0009_ward-8-isle-of-bute_06052022_165355.blt
-# ArgyllAndBute/preferenceprofile_v0010_ward-9-lomond-north_06052022_173349.blt
-# ArgyllAndBute/preferenceprofile_v0012_ward-10-helensburgh-central_06052022_182005.blt
-# ArgyllAndBute/preferenceprofile_v0012_ward-11-helensburgh-and-lomond-south_06052022_182005.blt
-# Clackmannanshire/clacks_W1_West_2022_6693.txt
-# Clackmannanshire/clacks_W2_North_2022_6694.txt
-# Clackmannanshire/clacks_W3_Central_2022_6695.txt
-# Clackmannanshire/clacks_W4_South_2022_6696.txt
-# Clackmannanshire/clacks_W5_East_2022_6697.txt
-# Comhairle/cnesair_ward02_preferenceprofile.txt
-# Comhairle/cnesair_ward07_preferenceprofile.txt
-# Comhairle/cnesair_ward08_preferenceprofile.txt
-# Comhairle/cnesair_ward09_preferenceprofile.txt
-# Comhairle/cnesair_ward10_preferenceprofile.txt
-# Comhairle/cnesair_ward_03_preferenceprofile.txt
-# Comhairle/cnesair_ward_04_preferenceprofile.txt
-# Comhairle/cnesair_ward_05_preferenceprofile.txt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-1---Stranraer-and-the-Rhins_06052022_171141.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-1---Strathmartine_06052022_161516.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-10---Annandale-South_06052022_171202.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-11---Annandale-North_06052022_171202.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-12---Annandale-East-and-Eskdale_06052022_171202.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-2---Lochee_06052022_161513.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-2---Mid-Galloway-and-Wigtown-West_06052022_171201.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-3---Dee-and-Glenkens_06052022_171147.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-3---West-End_06052022_161516.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-4---Castle-Douglas-and-Crocketford_06052022_171202.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-4---Coldside_06052022_161514.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-5---Abbey_06052022_171201.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-5---Maryfield_06052022_161515.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-6---North-East_06052022_161516.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-6---North-West-Dumfries_06052022_171201.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-7---East-End_06052022_161516.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-7---Mid-and-Upper-Nithsdale_06052022_171202.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-8---Lochar_06052022_171202.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-8---The-Ferry_06052022_161517.blt
-# DumfriesAndGalloway/PreferenceProfile_V0001_Ward-9---Nith_06052022_171202.blt
-# EastAyrshire/PreferenceProfile-V0002-Ward-4-Kilmarnock-East-and-Hurlford-06052022-145128.blt.pdf
-# EastAyrshire/PreferenceProfile-Ward-6-Irvine-Valley.pdf
-# EastAyrshire/PreferenceProfile-Ward-7-Ballochmyle.pdf
-# EastAyrshire/PreferenceProfile-Ward-8-Cumnock-and-New-Cumnock.pdf
-# EastAyrshire/PreferenceProfile-Ward-9-Doon-Valley.pdf
-# EastAyrshire/PreferenceProfileReportWard1Annick.pdf
-# EastAyrshire/PreferenceProfileReportWard2KilmarnockNorth.pdf
-# EastAyrshire/PreferenceProfileReportWard3KilmarnockWestandCrosshouse.pdf
-# EastAyrshire/PreferenceProfileWard-5-Kilmarnock-South.pdf
-# EastDunbarton/edunbarton22_preference_profile_-_ward-5_-_bishopbriggs_south.xls
-# EastDunbarton/edunbarton22_preference_profile_w1.xlsx
-# EastDunbarton/edunbarton22_preference_profile_ward_2.xlsx
-# EastDunbarton/edunbarton22_preference_profile_ward_3.xlsx
-# EastDunbarton/edunbarton22_preference_profile_ward_4.xlsx
-# EastDunbarton/edunbarton22_preference_profile_ward_6.xlsx
-# EastDunbarton/edunbarton22_preference_profile_ward_7.xlsx
-# EastLothian/elothian22_PreferenceProfile_V0001_Ward_1___Musselburgh_06052022_153935.blt
-# EastLothian/elothian22_PreferenceProfile_V0001_Ward_2___Preston_Seton_and_Gosford_06052022_153931.blt
-# EastLothian/elothian22_PreferenceProfile_V0001_Ward_3___Tranent_Wallyford_and_Macmerry_06052022_153937.blt
-# EastLothian/elothian22_PreferenceProfile_V0001_Ward_4___North_Berwick_Coastal_06052022_153938.blt
-# EastLothian/elothian22_PreferenceProfile_V0001_Ward_5___Haddington_and_Lammermuir_06052022_153938.blt
-# EastLothian/elothian22_PreferenceProfile_V0001_Ward_6___Dunbar_and_East_Linton_06052022_153938.blt
-# EastRenfrewshire/Preference_Profile_Report_W1.pdf
-# EastRenfrewshire/Preference_Profile_Report_W2.pdf
-# EastRenfrewshire/Preference_Profile_Report_W4.pdf
-# EastRenfrewshire/Preference_Profile_Report_W5.pdf
-# EastRenfrewshire/Preference_profile_report_W3.pdf
-# Edinburgh/PreferenceProfile_V0001_Ward_10___Morningside_06052022_160625.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_11___City_Centre_06052022_155600.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_12___Leith_Walk_06052022_160625.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_13___Leith_06052022_155600.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_14___Craigentinny_Duddingston_06052022_160625.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_15___Southside_Newington_06052022_155603.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_16___Liberton_Gilmerton_06052022_160625.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_17___Portobello_Craigmillar_06052022_155600.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_1___Almond_06052022_155516.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_2___Pentland_Hills_06052022_160611.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_3___Drum_Brae_Gyle_06052022_155559.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_4___Forth_06052022_160611.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_5___Inverleith_06052022_155559.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_6___Corstorphine_Murrayfield_06052022_160625.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_7___Sighthill_Gorgie_06052022_155557.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_8___Colinton_Fairmilehead_06052022_160625.blt
-# Edinburgh/PreferenceProfile_V0001_Ward_9___Fountainbridge_Craiglockhart_06052022_155600.blt
-# Falkirk/falkirk22_Preference Profile_W1.csv
-# Falkirk/falkirk22_Preference Profile_W2.csv
-# Falkirk/falkirk22_Preference Profile_W3.csv
-# Falkirk/falkirk22_Preference Profile_W4.csv
-# Falkirk/falkirk22_Preference Profile_W5.csv
-# Falkirk/falkirk22_Preference Profile_w6.csv
-# Falkirk/falkirk22_Preference Profile_w7.csv
-# Falkirk/falkirk22_Preference Profile_w8.csv
-# Falkirk/falkirk22_Preference Profile_w9.csv
-# Fife/PreferenceProfile_V0001_Ward-1-West-Fife-and-Coastal-Villages_06052022_145537.blt
-# Fife/PreferenceProfile_V0001_Ward-10-Kirkcaldy-North_06052022_151928.blt
-# Fife/PreferenceProfile_V0001_Ward-11-Kirkcaldy-Central_06052022_145551.blt
-# Fife/PreferenceProfile_V0001_Ward-12-Kirkcaldy-East_06052022_151925.blt
-# Fife/PreferenceProfile_V0001_Ward-13-Glenrothes-West-and-Kinglassie_06052022_145551.blt
-# Fife/PreferenceProfile_V0001_Ward-14-Glenrothes-North-Leslie-and-Markinch_06052022_151925.blt
-# Fife/PreferenceProfile_V0001_Ward-15-Glenrothes-Central-and-Thornton_06052022_145551.blt
-# Fife/PreferenceProfile_V0001_Ward-16-Howe-Of-Fife-and-Tay-Coast_06052022_151928.blt
-# Fife/PreferenceProfile_V0001_Ward-17-Tay-Bridgehead_06052022_145551.blt
-# Fife/PreferenceProfile_V0001_Ward-18-St.-Andrews_06052022_151928.blt
-# Fife/PreferenceProfile_V0001_Ward-19-East-Neuk-and-Landward_06052022_145551.blt
-# Fife/PreferenceProfile_V0001_Ward-2-Dunfermline-North_06052022_151927.blt
-# Fife/PreferenceProfile_V0001_Ward-20-Cupar_06052022_151928.blt
-# Fife/PreferenceProfile_V0001_Ward-21-Leven-Kennoway-and-Largo_06052022_145552.blt
-# Fife/PreferenceProfile_V0001_Ward-22-Buckhaven-Methil-and-Wemyss-Villages_06052022_151928.blt
-# Fife/PreferenceProfile_V0001_Ward-3-Dunfermline-Central_06052022_145551.blt
-# Fife/PreferenceProfile_V0001_Ward-4-Dunfermline-South_06052022_151924.blt
-# Fife/PreferenceProfile_V0001_Ward-5-Rosyth_06052022_145544.blt
-# Fife/PreferenceProfile_V0001_Ward-6-Inverkeithing-and-Dalgety-Bay_06052022_151927.blt
-# Fife/PreferenceProfile_V0001_Ward-7-Cowdenbeath_06052022_145532.blt
-# Fife/PreferenceProfile_V0001_Ward-8-Lochgelly-Cardenden-and-Benarty_06052022_151928.blt
-# Fife/PreferenceProfile_V0001_Ward-9-Burntisland-Kinghorn-and-Western-Kirkcaldy_06052022_145551.blt
-# Glasgow/PreferenceProfile_V0001_Ward-1-Linn_06052022_163754.blt
-# Glasgow/PreferenceProfile_V0001_Ward-10-Anderston-City-Yorkhill_06052022_170256.blt
-# Glasgow/PreferenceProfile_V0001_Ward-11-Hillhead_06052022_163755.blt
-# Glasgow/PreferenceProfile_V0001_Ward-12-Victoria-Park_06052022_163755.blt
-# Glasgow/PreferenceProfile_V0001_Ward-13-Garscadden-Scotstounhill_06052022_165250.blt
-# Glasgow/PreferenceProfile_V0001_Ward-14-Drumchapel-Anniesland_06052022_170258.blt
-# Glasgow/PreferenceProfile_V0001_Ward-15-Maryhill_06052022_165258.blt
-# Glasgow/PreferenceProfile_V0001_Ward-16-Canal_06052022_163755.blt
-# Glasgow/PreferenceProfile_V0001_Ward-17-Springburn-Robroyston_06052022_170301.blt
-# Glasgow/PreferenceProfile_V0001_Ward-18-East-Centre_06052022_165259.blt
-# Glasgow/PreferenceProfile_V0001_Ward-19-Shettleston_06052022_170301.blt
-# Glasgow/PreferenceProfile_V0001_Ward-2-Newlands-Auldburn_06052022_165250.blt
-# Glasgow/PreferenceProfile_V0001_Ward-20-Baillieston_06052022_170301.blt
-# Glasgow/PreferenceProfile_V0001_Ward-21-North-East_06052022_170301.blt
-# Glasgow/PreferenceProfile_V0001_Ward-22-Dennistoun_06052022_163757.blt
-# Glasgow/PreferenceProfile_V0001_Ward-23-Partick-East-Kelvindale_06052022_170257.blt
-# Glasgow/PreferenceProfile_V0001_Ward-3-Greater-Pollok_06052022_163750.blt
-# Glasgow/PreferenceProfile_V0001_Ward-4-Cardonald_06052022_163754.blt
-# Glasgow/PreferenceProfile_V0001_Ward-5-Govan_06052022_165258.blt
-# Glasgow/PreferenceProfile_V0001_Ward-6-Pollokshields_06052022_170301.blt
-# Glasgow/PreferenceProfile_V0001_Ward-7-Langside_06052022_165250.blt
-# Glasgow/PreferenceProfile_V0001_Ward-8-Southside-Central_06052022_165258.blt
-# Glasgow/PreferenceProfile_V0001_Ward-9-Calton_06052022_163749.blt
-# Highland/PreferenceProfile_V0001_Aird_and_Loch_Ness_06052022_161539.blt
-# Highland/PreferenceProfile_V0001_Badenoch_and_Strathspey_06052022_161540.blt
-# Highland/PreferenceProfile_V0001_Black_Isle_06052022_161539.blt
-# Highland/PreferenceProfile_V0001_Cromarty_Firth_06052022_161538.blt
-# Highland/PreferenceProfile_V0001_Culloden_and_Ardersier_06052022_161539.blt
-# Highland/PreferenceProfile_V0001_Dingwall_and_Seaforth_06052022_161539.blt
-# Highland/PreferenceProfile_V0001_East_Sutherland_and_Edderton_06052022_161530.blt
-# Highland/PreferenceProfile_V0001_Eilean_a__Che___06052022_161539.blt
-# Highland/PreferenceProfile_V0001_Fort_William_and_Ardnamurchan_06052022_161540.blt
-# Highland/PreferenceProfile_V0001_Inverness_Central_06052022_161539.blt
-# Highland/PreferenceProfile_V0001_Inverness_Millburn_06052022_161539.blt
-# Highland/PreferenceProfile_V0001_Inverness_Ness_side_06052022_161539.blt
-# Highland/PreferenceProfile_V0001_Inverness_South_06052022_161540.blt
-# Highland/PreferenceProfile_V0001_Inverness_West_06052022_161539.blt
-# Highland/PreferenceProfile_V0001_Nairn_and_Cawdor_06052022_161539.blt
-# Highland/PreferenceProfile_V0001_North_West_and_Central_Sutherland_06052022_161534.blt
-# Highland/PreferenceProfile_V0001_Tain_and_Easter_Ross_06052022_161537.blt
-# Highland/PreferenceProfile_V0001_Thurso_and_Northwest_Caithness_06052022_161528.blt
-# Highland/PreferenceProfile_V0001_Wester_Ross_Strathpeffer_and_Lochalsh_06052022_161539.blt
-# Highland/PreferenceProfile_V0001_Wick_and_East_Caithness_06052022_161532.blt
-# Inverclyde/PreferenceProfile_Ward-2.blt
-# Inverclyde/PreferenceProfile_Ward-3.blt
-# Inverclyde/PreferenceProfile_Ward-4.blt
-# Inverclyde/PreferenceProfile_Ward-5.blt
-# Inverclyde/PreferenceProfile_Ward-6.blt
-# Inverclyde/PreferenceProfile_Ward-7.blt
-# Midlothian/PreferenceProfile_V0001_Ward_2___Bonnyrigg_06052022_151836.blt
-# Midlothian/Ward_1_Penicuik_preference_profile__open_from_within_MS_Word_or_similar_.blt
-# Midlothian/Ward_3_Dalkeith_preference_profile__open_from_within_MS_Word_or_similar_.blt
-# Midlothian/Ward_4_Midlothian_West_preference_profile__open_from_within_MS_Word_or_similar_.blt
-# Midlothian/Ward_5_Midlothian_East_preference_profile__open_from_within_MS_Word_or_similar_.blt
-# Midlothian/Ward_6_Midlothian_South_Dalkeith_preference_profile__open_from_within_MS_Word_or_similar_.blt
-# Moray/moray22_ward1.blt
-# Moray/moray22_ward2.blt
-# Moray/moray22_ward4.blt
-# Moray/moray22_ward5.blt
-# Moray/moray22_ward6.blt
-# Moray/moray22_ward7.blt
-# Moray/moray22_ward8.blt
-# NorthAyrshire/Preference Profile Ardrossan.pdf
-# NorthAyrshire/Preference Profile Arran.pdf
-# NorthAyrshire/Preference Profile Garnock Valley.pdf
-# NorthAyrshire/Preference Profile Irvine East.pdf
-# NorthAyrshire/Preference Profile Irvine South.pdf
-# NorthAyrshire/Preference Profile Irvine West.pdf
-# NorthAyrshire/Preference Profile Kilwinning.pdf
-# NorthAyrshire/Preference Profile North Coast.pdf
-# NorthAyrshire/Preference Profile Saltcoats and Stevenston.pdf
-# NorthLanarkshire/Preference Profile WArd 14 Thorniewood.xlsx
-# NorthLanarkshire/Preference Profile WArd 15 Bellshill.xlsx
-# NorthLanarkshire/Preference Profile WArd 4 Cumbernauld East.xlsx
-# NorthLanarkshire/Preference Profile WArd 7 Coatbridge North.xlsx
-# NorthLanarkshire/Preference Profile WArd 9 Airdrie Central.xlsx
-# NorthLanarkshire/Preference Profile Ward 1 Kilsyth.xlsx
-# NorthLanarkshire/Preference Profile Ward 10 Coatbridge West.xlsx
-# NorthLanarkshire/Preference Profile Ward 11 Coatbridge South.xlsx
-# NorthLanarkshire/Preference Profile Ward 12 Airdrie South.xlsx
-# NorthLanarkshire/Preference Profile Ward 13 Fortissat.xlsx
-# NorthLanarkshire/Preference Profile Ward 16 Mossend and Holytown.xlsx
-# NorthLanarkshire/Preference Profile Ward 17 Motherwell West.xlsx
-# NorthLanarkshire/Preference Profile Ward 18 Motherwell North.xlsx
-# NorthLanarkshire/Preference Profile Ward 19 Motherwell South East and Ravenscraig.xlsx
-# NorthLanarkshire/Preference Profile Ward 2 Cumbernauld North.xlsx
-# NorthLanarkshire/Preference Profile Ward 20 Murdostoun.xlsx
-# NorthLanarkshire/Preference Profile Ward 21 Wishaw.xlsx
-# NorthLanarkshire/Preference Profile Ward 3 Cumbernauld South.xlsx
-# NorthLanarkshire/Preference Profile Ward 5 Stepps, Chryston and Muirhead.xlsx
-# NorthLanarkshire/Preference Profile Ward 6 Gartcosh, Glenboig and Moodiesburn.xlsx
-# NorthLanarkshire/Preference Profile Ward 8 Airdrie North.xlsx
-# OrkneyIslands/orkney22-W2.blt
-# OrkneyIslands/orkney22-W3.blt
-# OrkneyIslands/orkney22-W4.blt
-# OrkneyIslands/orkney22-W5.blt
-# OrkneyIslands/orkney22-W6.blt
-# OrkneyIslands/orkney22_W1.blt
-# PerthAndKinross/Ward_10_-_Preference_Profile_Report.pdf
-# PerthAndKinross/Ward_11_-_Preference_Profile_Report.pdf
-# PerthAndKinross/Ward_12_-_Preference_Profile_Report.pdf
-# PerthAndKinross/Ward_1_-_Preference_Profile_Report.pdf
-# PerthAndKinross/Ward_2_-_Preference_Profile_Report.pdf
-# PerthAndKinross/Ward_3_-_Preference_Profile_Report.pdf
-# PerthAndKinross/Ward_4_-_Preference_Profile_Report.pdf
-# PerthAndKinross/Ward_5_-_Preference_Profile_Report.pdf
-# PerthAndKinross/Ward_6_-_Preference_Profile_Report.pdf
-# PerthAndKinross/Ward_7_-_Preference_Profile_Report_1.pdf
-# PerthAndKinross/Ward_8_-_Preference_Profile_Report.pdf
-# PerthAndKinross/Ward_9_-_Preference_Profile_Report.pdf
-# Renfrewshire/Preference_profile_for_Ward_10_Houston_Crosslee_and_Linwood.pdf
-# Renfrewshire/Preference_profile_for_Ward_11_Bishopton_Bridge_of_Weir_and_Langbank.pdf
-# Renfrewshire/Preference_profile_for_Ward_12_Erskine_and_Inchinnan.pdf
-# Renfrewshire/Preference_profile_for_Ward_1_Renfrew_North_and_Braehead.pdf
-# Renfrewshire/Preference_profile_for_Ward_2_Renfrew_South_and_Gallowhill.pdf
-# Renfrewshire/Preference_profile_for_Ward_3_Paisley_Northeast_and_Ralston.pdf
-# Renfrewshire/Preference_profile_for_Ward_4_Paisley_Northwest.pdf
-# Renfrewshire/Preference_profile_for_Ward_5_Paisley_East_and_Central.pdf
-# Renfrewshire/Preference_profile_for_Ward_6_Paisley_Southeast.pdf
-# Renfrewshire/Preference_profile_for_Ward_7_Paisley_Southwest.pdf
-# Renfrewshire/Preference_profile_for_Ward_8_Johnstone_South_and_Elderslie.pdf
-# Renfrewshire/Preference_profile_for_Ward_9_Johnstone_North_Kilbarchan_Howwood_and_Lochwinnoch.pdf
-# ShetlandIslands/PreferenceProfile_V0001_North_Isles_Ward_05082022_112827.blt
-# ShetlandIslands/PreferenceProfile_V0001_Ward_3___Shetland_West_06052022_120841.blt
-# ShetlandIslands/PreferenceProfile_V0001_Ward_4___Shetland_Central_06052022_120841.blt
-# ShetlandIslands/PreferenceProfile_V0001_Ward_5___Lerwick_North_and_Bressay_06052022_120841.blt
-# ShetlandIslands/PreferenceProfile_V0001_Ward_6___Lerwick_South_06052022_120841.blt
-# ShetlandIslands/PreferenceProfile_V0001_Ward_7___Shetland_South_06052022_120840.blt
-# SouthAyrshire/PreferenceProfile_V0001_Ward-1---Troon_06052022_142627.csv
-# SouthAyrshire/PreferenceProfile_V0001_Ward-2---Prestwick_06052022_142624.csv
-# SouthAyrshire/PreferenceProfile_V0001_Ward-4---Ayr-East_06052022_142626.csv
-# SouthAyrshire/PreferenceProfile_V0001_Ward-5---Ayr-West_06052022_142628.csv
-# SouthAyrshire/PreferenceProfile_V0001_Ward-6---Kyle_06052022_142627.csv
-# SouthAyrshire/PreferenceProfile_V0001_Ward-7---Maybole-North-Carrick-and-Coylton_06052022_142628.csv
-# SouthAyrshire/PreferenceProfile_V0001_Ward-8---Girvan-and-South-Carrick_06052022_142628.csv
-# SouthAyrshire/PreferenceProfile_V0009_Ward-3---Ayr-North_10052022_111313.csv
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_10___East_Kilbride_East.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_11___Rutherglen_South.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_12___Rutherglen_Central_and_North.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_13___Cambuslang_West.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_14___Cambuslang_East.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_15___Blantyre.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_16___Bothwell_and_Uddingston.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_17___Hamilton_North_and_East.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_18___Hamilton_West_and_Earnock.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_19___Hamilton_South.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_1___Clydesdale_West.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_20___Larkhall.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_2___Clydesdale_North.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_3___Clydesdale_East.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_4___Clydesdale_South.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_5___Avondale_and_Stonehouse.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_6___East_Kilbride_South.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_7___East_Kilbride_Central_South.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_8___East_Kilbride_Central_North.txt
-# SouthLanarkshire/PreferenceProfile_V0001_Ward_9___East_Kilbride_West.txt
-# Stirling/preferenceprofile_v0001_ward-1-trossachs-and-teith_06052022_124254.blt
-# Stirling/preferenceprofile_v0001_ward-2-forth-and-endrick_06052022_124253.blt
-# Stirling/preferenceprofile_v0001_ward-3-dunblane-and-bridge-of-allan_06052022_124253.blt
-# Stirling/preferenceprofile_v0001_ward-4-stirling-north_06052022_124253.blt
-# Stirling/preferenceprofile_v0001_ward-5-stirling-west_06052022_124253.blt
-# Stirling/preferenceprofile_v0001_ward-6-stirling-east_06052022_124253.blt
-# Stirling/preferenceprofile_v0001_ward-7-bannockburn_06052022_124254.blt
-# WestDunbartonshire/preferenceprofile_v0001_ward-1-lomond_06052022_120102.csv
-# WestDunbartonshire/preferenceprofile_v0001_ward-2-leven_06052022_120059.csv
-# WestDunbartonshire/preferenceprofile_v0001_ward-3-dumbarton_06052022_120059.csv
-# WestDunbartonshire/preferenceprofile_v0001_ward-4-kilpatrick_06052022_120059.csv
-# WestDunbartonshire/preferenceprofile_v0001_ward-5-clydebank-central_06052022_120100.csv
-# WestDunbartonshire/preferenceprofile_v0001_ward-6-clydebank-waterfront_06052022_120103.csv
-# WestLothian/PreferenceProfile_V0001_Ward-1---Linlithgow_06052022_160231.pdf
-# WestLothian/PreferenceProfile_V0001_Ward-2---Broxburn-Uphall-and-Winchburgh_06052022_160218.pdf
-# WestLothian/PreferenceProfile_V0001_Ward-3---Livingston-North_06052022_160234.pdf
-# WestLothian/PreferenceProfile_V0001_Ward-4---Livingston-South_06052022_160228.pdf
-# WestLothian/PreferenceProfile_V0001_Ward-5---East-Livingston-and-East-Calder_06052022_160233.pdf
-# WestLothian/PreferenceProfile_V0001_Ward-6---Fauldhouse-and-the-Breich-Valley_06052022_160234.pdf
-# WestLothian/PreferenceProfile_V0001_Ward-7---Whitburn-and-Blackburn_06052022_160234.pdf
-# WestLothian/PreferenceProfile_V0001_Ward-8---Bathgate_06052022_160235.pdf
-# WestLothian/PreferenceProfile_V0001_Ward-9---Armadale-and-Blackridge_06052022_160235.pdf"""
-# #
-#
-# for line in txt.split("\n"):
-#     council, ward = line.split("/")
-#     if council in ["EastAyrshire", "EastDunbarton", "EastRenfrewshire", "NorthAyrshire", "NorthLanarkshire",
-#                    "PerthAndKinross", "Renfrewshire", "WestLothian"]:
-#         continue
-#     filename = ward
-#     filename = filename.split('.')[0] + ".blt"
-#     if "PreferenceProfile_V0001_" in ward:
-#         ward = ward.split("_V0001_")[1]
-#     if "preferenceprofile_v0001_" in ward:
-#         ward = ward.split("_v0001_")[1]
-#     if "PreferenceProfile_V0009_" in ward:
-#         ward = ward.split("_V0009_")[1]
-#     if "." in ward:
-#         ward = ward.split(".")[0]
-#     if "_06052022_" in ward:
-#         ward = ward.split("_06052022_")[0]
-#     if "_10052022_" in ward:
-#         ward = ward.split("_10052022_")[0]
-#     if "_05082022_" in ward:
-#         ward = ward.split("_05082022_")[0]
-#     if "_preference_profile__open_" in ward:
-#         ward = ward.split("_preference_profile__open_")[0]
-#     if "_preferenceprofile" in ward:
-#         ward = ward.split("_preferenceprofile")[0]
-#     if "preferenceprofile_" in ward:
-#         ward = ward.split("preferenceprofile_")[1]
-#     if "PreferenceProfile_" in ward:
-#         ward = ward.split("PreferenceProfile_")[1]
-#     if "---" in ward:
-#         pre, post = ward.split("---")
-#         ward = pre + " " + post
-#     if "___" in ward:
-#         pre, post = ward.split("___")
-#         ward = pre + " " + post
-#     # if "ard_" in ward:
-#     #     pre, post = ward.split("ard_")
-#     #     ward = "Ward " + post
-#     # if "ard-" in ward:
-#     #     pre, post = ward.split("ard-")
-#     #     ward = "Ward " + post
-#     print(f'"Scotland/2022/{filename}": "{council}, {ward}",')
-# #
