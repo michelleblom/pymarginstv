@@ -18,6 +18,9 @@ class TreeNode:
 
         order_a  : Outcome prefix (whether an elimination or election occurred).
 
+        order_q  : The exact round in which candidates who receive a quota throughout
+                   the prefix have a quota at the start of the round.
+
         winners  : Original winners (identified by their number).
 
         distance : How many votes have to change (lower bound) to realise the
@@ -25,12 +28,18 @@ class TreeNode:
         
     """
 
-    def __init__(self, pid, order_c, order_a, winners, rem, distance, dist_ub):
+    def __init__(self, pid, order_c, order_a, order_q, winners, rem, distance, dist_ub):
         self.id = None
         self.pid = pid
 
         self.order_c = order_c
         self.order_a = order_a
+        self.order_q = order_q
+
+        self.quotas = [[] for r in self.order_c]
+        for c,r in order_q:
+          self.quotas[r].append(c)
+
         self.rem = rem
 
         self.dist = distance  # lower bound from MINLP solve
@@ -48,6 +57,12 @@ class TreeNode:
 
         for r in range(len(self.order_c)):
             action = "e" if self.order_a[r] == 0 else "s"
+            if len(self.quotas[r]) > 0:
+              qlist = " ( "
+              for c in self.quotas[r]:
+                qlist += str(c) + " "
+              qlist += ")"
+              action += qlist
             summary += str(self.order_c[r]) + action + " "
 
         summary += "with distance {}/{}".format(self.dist, self.dist_ub)
@@ -140,7 +155,7 @@ class Frontier:
                 self.size = 0
 
             elif i < self.size:
-                if log != None:
+                if log is not None:
                     for n in self.nodes[i:]:
                         print("Pruning {}".format(str(self.get_node(n))), \
                               file=log)
@@ -152,8 +167,14 @@ class Frontier:
         if inode.order_a != node.order_a:
             return False
 
+        # For now, say that two notes are NOT similar if quotas are
+        # not received in the same rounds
+        for r in range(len(inode.order_c)):
+          if set(inode.quotas[r]) != set(node.quotas[r]):
+            return False
+
         if lse:
-            if (inode.dist <= node.dist):  # - epsilon):
+            if inode.dist <= node.dist:  # - epsilon):
                 return False
         else:
             if abs(inode.dist - node.dist) > epsilon:
@@ -255,32 +276,6 @@ def compute_last_round(order_c, order_a, seats, ncands):
     return min(loc - 1, LAST_ROUND)
 
 
-def get_order_q(order_c, order_a, LAST_ROUND, winners):
-    """
-        Determine the earliest and latest time that winners could have
-        achieved a quota, given that we have determined we only care
-        about winners that have been seated at or before LAST_ROUND.
-    """
-    order_q = {}
-    for w in winners:
-        pos = order_c.index(w) if w in order_c else LAST_ROUND
-        if pos > LAST_ROUND:
-            continue
-
-        minrq = pos - 1
-        maxrq = pos - 1
-
-        for r in range(pos - 1, -1, -1):
-            if order_a[r] == 1:
-                minrq -= 1
-            else:
-                break
-
-        order_q[w] = (minrq, maxrq)
-
-    return order_q
-
-
 def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
     """
     This function calculates the lower bound on the number of votes that need to be changed
@@ -293,11 +288,12 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
     order_c (list): A list representing the order in which candidates were eliminated or seated.
     order_a (list): A list of 0s and 1s indicating whether a candidate was eliminated (0) or seated (1) in each round.
     quota (int): The quota for the election, i.e., the minimum number of votes a candidate needs to win a seat.
-    order_q (dict): A dictionary mapping candidates to their quota values.
+    order_q (dict): Round in which candidates who receive a quota in prefix have a quota at the start of the round.
 
     Returns:
     int: The lower bound on the number of votes that need to be changed to alter the outcome of the election prefix.
     """
+    # TODO How to rework with order_q information?
     gone = []
     elim_lb = 0
     quota_lb = 0
@@ -336,6 +332,9 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
                 elim_lb = max(elim_lb, max(0, 0.5 * (min_ce - v)))
 
         else:  # candidate seated
+          # TODO: do the above of the IF, then have separate block to go through the
+          # candidates that have a quota at the start of the round, and then look at
+          # whether the candidates are left at the end.
             if ce in order_q:  # candidate got a quota, else seated by default (last round)
                 lb_value = 0  # lb on value of ballots
                 ub_value = 0  # ub on value of ballots (quota <= lb_value <= ub_value <= len(ballots))
@@ -387,6 +386,7 @@ def calc_tallies(b, gone, transfer, winners):
     tuple: A tuple containing the seating-based lower bound, elimination-based lower bound, and upper bound on the
            value of the ballot after transfers.
     """
+    # TODO Understand this and determine how knowing when quotas received can help
     b_value_slb = b.votes  # seating lower bound
     b_value_elb = b.votes  # elimination lower bound
     b_value_ub = b.votes  # upper bound
@@ -459,7 +459,7 @@ def compute_elim_quota_lb_old(cands, ballots, order_c, order_a, quota, order_q):
                     if p in winners:
                         through_winner = True
 
-                if prefs == []:
+                if not prefs:
                     continue
 
                 if prefs[0] != ce:

@@ -12,7 +12,7 @@ epsilon = 0.0001
 # On this branch, we implement the US-style STV model.
 #
 
-def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot, \
+def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot,
     LAST_ROUND, winners, tvalue, tallies, rem, candpos,order_q, max_tallies):
 
     # Ballot is currently sitting with 'ballotwith' at the start of round
@@ -41,7 +41,7 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot, \
     tallies[ballotwith,rstart] += ballot_value
     
     for r in range(rstart, R):
-        if ballotwith != None:
+        if ballotwith is not None:
             max_tallies[ballotwith][r] += b.votes
 
             # The ballot is still with candidate 'ballotwith' at the 
@@ -121,8 +121,8 @@ class TerminateAtIntegerSolution(Eventhdlr):
             self.model.interruptSolve()
 
 
-def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
-    merge_map, supers, tot_ballots, args, quota, upperbound, LAST_ROUND, \
+def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
+    merge_map, supers, tot_ballots, args, quota, upperbound, LAST_ROUND,
     lowerbound, isleaf = False, log=None):
     """
         Compute the number of ballots we would have to alter in order to 
@@ -336,10 +336,10 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
             # they have a quota on first preferences. 
             for co in nonsupers:
                 if co in order_q:
-                    rq = order_[co]
+                    rq = order_q[co]
 
                     if rq == r:
-                        model.addCons(vcr[co,r] >= quota);
+                        model.addCons(vcr[co,r] >= quota)
                 
 
             # Note that it is not necessarily true that the candidate, of
@@ -406,7 +406,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         # Populate tallies[] expressions, defining who has this ballot
         # in different rounds.
         distribute_ballots_t(0, R, ballotwith, cp_ballotwith, withindex, 
-            ys[b.num], b, lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, \
+            ys[b.num], b, lballot, LAST_ROUND, winners, tvalue,
             tallies, rem, candpos, order_q, max_tallies)
   
     # Constraint enforces consistency  
