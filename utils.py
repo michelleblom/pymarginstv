@@ -36,20 +36,26 @@ class Ballot:
         Note: sometimes this data structure is used to represent a single
         ballot, or a collection of ballots cast with the same ranking.
     """
-    def __init__(self, num, votes, prefs, atl=False):
+    def __init__(self, num, votes, prefs, totcand, atl=False):
         self.num = num # Numeric identifier for ballot
 
         # Total votes expressed on the papers of this ballot type/ballot
         self.votes = votes 
 
         # Ranking over candidates
-        self.prefs = prefs[:]
+        self.prefs = prefs
 
         # Is this an above the line ballot/below the line
         self.atl = atl
 
         # Number of papers cast of this ballot type.
         self.papers = votes
+
+        # Indexes of each candidate 
+        self.ranks = [-1]*totcand
+
+        for i in range(len(prefs)):
+            self.ranks[prefs[i]] = i;
 
     def __str__(self):
         """
@@ -165,13 +171,15 @@ def read_ballots_blt(path):
 
         bcntr = 0
 
+        ncands = len(candidates)
+
         for bline in ballot_strs:
             toks = [int(t) for t in bline.split()]
 
             n = toks[0]
             prefs = [cid2num[p] for p in toks[1:-1]]
 
-            ballot = Ballot(bcntr, n, prefs)
+            ballot = Ballot(bcntr, n, prefs, ncands)
             ballots.append(ballot)
 
             fpcand = candidates[prefs[0]]
@@ -229,7 +237,8 @@ def read_ballots_txt(path):
             votes = int(toks[1])
 
             cprefs = [cid2num[p] for p in prefs]
-            ballot = Ballot(bcntr, votes, cprefs, atl=False)
+
+            ballot = Ballot(bcntr, votes, cprefs, ncands, atl=False)
             ballots.append(ballot)
 
             fpcand = candidates[cprefs[0]]
@@ -280,6 +289,8 @@ def read_ballots_json(path):
             cid += 1
 
 
+        ncands = len(candidates)
+
         # get party info
         pid = 0
         for party in data["metadata"]["parties"]:
@@ -303,8 +314,7 @@ def read_ballots_json(path):
             for g in groups:
                 prefs.extend(g.cands)
                 
-
-            blt = Ballot(bcntr, n, prefs, atl=True)
+            blt = Ballot(bcntr, n, prefs, ncands, atl=True)
 
             fcand = candidates[prefs[0]]
             fcand.ballots.append(bcntr)
@@ -325,7 +335,7 @@ def read_ballots_json(path):
             # num_cands -1 already.
             prefs = [int(c) for c in btl["candidates"]]
 
-            blt = Ballot(bcntr, n, prefs, atl=False)
+            blt = Ballot(bcntr, n, prefs, ncands, atl=False)
 
             fcand = candidates[prefs[0]]
             fcand.ballots.append(bcntr)
@@ -421,7 +431,7 @@ def read_ballots_stv(path):
                 for c in group.cands:
                     prefs.append(c)
 
-            ballot = Ballot(bcntr, votes, prefs, atl=True)
+            ballot = Ballot(bcntr, votes, prefs, ncands, atl=True)
             ballots.append(ballot)
 
             fpcand = candidates[prefs[0]]
@@ -443,7 +453,7 @@ def read_ballots_stv(path):
             votes = int(toks[-1])
             prefs = [int(c) for c in toks[0].split(',')]
 
-            ballot = Ballot(bcntr, votes, prefs)
+            ballot = Ballot(bcntr, votes, prefs, ncands)
             ballots.append(ballot)
             
             fpcand = candidates[prefs[0]]
@@ -891,7 +901,7 @@ def next_mod(mask, n):
     return 0
 
 
-def CreateEquivalenceClasses(order_c):
+def CreateEquivalenceClasses(order_c, totcand):
     ncand = len(order_c)
     mask = [0]*ncand
 
@@ -917,7 +927,7 @@ def CreateEquivalenceClasses(order_c):
             if mask[i]:
                 prefs.append(order_c[i])
 
-        classes.append(Ballot(cntr, 0, prefs))
+        classes.append(Ballot(cntr, 0, prefs, totcand))
 
         cmap[tuple(prefs)] = cntr;
         
@@ -931,17 +941,17 @@ def CreateEquivalenceClasses(order_c):
 # Note that total number of possible ballot types (assuming smallest number 
 # of possible rankings is 1) with n candidates:
 # \sum_{i = 1}^{n} n! / (n-i)!
-def gen_equivalence_classes(order_c, remainder):
-    first,cntr,cmap = CreateEquivalenceClasses(order_c)
+def gen_equivalence_classes(order_c, remainder, totcand):
+    first,cntr,cmap = CreateEquivalenceClasses(order_c, totcand)
 
     second = []
     for r in remainder:
-        second.append(Ballot(cntr, 0, [r]))
+        second.append(Ballot(cntr, 0, [r], totcand))
         cmap[(r,)] = cntr
         cntr += 1
         for f in first:
             newc = f.prefs + [r]
-            second.append(Ballot(cntr, 0, newc))
+            second.append(Ballot(cntr, 0, newc, totcand))
             cmap[tuple(newc)] = cntr
             cntr += 1
 

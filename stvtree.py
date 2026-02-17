@@ -18,6 +18,8 @@ class TreeNode:
 
         order_a  : Outcome prefix (whether an elimination or election occurred).
 
+        reported : True if order_c/order_a is a prefix of the reported outcome.
+
         winners  : Original winners (identified by their number).
 
         distance : How many votes have to change (lower bound) to realise the
@@ -25,13 +27,15 @@ class TreeNode:
         
     """
 
-    def __init__(self, pid, order_c, order_a, winners, rem, distance, dist_ub):
+    def __init__(self, pid, order_c, order_a, reported, winners, rem, distance, dist_ub):
         self.id = None
         self.pid = pid
 
         self.order_c = order_c
         self.order_a = order_a
         self.rem = rem
+
+        self.reported = reported
 
         self.dist = distance  # lower bound from MINLP solve
         self.dist_ub = dist_ub  # upper bound from MINLP solve
@@ -187,7 +191,8 @@ class Frontier:
     def insert(self, node, lse=True, log=None):
         """
             Nodes are inserted into the frontier on the basis of their 
-            distance value, smallest first.
+            distance value, smallest first. Unless the node is tracking
+            the reported outcome--then it is added to the front of the frontier
         """
         if self.size > 0:
             for fnode in self.nodes:
@@ -207,6 +212,11 @@ class Frontier:
         self.idcntr += 1
 
         self.node_map[node.id] = node
+
+        if node.reported:
+          self.nodes.insert(0, node.id)
+          self.size += 1
+          return 0
 
         for i in range(len(self.nodes)):
             if node.dist < self.get_node(self.nodes[i]).dist:
@@ -520,7 +530,8 @@ def nowinner(prefs, w, winners):
             return False
 
 
-def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota, seats, transfer):
+def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, \
+    winner_set, rem, quota, seats, transfer, globalub):
     """
         Consider a prefix where it is clear that at least one original loser
         still standing has to displace one of the original winners still
@@ -590,8 +601,11 @@ def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_
         if not prefs:
             continue
         _, elb, ub = calc_tallies(b, node_order_c, transfer, winners)
-        filtered_ballots.append((prefs, elb, ub))
+        filtered_ballots.append((b.ranks, elb, ub))
         min_r[prefs[0]] += elb
+
+
+    ncand = len(candidates)
 
     # calculate how much it costs to seat ogl
     lowerbound = np.inf
@@ -599,35 +613,40 @@ def compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_
         displacement_cost = np.inf
         left_at_end_costs = []
 
-        # calculate how much it costs to displace ogw with ogl
+        max_l = [0]*ncand
+
+        max_ogl = 0
+        for ranks, elb, ub in filtered_ballots:
+            posl = ranks[ogl]
+            if posl != -1:
+                max_ogl += ub
+
+            # calculate how much it costs to displace r with ogl
+            for r in rem:
+                if r == ogl:
+                    continue
+                
+                posw = ranks[r]
+                if posl != -1 and (posw == -1 or posl < posw):  # ogl ranked above ogw
+                      max_l[r] += ub
+
+        
         for r in rem:
             if r == ogl:
-                continue
-            max_l = 0
+                continue;
 
-            for prefs, elb, ub in filtered_ballots:
-                posl = prefs.index(ogl) if ogl in prefs else -1
-                posw = prefs.index(r) if r in prefs else -1
-                if posl != -1 and (posw == -1 or posl < posw):  # ogl ranked above ogw
-                    max_l += ub
-
-            dp = max(0.0, 0.5 * (min_r[r] - max_l))
+            dp = max(0.0, 0.5 * (min_r[r] - max_l[r]))
             left_at_end_costs.append(dp)
             if r in og_winners:
                 displacement_cost = min(displacement_cost, dp)
 
-        max_l = 0
-        for prefs, elb, ub in filtered_ballots:
-            if ogl in prefs:
-                max_l += ub
-
-        quota_cost = max(0, quota - max_l)
+        quota_cost = max(0, quota - max_ogl)
         left_at_end_costs.sort()
 
         # ogl needs to outlast nleft - sleft candidates
         left_at_end_cost = max(left_at_end_costs[:nleft - sleft])
 
-        lowerbound = min(lowerbound, max(displacement_cost, min(quota_cost, left_at_end_cost)))
+        lowerbound = min(lowerbound, max(displacement_cost, min(quota_cost,left_at_end_cost)))
 
     return math.ceil(lowerbound)
 
@@ -695,7 +714,7 @@ def compute_disp_lb_old(candidates, ballots, node_order_c, node_order_a, \
     for b in ballots:
         prefs, winners = filterballot(b, node_order_c, node_order_a)
         if prefs != []:
-            filtered_ballots.append((prefs, b.prefs, b.votes, winners))
+            filtered_ballots.append((prefs, b.prefs, b.ranks, b.votes, winners))
 
     sleft = seats - sum(node_order_a)
     nleft = len(rem)
@@ -713,7 +732,7 @@ def compute_disp_lb_old(candidates, ballots, node_order_c, node_order_a, \
                 max_l = 0
                 min_w = 0
 
-                for prefs, oprefs, votes, winners in filtered_ballots:
+                for prefs, oprefs, ranks, votes, winners in filtered_ballots:
                     if oprefs[0] == ogw:
                         min_w += votes
                         continue
@@ -723,8 +742,8 @@ def compute_disp_lb_old(candidates, ballots, node_order_c, node_order_a, \
                             min_w += votes
                         continue
 
-                    posl = prefs.index(ogl) if ogl in prefs else -1
-                    posw = prefs.index(ogw) if ogw in prefs else -1
+                    posl = ranks[ogl]
+                    posw = ranks[ogw]
 
                     if posl != -1 and (posw == -1 or posl < posw):
                         max_l += votes
@@ -740,14 +759,14 @@ def compute_disp_lb_old(candidates, ballots, node_order_c, node_order_a, \
                 max_l = 0
                 min_r = 0
 
-                for prefs, _, votes, winners in filtered_ballots:
+                for prefs, _, ranks, votes, winners in filtered_ballots:
                     if prefs[0] == r:
                         if winners == []:
                             min_r += votes
                         continue
 
-                    posl = prefs.index(ogl) if ogl in prefs else -1
-                    posr = prefs.index(r) if r in prefs else -1
+                    posl = ranks[ogl]
+                    posr = ranks[r]
 
                     if posl != -1 and (posr == -1 or posl < posr):
                         max_l += votes
@@ -841,9 +860,11 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             node_order_a = [o]
             node_winners = set([cand.num]) if o == 1 else []
 
+            reported = True if order_c[0] == cand.num and order_a[0] == o else False
+
             children.append((node_order_c, node_order_a, node_winners, \
                              winner_set, candidates, ballots, rem, quota, args, merge_map, \
-                             tot_ballots, running_ub, order_c, order_a))
+                             tot_ballots, running_ub, order_c, order_a, reported))
 
     result = []
     if args.pc > 1:
@@ -945,7 +966,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             # evaluate children
             min_dist = None
             for isleaf, node_order_c, node_order_a, lb, dlb, eqlb, dist, \
-                    dist_ub, new_rem, node_winners, solved in children:
+                    dist_ub, new_rem, node_winners, reported, solved in children:
 
                 if solved:
                     nsolves += 1
@@ -986,7 +1007,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                     frontier.prune(running_ub, log=log)
                 else:
                     newn = TreeNode(fn.id, node_order_c, node_order_a, \
-                                    node_winners, new_rem, dist, dist_ub)
+                                    reported, node_winners, new_rem, dist, dist_ub)
 
                     idx = frontier.insert(newn, lse=args.lse, log=log)
 
@@ -1053,7 +1074,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
 def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
                        candidates, ballots, rem, quota, args, merge_map, tot_ballots, running_ub, \
-                       full_order_c, full_order_a):
+                       full_order_c, full_order_a, reported, log=None):
     # Is this a prefix of the original outcome?
     l = len(node_order_c)
     orig_prefix = node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == full_order_a[:l]
@@ -1082,7 +1103,7 @@ def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
                                               args.seats)
     elif args.dlb and transfer is not None:
         disp_lowerbound = compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota,
-                                              args.seats, transfer)
+                                              args.seats, transfer, running_ub)
     else:
         disp_lowerbound = 0
 
@@ -1090,24 +1111,24 @@ def eval_child_initial(node_order_c, node_order_a, node_winners, winner_set, \
 
     if lb >= running_ub:
         return lb, disp_lowerbound, eqlb, TreeNode(-1, node_order_c, \
-                                                   node_order_a, node_winners, rem, lb, lb), False
+                                                   node_order_a, reported, node_winners, rem, lb, lb), False
 
     # Evaluate distance for our new tree node.
     _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
                                    node_order_a, rem, node_winners, order_q, merge_map, [], \
-                                   tot_ballots, args, quota, running_ub, 0, lb, log=None)
+                                   tot_ballots, args, quota, running_ub, 0, lb)
 
     return lb, disp_lowerbound, eqlb, TreeNode(-1, node_order_c, \
-                                               node_order_a, node_winners, rem, dist, dist_ub), True
+                                               node_order_a, reported, node_winners, rem, dist, dist_ub), True
 
 
 def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
                node_winners, winner_set, candidates, ballots, tot_ballots, rem, \
-               quota, running_ub, full_order_c, full_order_a, isleaf):
+               quota, running_ub, full_order_c, full_order_a, isleaf, reported, log=None):
 
     # Is this a prefix of the original outcome?
-    l = len(node_order_c)
-    orig_prefix = node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == full_order_a[:l]
+    #l = len(node_order_c)
+    #orig_prefix = node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == full_order_a[:l]
 
     # if node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == \
     #         full_order_a[:l]:
@@ -1129,7 +1150,7 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
         eqlb = compute_elim_quota_lb_old(candidates, ballots, node_order_c, \
                                      node_order_a, quota, order_q)
 
-    if orig_prefix:
+    if reported:
         assert eqlb == 0, f"eqlb is {eqlb}, should be 0. {node_order_c[:l]}/{node_order_a[:l]}"
         eqlb = 0
 
@@ -1138,7 +1159,7 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
                                               args.seats)
     elif args.dlb and transfer:
         disp_lowerbound = compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota,
-                                              args.seats, transfer)
+                                              args.seats, transfer, running_ub)
     else:
         disp_lowerbound = 0
 
@@ -1149,12 +1170,12 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
     if lowerbound >= running_ub:  # or (not isleaf and sum(node_order_a) == 0):
         return (isleaf, node_order_c, node_order_a, lowerbound, \
                 disp_lowerbound, eqlb, lowerbound, lowerbound, rem, \
-                node_winners, False)
+                node_winners, reported, False)
 
     if args.nominlps:
         return (isleaf, node_order_c, node_order_a, lowerbound, \
                 disp_lowerbound, eqlb, lowerbound, lowerbound, rem, \
-                node_winners, False)
+                node_winners, reported, False)
 
     if args.m:
         m_order_c, m_order_a, m_order_q, merge_map, supers, round_conv = \
@@ -1166,7 +1187,7 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
         _, dist, dist_ub = stvdistance(candidates, ballots, m_order_c, \
                                        m_order_a, rem, node_winners, m_order_q, merge_map, \
                                        supers, tot_ballots, args, quota, running_ub, LAST_ROUND, \
-                                       lowerbound, isleaf=isleaf, log=None)
+                                       lowerbound, isleaf, reported)
 
     else:
         merge_map = {c.num: c.num for c in candidates}
@@ -1174,15 +1195,18 @@ def eval_child(parent_dist, node_order_c, node_order_a, args, ncands, \
         _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
                                        node_order_a, rem, node_winners, order_q, merge_map, \
                                        [], tot_ballots, args, quota, running_ub, LAST_ROUND, \
-                                       lowerbound, isleaf=isleaf, log=None)
+                                       lowerbound, isleaf)
 
     return isleaf, node_order_c, node_order_a, lowerbound, disp_lowerbound, \
-        eqlb, dist, dist_ub, rem, node_winners, True
+        eqlb, dist, dist_ub, rem, node_winners, reported, True
 
 
 def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands, \
-                args, quota, tot_ballots, merge_map, full_order_c, full_order_a):
+                args, quota, tot_ballots, merge_map, full_order_c, full_order_a,\
+                log=None):
     children = []
+
+    reported = None
 
     # Add a candidate to the end of the outcome prefix represented
     # by the selected node. That candidate can either be seated or 
@@ -1234,10 +1258,22 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands, \
                 # This represents the original outcome
                 continue
 
-            children.append((fnode.dist, node_order_c, node_order_a, args, \
+            # If the child is following the reported outcome, keep a record
+            # of it and add it as the last child in the list to be returned.
+            if full_order_c[:len(node_order_c)] == node_order_c and \
+              full_order_a[:len(node_order_a)] == node_order_a:
+              reported =  (fnode.dist, node_order_c, node_order_a, args, \
                              ncands, node_winners, winner_set, candidates, ballots, \
                              tot_ballots, new_rem, quota, running_ub, full_order_c, \
-                             full_order_a, isleaf))
+                             full_order_a, isleaf, True)
+            else:
+              children.append((fnode.dist, node_order_c, node_order_a, args, \
+                             ncands, node_winners, winner_set, candidates, ballots, \
+                             tot_ballots, new_rem, quota, running_ub, full_order_c, \
+                             full_order_a, isleaf, False))
+
+    if reported is not None:
+      children.append(reported)
 
     result = []
     if args.pc > 1:
