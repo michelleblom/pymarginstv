@@ -162,7 +162,7 @@ class Frontier:
             return False
 
         if lse:
-            if (inode.dist <= node.dist):  # - epsilon):
+            if (inode.dist < node.dist - epsilon):
                 return False
         else:
             if abs(inode.dist - node.dist) > epsilon:
