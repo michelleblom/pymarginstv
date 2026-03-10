@@ -866,7 +866,6 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
     children = []
 
-    pool = Pool(processes=args.pc)
     ncand = len(candidates)
 
     # Initialise frontier. For each candidate, they can either be elected
@@ -891,7 +890,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
     result = []
     if args.pc > 1:
-        result = pool.starmap(eval_child_initial, children)
+        with Pool(processes=args.pc) as pool:
+            result = pool.starmap(eval_child_initial, children)
     else:
         for c in children:
             result.append(eval_child_initial(*c))
@@ -951,6 +951,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         print("Time elapsed {}s".format(tnow - tstart), file=log, flush=True)
 
     if tlimit != None and tnow - tstart > tlimit:
+        print("Time start {}, now {}, difference {}".format(tstart, tnow, tnow  - tstart), file=log, flush=True)
         return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr
 
     if frontier.size == 0:  # search space exhausted
@@ -983,7 +984,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
             _, children = expand_node(fn, ballots, candidates, winner_set, \
                                       running_ub, ncands, args, quota, tot_ballots, merge_map, \
-                                      order_c, order_a, pool)
+                                      order_c, order_a)
 
             # evaluate children
             min_dist = None
@@ -1078,6 +1079,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                   flush=True)
 
         if tlimit != None and tnow - tstart > tlimit:
+            print("Time start {}, now {}, difference {}".format(tstart, tnow, tnow  - tstart), file=log, flush=True)
             return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr
 
     if converged or frontier.size == 0:
@@ -1226,7 +1228,7 @@ def eval_child(parent_dist, node_order_c, order_c_index, node_order_a, args, nca
 
 def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands, \
                 args, quota, tot_ballots, merge_map, full_order_c, full_order_a,\
-                pool, log=None):
+                log=None):
     children = []
 
     reported = None
@@ -1271,7 +1273,7 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands, \
                 isleaf = True
 
                 for i in range(newindx, len(node_order_c)):
-                    node_order_c[node_order_c[i]] = i
+                    order_c_index[node_order_c[i]] = i
 
             elif args.seats - seats_filled == nrem:
                 # Are we in a situation where the number of seats left
@@ -1303,12 +1305,16 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands, \
                              tot_ballots, new_rem, quota, running_ub, full_order_c, \
                              full_order_a, isleaf, False))
 
+           # for c in candidates:
+           #     assert(c.num in node_order_c or c.num in new_rem)
+
     if reported is not None:
       children.append(reported)
 
     result = []
     if args.pc > 1:
-        result = pool.starmap(eval_child, children)
+        with Pool(processes=args.pc) as pool:
+            result = pool.starmap(eval_child, children)
     else:
         for c in children:
             result.append(eval_child(*c))

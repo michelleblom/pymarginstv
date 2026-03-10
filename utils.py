@@ -972,7 +972,6 @@ def reduce_ballots(ncands, order_c, remainder, merge_map, ballots, rballots,\
     for b in ballots:
         new_prefs = []
 
-        # Form eq-class representation
         np = merge_map[b.prefs[0]]
         if np in remainder:
             new_prefs = [np]
