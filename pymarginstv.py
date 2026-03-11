@@ -73,6 +73,10 @@ if __name__ == "__main__":
 
     # Input: whether to use new eqlb bounding mechanism
     parser.add_argument('-eqlb', action='store_true', default=False)
+    
+    # Input: whether to perform aggressive pruning during
+    # structural equivalency testing
+    parser.add_argument('-agv', action='store_true', default=False)
 
     # Input: whether to only use lower bounding heuristics during search
     parser.add_argument("-nominlps", action='store_true', default=False)
@@ -161,30 +165,19 @@ if __name__ == "__main__":
 
     # Start branch and bound.
     tstart = time.time()
-    lb, ub, nexps, nsolves, ignores = treestv(ballots, candidates, winners, \
-        order_c, order_a, upper_bound, args.seats, args, quota, totvotes, \
-        agap=args.agap, tlimit=args.limit, log=log)
+    lb, ub, nexps, nsolves, ignores, agg_prunes = treestv(ballots, candidates, \
+        winners, order_c, order_a, upper_bound, args.seats, args, quota, \
+        totvotes, agap=args.agap, tlimit=args.limit, log=log)
     tend = time.time()
 
-    print("{}--{}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores),file=log)
-    # print("{},{}--{}, {}, {}, {}, MARGIN LB, {}, ORIGINAL UB, {}".format(args.data, lb, ub, \
-    #     nexps, nsolves, ignores, lb, original_upper_bound))
+    print("{}--{}, {}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores, \
+        agg_prunes),file=log)
 
     t0_end = perf_counter()
 
     # datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, time(s)
     print(f"{args.displayname}, {len(candidates)}, {args.seats}, {quota}, {original_upper_bound}, {lb}, {ub}, {nexps}, {nsolves}, "
           f"{tend-tstart}, {t0_end-t0_start}, {args.lse}, {args.dlb}, {args.eqlb}, {external_upper_bound}")
-
-    #winner_set = {0, 1, 5, 4}
-    #node_winners = [0, 1, 3, 5]
-    #node_order_c = [0, 1, 2, 3, 4, 5]
-    #node_order_a = [1, 1, 0, 1, 0, 1]
-
-    #_, _, _, _, _, _, dist, dist_ub, _, _, _ = eval_child(0, node_order_c, \
-    #    node_order_a, args, len(candidates), node_winners, winner_set, \
-    #    candidates, ballots, totvotes, [], quota, 100000000, [0, 1, 5, 2, 3, 4],\
-    #    [1, 1, 1, 0, 0, 1], True)
 
     log.close()
 

@@ -82,6 +82,7 @@ class Frontier:
         self.idcntr = 0
 
         self.ignore_cntr = 0
+        self.agg_prune_cntr = 0
 
     def get_node(self, nid):
         if nid in self.node_map:
@@ -157,22 +158,25 @@ class Frontier:
                 self.nodes = self.nodes[:i]
                 self.size = len(self.nodes)
 
-    def similar_node(self, inode, node, lse=True):
-        if inode.order_a != node.order_a:
-            return False
 
-        if lse:
-            if (inode.dist < node.dist - epsilon):
-                return False
+    def prune_descendants(self, node):
+        if node.children == []:
+            # If this node is on the frontier, prune and add to expanded
+            idx = self.nodes.index(node.id)
+
+            if idx >= 0:
+                self.nodes.pop(idx)
+                self.expanded.append(node.id)
+                self.agg_prune_cntr += 1
         else:
-            if abs(inode.dist - node.dist) > epsilon:
-                return False
+            for did in node.children:
+                self.prune_descendants(self.node_map[did])
 
+    def similar_seq(self, inode, node):
         elim_seq1 = set()
         elim_seq2 = set()
 
         for i in range(len(inode.order_c)):
-
             if inode.order_a[i] == 1:
                 if inode.order_c[i] != node.order_c[i]:
                     return False
@@ -188,12 +192,52 @@ class Frontier:
                 elim_seq2.add(node.order_c[i])
 
         if elim_seq1 == elim_seq2:
-            self.ignore_cntr += 1
             return True
 
         return False
 
-    def insert(self, node, lse=True, log=None):
+    def similar_node(self, inode, node, lse=True, agv=True):
+        if inode.order_a != node.order_a:
+            return False
+
+
+        if agv:
+            sim_seq = self.similar_seq(inode, node)
+
+            if not sim_seq:
+                return False
+
+            if lse:
+                if inode.dist < node.dist - epsilon:
+                    # Aggressively prune node/descendants of node
+                    # that are on the frontier. 
+                    self.prune_descendants(node)
+                    return False
+                
+            else:
+                if abs(inode.dist - node.dist) > epsilon:
+                    # Aggressively prune node/descendants of node
+                    # that are on the frontier. 
+                    self.prune_descendants(node)
+                    return False
+
+        else:
+            if lse:
+                if (inode.dist < node.dist - epsilon):
+                    return False
+            else:
+                if abs(inode.dist - node.dist) > epsilon:
+                    return False
+
+            sim_seq = self.similar_seq(inode, node)
+
+            if sim_seq:
+                self.ignore_cntr += 1
+                return True
+
+        return False
+
+    def insert(self, node, lse=True, agv=True, log=None):
         """
             Nodes are inserted into the frontier on the basis of their 
             distance value, smallest first. Unless the node is tracking
@@ -205,12 +249,12 @@ class Frontier:
                 if fnodeobj.dist > node.dist + epsilon:
                     break
 
-                if self.similar_node(node, fnodeobj, lse=lse):
+                if self.similar_node(node, fnodeobj, lse=lse, agv=agv):
                     return None
 
             for fnode in self.expanded:
                 fnodeobj = self.get_node(fnode)
-                if self.similar_node(node, fnodeobj, lse=lse):
+                if self.similar_node(node, fnodeobj, lse=lse, agv=agv):
                     return None
 
         node.id = self.idcntr
@@ -921,7 +965,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
         if node.dist == -1:
             return running_lb, running_ub, nexps, nsolves, \
-                frontier.ignore_cntr
+                frontier.ignore_cntr, frontier.agg_prune_cntr
 
         # skip infeasible nodes
         if node.dist is None or node.dist >= running_ub:
@@ -936,7 +980,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         else:
             running_lb = node.dist
 
-        frontier.insert(node, lse=args.lse, log=log)
+        frontier.insert(node, lse=args.lse, agv=args.agv, log=log)
 
     if log != None:
         print("Lower bound {}, upper bound {}".format(running_lb, \
@@ -952,7 +996,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
     if tlimit != None and tnow - tstart > tlimit:
         print("Time start {}, now {}, difference {}".format(tstart, tnow, tnow  - tstart), file=log, flush=True)
-        return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr
+        return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr, frontier.agg_prune_cntr
 
     if frontier.size == 0:  # search space exhausted
         running_lb = running_ub  # running_ub must be a true lower bound
@@ -1033,7 +1077,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                                     reported, node_winners, new_rem, dist, \
                                     dist_ub, order_c_index)
 
-                    idx = frontier.insert(newn, lse=args.lse, log=log)
+                    idx = frontier.insert(newn, lse=args.lse, agv=args.agv, log=log)
 
                     if log is not None and idx is None:
                         print("        SUBSUMED", file=log, flush=True)
@@ -1079,8 +1123,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                   flush=True)
 
         if tlimit != None and tnow - tstart > tlimit:
-            print("Time start {}, now {}, difference {}".format(tstart, tnow, tnow  - tstart), file=log, flush=True)
-            return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr
+            return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr,\
+                frontier.agg_prune_cntr
 
     if converged or frontier.size == 0:
         if log != None:
@@ -1094,7 +1138,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
     if log != None:
         print("Time to finish: {}s".format(time.time() - tstart), file=log)
 
-    return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr
+    return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr,\
+        frontier.agg_prune_cntr
 
 
 def eval_child_initial(node_order_c, order_c_index, node_order_a, node_winners, winner_set, \
