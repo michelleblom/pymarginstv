@@ -1,5 +1,5 @@
 from stvdistance import stvdistance
-from utils import merge_outcome
+from utils import merge_outcome, find_item_index_next
 
 import math
 import numpy as np
@@ -162,12 +162,13 @@ class Frontier:
     def prune_descendants(self, node):
         if node.children == []:
             # If this node is on the frontier, prune and add to expanded
-            idx = self.nodes.index(node.id)
+            idx = find_item_index_next(self.nodes, node.id)
 
             if idx >= 0:
                 self.nodes.pop(idx)
                 self.expanded.append(node.id)
                 self.agg_prune_cntr += 1
+                self.size -= 1
         else:
             for did in node.children:
                 self.prune_descendants(self.node_map[did])
@@ -221,6 +222,9 @@ class Frontier:
                     self.prune_descendants(node)
                     return False
 
+            self.ignore_cntr += 1
+            return True
+
         else:
             if lse:
                 if (inode.dist < node.dist - epsilon):
@@ -246,7 +250,7 @@ class Frontier:
         if self.size > 0:
             for fnode in self.nodes:
                 fnodeobj = self.get_node(fnode)
-                if fnodeobj.dist > node.dist + epsilon:
+                if (not agv) and fnodeobj.dist > node.dist + epsilon:
                     break
 
                 if self.similar_node(node, fnodeobj, lse=lse, agv=agv):

@@ -22,6 +22,9 @@ import math
 import re
 import json
 
+def find_item_index_next(item_list, item_to_find):
+    return next((i for i, x in enumerate(item_list) if x == item_to_find), -1)
+
 
 class Ballot:
     """
