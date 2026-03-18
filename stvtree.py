@@ -1019,20 +1019,32 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             break
 
         # Expand node with smallest assigned distance (first in frontier)
-        fnodes = frontier.pop(1)
+        fnodes = frontier.pop(args.pc)
         nexps += 1
 
         if fnodes == []:
             break
+
+        toexpand = []
 
         # expand nodes until frontier is empty or we have converged
         for fn in fnodes:
             if log != None:
                 print("EXPANDING NODE {}".format(fn), file=log, flush=True)
 
-            _, children = expand_node(fn, ballots, candidates, winner_set, \
-                                      running_ub, ncands, args, quota, tot_ballots, merge_map, \
-                                      order_c, order_a)
+            toexpand.append((fn, ballots, candidates, winner_set, \
+                running_ub, ncands, args, quota, tot_ballots, merge_map, \
+                order_c, order_a))
+
+
+        result = None
+        with Pool(processes=args.pc) as pool:
+            result = pool.starmap(expand_node, toexpand)
+
+        for _, children in result:
+            #_, children = expand_node(fn, ballots, candidates, winner_set, \
+            #                          running_ub, ncands, args, quota, tot_ballots, merge_map, \
+            #                          order_c, order_a)
 
             # evaluate children
             min_dist = None
@@ -1361,11 +1373,11 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands, \
       children.append(reported)
 
     result = []
-    if args.pc > 1:
-        with Pool(processes=args.pc) as pool:
-            result = pool.starmap(eval_child, children)
-    else:
-        for c in children:
-            result.append(eval_child(*c))
+    #if args.pc > 1:
+    #    with Pool(processes=args.pc) as pool:
+    #        result = pool.starmap(eval_child, children)
+    #else:
+    for c in children:
+        result.append(eval_child(*c))
 
     return fnode, result
