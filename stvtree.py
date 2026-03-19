@@ -96,6 +96,12 @@ class Frontier:
         else:
             return lb
 
+    def remove_nodes(self, ids):
+        for idn in ids:
+            self.nodes.remove(idn)
+            self.size -= 1
+            self.agg_prune_cntr += 1
+
     def pop(self, number):
         if self.size <= number:
             popped = self.nodes[:]
@@ -173,6 +179,20 @@ class Frontier:
             for did in node.children:
                 self.prune_descendants(self.node_map[did])
 
+    def prune_descendants_rev(self, node):
+        if node.children == []:
+            # If this node is on the frontier, prune and add to expanded
+            idx = find_item_index_next(self.nodes, node.id)
+
+            if idx >= 0:
+                return [idx]
+            else:
+                return []
+        else:
+            todel = []
+            for did in node.children:
+                todel += self.prune_descendants(self.node_map[did])
+
     def similar_seq(self, inode, node):
         elim_seq1 = set()
         elim_seq2 = set()
@@ -240,6 +260,103 @@ class Frontier:
                 return True
 
         return False
+
+    def similar_node_rev(self, inode, node, lse=True, agv=True):
+        if inode.order_a != node.order_a:
+            return False, []
+
+
+        if agv:
+            sim_seq = self.similar_seq(inode, node)
+
+            if not sim_seq:
+                return False, []
+
+            if lse:
+                if inode.dist < node.dist - epsilon:
+                    # Aggressively prune node/descendants of node
+                    # that are on the frontier. 
+                    todel = self.prune_descendants_rev(node)
+                    return False, todel
+                
+            else:
+                if abs(inode.dist - node.dist) > epsilon:
+                    # Aggressively prune node/descendants of node
+                    # that are on the frontier. 
+                    todel = self.prune_descendants_rev(node)
+                    return False, todel
+
+            return True, []
+
+        else:
+            if lse:
+                if (inode.dist < node.dist - epsilon):
+                    return False, []
+            else:
+                if abs(inode.dist - node.dist) > epsilon:
+                    return False, []
+
+            sim_seq = self.similar_seq(inode, node)
+
+            if sim_seq:
+                return True, []
+
+        return False, []
+
+
+
+    def assess_for_insert(self, node, lse=True, agv=True):
+        todel = []
+    
+        if self.size > 0:
+            for fnode in self.nodes:
+                fnodeobj = self.get_node(fnode)
+                if (not agv) and fnodeobj.dist > node.dist + epsilon:
+                    break
+
+                ignore, delete = self.similar_node_rev(node, fnodeobj, lse=lse, agv=agv)
+                
+                if ignore:
+                    return False, []
+
+                todel += delete
+
+            for fnode in self.expanded:
+                fnodeobj = self.get_node(fnode)
+                ignore, delete = self.similar_node_rev(node, fnodeobj, lse=lse, agv=agv)
+                    
+                if ignore:
+                    return False, []
+                
+                todel += delete
+
+            return True, todel
+
+        return True, []
+
+
+    def insert_rev(self, node): 
+        """
+            Nodes are inserted into the frontier on the basis of their 
+            distance value, smallest first. Unless the node is tracking
+            the reported outcome--then it is added to the front of the frontier
+        """
+        node.id = self.idcntr
+        self.idcntr += 1
+
+        self.node_map[node.id] = node
+
+        for i in range(len(self.nodes)):
+            if node.dist < self.get_node(self.nodes[i]).dist:
+                self.nodes.insert(i, node.id)
+                self.size += 1
+                return i
+
+        self.nodes.append(node.id)
+        self.size += 1
+        return self.size - 1
+
+
 
     def insert(self, node, lse=True, agv=True, log=None):
         """
@@ -1041,81 +1158,58 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         with Pool(processes=args.pc) as pool:
             result = pool.starmap(expand_node, toexpand)
 
-        for _, children in result:
-            #_, children = expand_node(fn, ballots, candidates, winner_set, \
-            #                          running_ub, ncands, args, quota, tot_ballots, merge_map, \
-            #                          order_c, order_a)
+        
+        toassess = [(fnode, children, running_ub, frontier, args) for fnode, children in result]
+        with Pool(processes=args.pc) as pool:
+            result = pool.starmap(assess_children, toassess)
 
-            # evaluate children
-            min_dist = None
-            for isleaf, node_order_c, order_c_index, node_order_a, lb, dlb, eqlb, dist, \
-                    dist_ub, new_rem, node_winners, reported, solved in children:
+        new_running_ub = min(nrb for _, _, _, nrb, _ in result)
 
-                if solved:
-                    nsolves += 1
+        if new_running_ub < running_ub:
+            if log != None and dist < running_ub:
+                print("Reducing upper bound from {} to {}".format(running_ub, dist), \
+                    file=log, flush=True)
 
-                if log != None:
-                    print("EVALUATED {}/{} LB {} (D {} EQ {})".format( \
-                        node_order_c, node_order_a, lb, dlb, eqlb), \
-                        file=log, flush=True)
-
-                    if dist == None:
-                        print("    DISTANCE None/Infeasible", file=log, \
-                              flush=True)
-                    else:
-                        print("    DISTANCE {}/{}, MINLP used: {}".format(dist, dist_ub, solved), \
-                              file=log, flush=True)
-
-                # skip infeasible nodes
-                if dist is None or dist >= running_ub:
-                    if log != None:
-                        print("        PRUNED!", file=log, flush=True)
-                    continue
-
-                if isleaf:
-                    # fully evaluated leaf nodes
-                    if log != None:
-                        print("        LEAF", file=log, flush=True)
-
-                    if log != None and dist < running_ub:
-                        print("Reducing upper bound from {} to {}".format(running_ub, dist), \
-                              file=log, flush=True)
-
-                    running_ub = min(running_ub, dist)  # update running_ub if possible
-
-                    if abs(running_ub - running_lb) <= agap:
-                        converged = True
-                        break
-
-                    frontier.prune(running_ub, log=log)
-                else:
-                    newn = TreeNode(fn.id, node_order_c, node_order_a, \
-                                    reported, node_winners, new_rem, dist, \
-                                    dist_ub, order_c_index)
-
-                    idx = frontier.insert(newn, lse=args.lse, agv=args.agv, log=log)
-
-                    if log is not None and idx is None:
-                        print("        SUBSUMED", file=log, flush=True)
-
-                    if idx is not None:
-                        fn.children.append(newn.id)
-            if converged:
-                break
-
-            # check if running_lb can be increased
-            old_lb = running_lb
-            if frontier.size == 0:  # search space exhausted
-                break  # no need to continue search
-            else:
-                running_lb = max(running_lb, frontier.get_lower_bound())
-
-            if old_lb < running_lb and log is not None:
-                print(f"Increasing lower bound from {old_lb} to {running_lb}", file=log, flush=True)
+            running_ub = new_running_ub  # update running_ub if possible
 
             if abs(running_ub - running_lb) <= agap:
                 converged = True
                 break
+
+            frontier.prune(running_ub, log=log)
+
+
+        for nsols, nignores, toadd, _, output in result:
+            if log != None:
+                print(output, file=log, flush=True)
+
+            nsolves += nsols
+            frontier.ignore_cntr += nignores
+
+            for parent, newn, todel in toadd:
+                if newn.dist >= new_running_ub:
+                    print("PRUNE {}/{} LB {}".format( \
+                        newn.order_c, newn.order_a, newn.distlb), \
+                        file=log, flush=True)
+
+                else:
+                    frontier.remove_nodes(todel)
+                    frontier.insert_rev(newn)
+                    parent.children.append(newn.id)
+
+        # check if running_lb can be increased
+        old_lb = running_lb
+        if frontier.size == 0:  # search space exhausted
+            break  # no need to continue search
+        else:
+            running_lb = max(running_lb, frontier.get_lower_bound())
+
+        if old_lb < running_lb and log is not None:
+                print(f"Increasing lower bound from {old_lb} to {running_lb}", file=log, flush=True)
+
+        if abs(running_ub - running_lb) <= agap:
+            converged = True
+            break
 
             # if args.ap:
             # Update distances for expanded node (and ancestors) based on
@@ -1157,6 +1251,58 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
     return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr,\
         frontier.agg_prune_cntr
 
+
+def assess_children(fnode, children, running_ub, frontier, args):
+    output = ""
+    nsolves = 0
+    nignores = 0
+    new_running_ub = running_ub
+
+    toadd = []
+
+    # evaluate children
+    min_dist = None
+    for isleaf, node_order_c, order_c_index, node_order_a, lb, dlb, eqlb, dist, \
+          dist_ub, new_rem, node_winners, reported, solved in children:
+
+        if solved:
+            nsolves += 1
+
+        output += "EVALUATED {}/{} LB {} (D {} EQ {})\n".format( \
+                        node_order_c, node_order_a, lb, dlb, eqlb)
+
+        if dist == None:
+            output += "    DISTANCE None/Infeasible\n"
+        else:
+            output += "    DISTANCE {}/{}, MINLP used: {}\n".format(dist, dist_ub, solved)
+
+        # skip infeasible nodes
+        if dist is None or dist >= running_ub:
+            output += "        PRUNED!\n"
+            continue
+
+        if isleaf:
+            # fully evaluated leaf nodes
+            output += "        LEAF\n"
+
+            if dist < new_running_ub:
+                new_running_ub = dist  # update running_ub if possible
+        else:
+            newn = TreeNode(fnode.id, node_order_c, node_order_a, \
+                            reported, node_winners, new_rem, dist, \
+                            dist_ub, order_c_index)
+
+            add, delete = frontier.assess_for_insert(newn, lse=args.lse, agv=args.agv)
+
+            if add:
+                toadd.append((fnode, newn, delete))
+
+            else:
+                output += "        SUBSUMED\n"
+                nignores += 1
+
+
+    return nsolves, nignores, toadd, new_running_ub, output
 
 def eval_child_initial(node_order_c, order_c_index, node_order_a, node_winners, winner_set, \
                        candidates, ballots, rem, quota, args, merge_map, tot_ballots, running_ub, \
