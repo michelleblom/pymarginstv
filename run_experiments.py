@@ -16,7 +16,7 @@
 
 """
 This script is used to compare the results of margin calculation implementations and comparing various contests.
-It assumes that the ballot files are in `../stv-rla/data`, which can be found at https://github.com/michelleblom/stv-rla
+It assumes that the ballot files are in `../stvdata`, which can be found at https://github.com/michelleblom/stv-rla
 """
 
 import sys
@@ -32,27 +32,27 @@ from pstats import SortKey, Stats
 
 displaynames = {
     # SCOTLAND GLASGOW 2007
-    "Scotland/GCC_07_Anderson_ballots.txt": "Anderston/City 07",
-    "Scotland/GCC_07_Baillieston_ballots.txt": "Baillieston 07",
-    "Scotland/GCC_07_Calton_ballots.txt": "Calton 07",
-    "Scotland/GCC_07_Canal_ballots.txt": "Canal 07",
-    "Scotland/GCC_07_Craigton_ballots.txt": "Craigton 07",
-    "Scotland/GCC_07_Drumchapel_ballots.txt": "Drumchapel/Anniesland 07",
-    "Scotland/GCC_07_EastCentre_ballots.txt": "East Centre 07",
-    "Scotland/GCC_07_Garscadden_ballots.txt": "Garscadden/Scotstounhill 07",
-    "Scotland/GCC_07_Govan_ballots.txt": "Govan 07",
-    "Scotland/GCC_07_GreaterPollock_ballots.txt": "Greater Pollok 07",
-    "Scotland/GCC_07_Hillhead_ballots.txt": "Hillhead 07",
-    "Scotland/GCC_07_Langside_ballots.txt": "Langside 07",
-    "Scotland/GCC_07_Linn_ballots.txt": "Linn 07",
-    "Scotland/GCC_07_Maryhill_ballots.txt": "Maryhill/Kelvin 07",
-    "Scotland/GCC_07_Newlands_ballots.txt": "Newlands/Auldburn 07",
-    "Scotland/GCC_07_NorthEast_ballots.txt": "North East 07",
-    "Scotland/GCC_07_Partick_ballots.txt": "Partick West 07",
-    "Scotland/GCC_07_Pollockshields_ballots.txt": "Pollokshields 07",
-    "Scotland/GCC_07_Shettleston_ballots.txt": "Shettleston 07",
-    "Scotland/GCC_07_SouthsideCentral_ballots.txt": "Southside Central 07",
-    "Scotland/GCC_07_Springburn_ballots.txt": "Springburn 07",
+    "Scotland/2007/GCC_07_Anderson_ballots.txt": "Anderston/City 07",
+    "Scotland/2007/GCC_07_Baillieston_ballots.txt": "Baillieston 07",
+    "Scotland/2007/GCC_07_Calton_ballots.txt": "Calton 07",
+    "Scotland/2007/GCC_07_Canal_ballots.txt": "Canal 07",
+    "Scotland/2007/GCC_07_Craigton_ballots.txt": "Craigton 07",
+    "Scotland/2007/GCC_07_Drumchapel_ballots.txt": "Drumchapel/Anniesland 07",
+    "Scotland/2007/GCC_07_EastCentre_ballots.txt": "East Centre 07",
+    "Scotland/2007/GCC_07_Garscadden_ballots.txt": "Garscadden/Scotstounhill 07",
+    "Scotland/2007/GCC_07_Govan_ballots.txt": "Govan 07",
+    "Scotland/2007/GCC_07_GreaterPollock_ballots.txt": "Greater Pollok 07",
+    "Scotland/2007/GCC_07_Hillhead_ballots.txt": "Hillhead 07",
+    "Scotland/2007/GCC_07_Langside_ballots.txt": "Langside 07",
+    "Scotland/2007/GCC_07_Linn_ballots.txt": "Linn 07",
+    "Scotland/2007/GCC_07_Maryhill_ballots.txt": "Maryhill/Kelvin 07",
+    "Scotland/2007/GCC_07_Newlands_ballots.txt": "Newlands/Auldburn 07",
+    "Scotland/2007/GCC_07_NorthEast_ballots.txt": "North East 07",
+    "Scotland/2007/GCC_07_Partick_ballots.txt": "Partick West 07",
+    "Scotland/2007/GCC_07_Pollockshields_ballots.txt": "Pollokshields 07",
+    "Scotland/2007/GCC_07_Shettleston_ballots.txt": "Shettleston 07",
+    "Scotland/2007/GCC_07_SouthsideCentral_ballots.txt": "Southside Central 07",
+    "Scotland/2007/GCC_07_Springburn_ballots.txt": "Springburn 07",
     # IRELAND 2002
     "Ireland/DublinNorth2002_ballots.txt": "Dublin North",
     "Ireland/DublinWest2002_ballots.txt": "Dublin West",
@@ -453,6 +453,10 @@ displaynames = {
     "FedAus22/FederalSenate2022TAS.json": "TAS 22",
     "FedAus22/FederalSenate2022VIC.json": "VIC 22",
     "FedAus22/FederalSenate2022WA.json": "WA 22",
+    "FedAus13/2013ACT.json": "ACT 13",
+    "FedAus13/2013NT.json": "NT 13",
+    "FedAus25/2025NT.json": "NT 25",
+    "FedAus25/2025ACT.json": "ACT 25",
     # Minneapolis
     "Minneapolis/MPLS-2009-BET_2Seat_ParsedMB.txt": "Minneapolis BET 09",
     "Minneapolis/MPLS-2013-BET_2Seat_ParsedMB.txt": "Minneapolis BET 13",
@@ -463,7 +467,46 @@ displaynames = {
     "data_election_temp_example.json": "SouthAyrshire-Ward-7 Maybole-North-Carrick-and-Coylton CHANGED"
 }
 
+data_aus_big = [
+("FedAus19/FederalSenate2019VIC.json", 6)           
+]
+
+data_rem = [
+#    ("FedAus25/2025ACT.json", 2),
+    ("FedAus25/2025NT.json", 2),
+ #   ("FedAus13/2013ACT.json", 2),
+  #  ("FedAus13/2013NT.json", 2)
+]
+
+data_aus_small = [
+    ("FedAus16/FederalSenate2016ACT.json", 2),
+    ("FedAus16/FederalSenate2016NT.json", 2),
+    ("FedAus19/FederalSenate2019ACT.json", 2),
+    ("FedAus19/FederalSenate2019NT.json", 2),
+    ("FedAus22/2022ACT.json", 2),
+    ("FedAus22/2022NT.json", 2)
+]
+
 datafiles = [
+    # GLASGOW, SCOTLAND 2007
+    ("Scotland/2007/GCC_07_Anderson_ballots.txt", 4), ("Scotland/2007/GCC_07_Baillieston_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_Calton_ballots.txt", 3), ("Scotland/2007/GCC_07_Canal_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_Craigton_ballots.txt", 4), ("Scotland/2007/GCC_07_Drumchapel_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_EastCentre_ballots.txt", 4), ("Scotland/2007/GCC_07_Garscadden_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_Govan_ballots.txt", 4), ("Scotland/2007/GCC_07_GreaterPollock_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_Hillhead_ballots.txt", 4), ("Scotland/2007/GCC_07_Langside_ballots.txt", 3),
+    ("Scotland/2007/GCC_07_Linn_ballots.txt", 4), ("Scotland/2007/GCC_07_Maryhill_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_Newlands_ballots.txt", 3), ("Scotland/2007/GCC_07_NorthEast_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_Partick_ballots.txt", 4), ("Scotland/2007/GCC_07_Pollockshields_ballots.txt", 3),
+    ("Scotland/2007/GCC_07_Shettleston_ballots.txt", 4), ("Scotland/2007/GCC_07_SouthsideCentral_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_Springburn_ballots.txt", 3),
+    # IRELAND 2002
+    ("Ireland/DublinNorth2002_ballots.txt", 4), ("Ireland/DublinWest2002_ballots.txt", 3),
+    #("Ireland/Meath2002_ballots.txt", 5),
+    ("FedAus25/2025ACT.json", 2),
+    ("FedAus25/2025NT.json", 2),
+    ("FedAus13/2013ACT.json", 2),
+ #  ("FedAus13/2013NT.json", 2)
     # AUSTRALIA 2-seat, 2016, 2019, 2022
     ("FedAus16/FederalSenate2016ACT.json", 2),
     ("FedAus16/FederalSenate2016NT.json", 2),
@@ -489,277 +532,262 @@ datafiles = [
     # ("FedAus22/FederalSenate2022TAS.json", 6),
     # ("FedAus22/FederalSenate2022VIC.json", 6),
     # ("FedAus22/FederalSenate2022WA.json", 6),
-    # GLASGOW, SCOTLAND 2007
-    ("Scotland/GCC_07_Anderson_ballots.txt", 4), ("Scotland/GCC_07_Baillieston_ballots.txt", 4),
-    ("Scotland/GCC_07_Calton_ballots.txt", 3), ("Scotland/GCC_07_Canal_ballots.txt", 4),
-    ("Scotland/GCC_07_Craigton_ballots.txt", 4), ("Scotland/GCC_07_Drumchapel_ballots.txt", 4),
-    ("Scotland/GCC_07_EastCentre_ballots.txt", 4), ("Scotland/GCC_07_Garscadden_ballots.txt", 4),
-    ("Scotland/GCC_07_Govan_ballots.txt", 4), ("Scotland/GCC_07_GreaterPollock_ballots.txt", 4),
-    ("Scotland/GCC_07_Hillhead_ballots.txt", 4), ("Scotland/GCC_07_Langside_ballots.txt", 3),
-    ("Scotland/GCC_07_Linn_ballots.txt", 4), ("Scotland/GCC_07_Maryhill_ballots.txt", 4),
-    ("Scotland/GCC_07_Newlands_ballots.txt", 3), ("Scotland/GCC_07_NorthEast_ballots.txt", 4),
-    ("Scotland/GCC_07_Partick_ballots.txt", 4), ("Scotland/GCC_07_Pollockshields_ballots.txt", 3),
-    ("Scotland/GCC_07_Shettleston_ballots.txt", 4), ("Scotland/GCC_07_SouthsideCentral_ballots.txt", 4),
-    ("Scotland/GCC_07_Springburn_ballots.txt", 3),
-    # IRELAND 2002
-    ("Ireland/DublinNorth2002_ballots.txt", 4), ("Ireland/DublinWest2002_ballots.txt", 3),
-    ("Ireland/Meath2002_ballots.txt", 5),
     # MIXED, SCOTLAND 2022, CANDIDATES > 10?
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_11___City_Centre_06052022_155600.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_12___Leith_Walk_06052022_160625.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-3-Greater-Pollok_06052022_163750.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-18-East-Centre_06052022_165259.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-5-Govan_06052022_165258.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-19-mearns_06052022_172124.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0004_ward-4-oban-south-and-the-isles_06052022_143143.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_5___Inverleith_06052022_155559.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_16___Liberton_Gilmerton_06052022_160625.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-6-Pollokshields_06052022_170301.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-4-Dunfermline-South_06052022_151924.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-8-Southside-Central_06052022_165258.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-2-Newlands-Auldburn_06052022_165250.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-14-Drumchapel-Anniesland_06052022_170258.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-3-dunblane-and-bridge-of-allan_06052022_124253.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-6---Arbroath-West-Letham-and-Friockheim_06052022_150511.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-1-West-Fife-and-Coastal-Villages_06052022_145537.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-10-Anderston-City-Yorkhill_06052022_170256.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-16-Canal_06052022_163755.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_11___City_Centre_06052022_155600.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_12___Leith_Walk_06052022_160625.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-3-Greater-Pollok_06052022_163750.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-18-East-Centre_06052022_165259.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-5-Govan_06052022_165258.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-19-mearns_06052022_172124.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0004_ward-4-oban-south-and-the-isles_06052022_143143.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_5___Inverleith_06052022_155559.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_16___Liberton_Gilmerton_06052022_160625.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-6-Pollokshields_06052022_170301.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-4-Dunfermline-South_06052022_151924.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-8-Southside-Central_06052022_165258.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-2-Newlands-Auldburn_06052022_165250.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-14-Drumchapel-Anniesland_06052022_170258.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-3-dunblane-and-bridge-of-allan_06052022_124253.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-6---Arbroath-West-Letham-and-Friockheim_06052022_150511.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-1-West-Fife-and-Coastal-Villages_06052022_145537.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-10-Anderston-City-Yorkhill_06052022_170256.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-16-Canal_06052022_163755.blt", 4),
     # More Scotland 2022, CANDIDATES = 8 to 10
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-15-Glenrothes-Central-and-Thornton_06052022_145551.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-6-stirling-east_06052022_124253.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-3---West-End_06052022_161516.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-8---The-Ferry_06052022_161517.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_17___Portobello_Craigmillar_06052022_155600.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-1-Linn_06052022_163754.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_7___East_Kilbride_Central_South.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-7-Cowdenbeath_06052022_145532.blt", 4),
-    ("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_1___Musselburgh_06052022_153935.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0009_Ward-3---Ayr-North_10052022_111313.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-3---Forfar-and-District_06052022_150515.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_14___Cambuslang_East.blt", 3),
-    ("Scotland/2022/PreferenceProfile_Ward-4.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-5-peterhead-north-and-rattray_06052022_172118.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0009_ward-8-isle-of-bute_06052022_165355.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_4___Forth_06052022_160611.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-2-Dunfermline-North_06052022_151927.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-1---Strathmartine_06052022_161516.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-3-Dunfermline-Central_06052022_145551.blt", 4),
-    ("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_4___North_Berwick_Coastal_06052022_153938.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-19-Shettleston_06052022_170301.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_3___Shetland_West_06052022_120841.blt", 2),
-    ("Scotland/2022/PreferenceProfile_V0001_Black_Isle_06052022_161539.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-1---Troon_06052022_142627.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-4-central-buchan_06052022_172124.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-10-Kirkcaldy-North_06052022_151928.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-15-Maryhill_06052022_165258.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-2---Lochee_06052022_161513.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-4-Cardonald_06052022_163754.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Torry-Ferryhill-Ward_06052022_160545.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-4---Monifieth-and-Sidlaw_06052022_150515.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Inverness_West_06052022_161539.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-19-East-Neuk-and-Landward_06052022_145551.blt", 3),
-    ("Scotland/2022/cnesair_ward09_preferenceprofile.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-14-Glenrothes-North-Leslie-and-Markinch_06052022_151925.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Tillydrone-Seaton-Old-Aberdeen-Ward_06052022_160546.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-3-dumbarton_06052022_120059.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_9___East_Kilbride_West.blt", 3),
-    ("Scotland/2022/falkirk22_Preference Profile_w9.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-5---Maryfield_06052022_161515.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-20-Cupar_06052022_151928.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-7-Langside_06052022_165250.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_3___Clydesdale_East.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-2-leven_06052022_120059.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-8---Montrose-and-District_06052022_150515.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-4---Ayr-East_06052022_142626.blt", 3),
-    ("Scotland/2022/orkney22-W2.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Northfield-Mastrick-North-Ward_06052022_160545.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Badenoch_and_Strathspey_06052022_161540.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Nairn_and_Cawdor_06052022_161539.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Bridge-of-Don-Ward_06052022_160546.blt", 4),
-    ("Scotland/2022/Ward_6_Midlothian_South_Dalkeith_preference_profile__open_from_within_MS_Word_or_similar_.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-17-Tay-Bridgehead_06052022_145551.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-5-Rosyth_06052022_145544.blt", 3),
-    ("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_5___Haddington_and_Lammermuir_06052022_153938.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-17-Springburn-Robroyston_06052022_170301.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-21-Leven-Kennoway-and-Largo_06052022_145552.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Cromarty_Firth_06052022_161538.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-7-bannockburn_06052022_124254.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-10-west-garioch_06052022_172124.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-5---Ayr-West_06052022_142628.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-18-stonehaven-and-lower-deeside_06052022_172124.blt", 4),
-    ("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_3___Tranent_Wallyford_and_Macmerry_06052022_153937.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-4---Coldside_06052022_161514.blt", 4),
-    ("Scotland/2022/falkirk22_Preference Profile_W2.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Inverness_Central_06052022_161539.blt", 3),
-    ("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_2___Preston_Seton_and_Gosford_06052022_153931.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-2---Prestwick_06052022_142624.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-9-Calton_06052022_163749.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_13___Leith_06052022_155600.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-1-trossachs-and-teith_06052022_124254.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Dyce-Bucksburn-Danestone-Ward_06052022_160545.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_2___Pentland_Hills_06052022_160611.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-9-Burntisland-Kinghorn-and-Western-Kirkcaldy_06052022_145551.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-1-banff-and-district_06052022_172114.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-23-Partick-East-Kelvindale_06052022_170257.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0003_ward-3-mid-argyll_06052022_133803.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_6___East_Kilbride_South.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-6-Inverkeithing-and-Dalgety-Bay_06052022_151927.blt", 4),
-    ("Scotland/2022/cnesair_ward02_preferenceprofile.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Kincorth-Nigg-Cove-Ward_06052022_160546.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-2-forth-and-endrick_06052022_124253.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_7___Sighthill_Gorgie_06052022_155557.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-21-North-East_06052022_170301.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Eilean_a__Che___06052022_161539.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-22-Buckhaven-Methil-and-Wemyss-Villages_06052022_151928.blt", 4),
-    ("Scotland/2022/clacks_W2_North_2022_6694.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-4---Castle-Douglas-and-Crocketford_06052022_171202.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_20___Larkhall.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-12-Kirkcaldy-East_06052022_151925.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_3___Drum_Brae_Gyle_06052022_155559.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_1___Almond_06052022_155516.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0005_ward-5-oban-north-and-lorn_06052022_151453.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-17-north-kincardine_06052022_172124.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-8-Lochgelly-Cardenden-and-Benarty_06052022_151928.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_4___Clydesdale_South.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-13-Garscadden-Scotstounhill_06052022_165250.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-15-Glenrothes-Central-and-Thornton_06052022_145551.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-6-stirling-east_06052022_124253.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-3---West-End_06052022_161516.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-8---The-Ferry_06052022_161517.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_17___Portobello_Craigmillar_06052022_155600.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-1-Linn_06052022_163754.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_7___East_Kilbride_Central_South.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-7-Cowdenbeath_06052022_145532.blt", 4),
+    #("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_1___Musselburgh_06052022_153935.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0009_Ward-3---Ayr-North_10052022_111313.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-3---Forfar-and-District_06052022_150515.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_14___Cambuslang_East.blt", 3),
+    #("Scotland/2022/PreferenceProfile_Ward-4.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-5-peterhead-north-and-rattray_06052022_172118.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0009_ward-8-isle-of-bute_06052022_165355.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_4___Forth_06052022_160611.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-2-Dunfermline-North_06052022_151927.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-1---Strathmartine_06052022_161516.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-3-Dunfermline-Central_06052022_145551.blt", 4),
+    #("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_4___North_Berwick_Coastal_06052022_153938.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-19-Shettleston_06052022_170301.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_3___Shetland_West_06052022_120841.blt", 2),
+    #("Scotland/2022/PreferenceProfile_V0001_Black_Isle_06052022_161539.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-1---Troon_06052022_142627.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-4-central-buchan_06052022_172124.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-10-Kirkcaldy-North_06052022_151928.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-15-Maryhill_06052022_165258.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-2---Lochee_06052022_161513.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-4-Cardonald_06052022_163754.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Torry-Ferryhill-Ward_06052022_160545.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-4---Monifieth-and-Sidlaw_06052022_150515.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Inverness_West_06052022_161539.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-19-East-Neuk-and-Landward_06052022_145551.blt", 3),
+    #("Scotland/2022/cnesair_ward09_preferenceprofile.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-14-Glenrothes-North-Leslie-and-Markinch_06052022_151925.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Tillydrone-Seaton-Old-Aberdeen-Ward_06052022_160546.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-3-dumbarton_06052022_120059.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_9___East_Kilbride_West.blt", 3),
+    #("Scotland/2022/falkirk22_Preference Profile_w9.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-5---Maryfield_06052022_161515.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-20-Cupar_06052022_151928.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-7-Langside_06052022_165250.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_3___Clydesdale_East.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-2-leven_06052022_120059.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-8---Montrose-and-District_06052022_150515.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-4---Ayr-East_06052022_142626.blt", 3),
+    #("Scotland/2022/orkney22-W2.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Northfield-Mastrick-North-Ward_06052022_160545.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Badenoch_and_Strathspey_06052022_161540.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Nairn_and_Cawdor_06052022_161539.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Bridge-of-Don-Ward_06052022_160546.blt", 4),
+    #("Scotland/2022/Ward_6_Midlothian_South_Dalkeith_preference_profile__open_from_within_MS_Word_or_similar_.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-17-Tay-Bridgehead_06052022_145551.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-5-Rosyth_06052022_145544.blt", 3),
+    #("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_5___Haddington_and_Lammermuir_06052022_153938.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-17-Springburn-Robroyston_06052022_170301.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-21-Leven-Kennoway-and-Largo_06052022_145552.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Cromarty_Firth_06052022_161538.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-7-bannockburn_06052022_124254.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-10-west-garioch_06052022_172124.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-5---Ayr-West_06052022_142628.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-18-stonehaven-and-lower-deeside_06052022_172124.blt", 4),
+    #("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_3___Tranent_Wallyford_and_Macmerry_06052022_153937.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-4---Coldside_06052022_161514.blt", 4),
+    #("Scotland/2022/falkirk22_Preference Profile_W2.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Inverness_Central_06052022_161539.blt", 3),
+    #("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_2___Preston_Seton_and_Gosford_06052022_153931.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-2---Prestwick_06052022_142624.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-9-Calton_06052022_163749.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_13___Leith_06052022_155600.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-1-trossachs-and-teith_06052022_124254.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Dyce-Bucksburn-Danestone-Ward_06052022_160545.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_2___Pentland_Hills_06052022_160611.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-9-Burntisland-Kinghorn-and-Western-Kirkcaldy_06052022_145551.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-1-banff-and-district_06052022_172114.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-23-Partick-East-Kelvindale_06052022_170257.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0003_ward-3-mid-argyll_06052022_133803.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_6___East_Kilbride_South.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-6-Inverkeithing-and-Dalgety-Bay_06052022_151927.blt", 4),
+    #("Scotland/2022/cnesair_ward02_preferenceprofile.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Kincorth-Nigg-Cove-Ward_06052022_160546.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-2-forth-and-endrick_06052022_124253.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_7___Sighthill_Gorgie_06052022_155557.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-21-North-East_06052022_170301.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Eilean_a__Che___06052022_161539.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-22-Buckhaven-Methil-and-Wemyss-Villages_06052022_151928.blt", 4),
+    #("Scotland/2022/clacks_W2_North_2022_6694.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-4---Castle-Douglas-and-Crocketford_06052022_171202.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_20___Larkhall.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-12-Kirkcaldy-East_06052022_151925.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_3___Drum_Brae_Gyle_06052022_155559.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_1___Almond_06052022_155516.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0005_ward-5-oban-north-and-lorn_06052022_151453.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-17-north-kincardine_06052022_172124.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-8-Lochgelly-Cardenden-and-Benarty_06052022_151928.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_4___Clydesdale_South.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-13-Garscadden-Scotstounhill_06052022_165250.blt", 4),
     # EVEN MORE SCOTLAND 2022, CANDIDATES less than 8
-    ("Scotland/2022/PreferenceProfile_Ward-3.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_2___Bonnyrigg_06052022_151836.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-5---Carnoustie-and-District_06052022_150514(1).blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-1---Stranraer-and-the-Rhins_06052022_171141.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-11-inverurie-and-district_06052022_172124.blt", 4),
-    ("Scotland/2022/cnesair_ward07_preferenceprofile.blt", 3),
-    ("Scotland/2022/PreferenceProfile_Ward-2.blt", 3),
-    ("Scotland/2022/cnesair_ward_05_preferenceprofile.blt", 2),
-    ("Scotland/2022/PreferenceProfile_V0001_Culloden_and_Ardersier_06052022_161539.blt", 3),
-    ("Scotland/2022/Ward_1_Penicuik_preference_profile__open_from_within_MS_Word_or_similar_.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_6___Lerwick_South_06052022_120841.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-3-fraserburgh-and-district_06052022_172124.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0007_ward-6-cowal_06052022_160055.blt", 3),
-    ("Scotland/2022/PreferenceProfile_Ward-5.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_5___Lerwick_North_and_Bressay_06052022_120841.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-6---Kyle_06052022_142627.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-1-south-kintyre_06052022_120128.blt", 3),
-    ("Scotland/2022/orkney22_W1.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_North_West_and_Central_Sutherland_06052022_161534.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-16-Howe-Of-Fife-and-Tay-Coast_06052022_151928.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Lower-Deeside-Ward_06052022_160546.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0012_ward-11-helensburgh-and-lomond-south_06052022_182005.blt", 3),
-    ("Scotland/2022/PreferenceProfile_Ward-6.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-12-east-garioch_06052022_172124.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-4-kilpatrick_06052022_120059.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-8---Girvan-and-South-Carrick_06052022_142628.blt", 3),
-    ("Scotland/2022/PreferenceProfile_Ward-7.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-8-mid-formartine_06052022_172123.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0008_ward-7-dunoon_06052022_163322.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-4-stirling-north_06052022_124253.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-2---Brechin-and-Edzell_06052022_150515.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Hilton-Woodside-Stockethill-Ward_06052022_160546.blt", 3),
-    ("Scotland/2022/clacks_W1_West_2022_6693.blt", 4),
-    ("Scotland/2022/moray22_ward8.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_18___Hamilton_West_and_Earnock.blt", 4),
-    ("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_6___Dunbar_and_East_Linton_06052022_153938.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_5___Avondale_and_Stonehouse.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Inverness_South_06052022_161540.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_9___Fountainbridge_Craiglockhart_06052022_155600.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-11---Annandale-North_06052022_171202.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-9-ellon-and-district_06052022_172124.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-20-Baillieston_06052022_170301.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Fort_William_and_Ardnamurchan_06052022_161540.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_14___Craigentinny_Duddingston_06052022_160625.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-14-huntly-strathbogie-and-howe-of-alford_06052022_172124.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Aird_and_Loch_Ness_06052022_161539.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Thurso_and_Northwest_Caithness_06052022_161528.blt", 4),
-    ("Scotland/2022/cnesair_ward_03_preferenceprofile.blt", 2),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-12---Annandale-East-and-Eskdale_06052022_171202.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_8___East_Kilbride_Central_North.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Kingswells-Sheddocksley-Summerhill-Ward_06052022_160546.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-6---North-West-Dumfries_06052022_171201.blt", 4),
-    ("Scotland/2022/Ward_4_Midlothian_West_preference_profile__open_from_within_MS_Word_or_similar_.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_4___Shetland_Central_06052022_120841.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-5---Abbey_06052022_171201.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Hazlehead-Queens-Cross-Countesswells-Ward_06052022_160545.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-1-lomond_06052022_120102.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-13-Glenrothes-West-and-Kinglassie_06052022_145551.blt", 3),
-    ("Scotland/2022/falkirk22_Preference Profile_w8.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_17___Hamilton_North_and_East.blt", 3),
-    ("Scotland/2022/Ward_5_Midlothian_East_preference_profile__open_from_within_MS_Word_or_similar_.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_10___East_Kilbride_East.blt", 3),
-    ("Scotland/2022/cnesair_ward_04_preferenceprofile.blt", 2),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_10___Morningside_06052022_160625.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_East_Sutherland_and_Edderton_06052022_161530.blt", 3),
-    ("Scotland/2022/falkirk22_Preference Profile_W5.blt", 3),
-    ("Scotland/2022/moray22_ward1.blt", 3),
-    ("Scotland/2022/falkirk22_Preference Profile_W4.blt", 4),
-    ("Scotland/2022/orkney22-W3.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-11-Kirkcaldy-Central_06052022_145551.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-1---Kirriemuir-and-Dean_06052022_150515(1).blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_15___Southside_Newington_06052022_155603.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Wester_Ross_Strathpeffer_and_Lochalsh_06052022_161539.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-18-St-Andrews_06052022_151928.blt", 4),
-    ("Scotland/2022/falkirk22_Preference Profile_w6.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-7-turriff-and-district_06052022_172118.blt", 4),
-    ("Scotland/2022/falkirk22_Preference Profile_w7.blt", 3),
-    ("Scotland/2022/moray22_ward2.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-7---Arbroath-East-and-Lunan_06052022_150515.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-6-peterhead-south-and-cruden_06052022_172115.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Inverness_Millburn_06052022_161539.blt", 3),
-    ("Scotland/2022/cnesair_ward10_preferenceprofile.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-7---Mid-and-Upper-Nithsdale_06052022_171202.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-6---North-East_06052022_161516.blt", 3),
-    ("Scotland/2022/orkney22-W4.blt", 4),
-    ("Scotland/2022/moray22_ward6.blt", 3),
-    ("Scotland/2022/falkirk22_Preference Profile_W3.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-11-Hillhead_06052022_163755.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_13___Cambuslang_West.blt", 3),
-    ("Scotland/2022/moray22_ward7.blt", 3),
-    ("Scotland/2022/orkney22-W5.blt", 3),
-    ("Scotland/2022/clacks_W3_Central_2022_6695.blt", 3),
-    ("Scotland/2022/clacks_W4_South_2022_6696.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_7___Shetland_South_06052022_120840.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-13-westhill-and-district_06052022_172124.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0010_ward-9-lomond-north_06052022_173349.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-15-aboyne-upper-deeside-and-donside_06052022_172124.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-2---Mid-Galloway-and-Wigtown-West_06052022_171201.blt", 4),
-    ("Scotland/2022/moray22_ward5.blt", 4),
-    ("Scotland/2022/moray22_ward4.blt", 3),
-    ("Scotland/2022/falkirk22_Preference Profile_W1.blt", 3),
-    ("Scotland/2022/orkney22-W6.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0012_ward-10-helensburgh-central_06052022_182005.blt", 4),
-    ("Scotland/2022/Ward_3_Dalkeith_preference_profile__open_from_within_MS_Word_or_similar_.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-5-clydebank-central_06052022_120100.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_George-St-Harbour-Ward_06052022_160545.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_1___Clydesdale_West.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-9---Nith_06052022_171202.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-6-clydebank-waterfront_06052022_120103.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_2___Clydesdale_North.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_16___Bothwell_and_Uddingston.blt", 3),
+    #("Scotland/2022/PreferenceProfile_Ward-3.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_2___Bonnyrigg_06052022_151836.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-5---Carnoustie-and-District_06052022_150514(1).blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-1---Stranraer-and-the-Rhins_06052022_171141.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-11-inverurie-and-district_06052022_172124.blt", 4),
+    #("Scotland/2022/cnesair_ward07_preferenceprofile.blt", 3),
+    #("Scotland/2022/PreferenceProfile_Ward-2.blt", 3),
+    #("Scotland/2022/cnesair_ward_05_preferenceprofile.blt", 2),
+    #("Scotland/2022/PreferenceProfile_V0001_Culloden_and_Ardersier_06052022_161539.blt", 3),
+    #("Scotland/2022/Ward_1_Penicuik_preference_profile__open_from_within_MS_Word_or_similar_.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_6___Lerwick_South_06052022_120841.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-3-fraserburgh-and-district_06052022_172124.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0007_ward-6-cowal_06052022_160055.blt", 3),
+    #("Scotland/2022/PreferenceProfile_Ward-5.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_5___Lerwick_North_and_Bressay_06052022_120841.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-6---Kyle_06052022_142627.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-1-south-kintyre_06052022_120128.blt", 3),
+    #("Scotland/2022/orkney22_W1.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_North_West_and_Central_Sutherland_06052022_161534.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-16-Howe-Of-Fife-and-Tay-Coast_06052022_151928.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Lower-Deeside-Ward_06052022_160546.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0012_ward-11-helensburgh-and-lomond-south_06052022_182005.blt", 3),
+    #("Scotland/2022/PreferenceProfile_Ward-6.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-12-east-garioch_06052022_172124.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-4-kilpatrick_06052022_120059.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-8---Girvan-and-South-Carrick_06052022_142628.blt", 3),
+    #("Scotland/2022/PreferenceProfile_Ward-7.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-8-mid-formartine_06052022_172123.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0008_ward-7-dunoon_06052022_163322.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-4-stirling-north_06052022_124253.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-2---Brechin-and-Edzell_06052022_150515.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Hilton-Woodside-Stockethill-Ward_06052022_160546.blt", 3),
+    #("Scotland/2022/clacks_W1_West_2022_6693.blt", 4),
+    #("Scotland/2022/moray22_ward8.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_18___Hamilton_West_and_Earnock.blt", 4),
+    #("Scotland/2022/elothian22_PreferenceProfile_V0001_Ward_6___Dunbar_and_East_Linton_06052022_153938.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_5___Avondale_and_Stonehouse.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Inverness_South_06052022_161540.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_9___Fountainbridge_Craiglockhart_06052022_155600.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-11---Annandale-North_06052022_171202.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-9-ellon-and-district_06052022_172124.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-20-Baillieston_06052022_170301.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Fort_William_and_Ardnamurchan_06052022_161540.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_14___Craigentinny_Duddingston_06052022_160625.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-14-huntly-strathbogie-and-howe-of-alford_06052022_172124.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Aird_and_Loch_Ness_06052022_161539.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Thurso_and_Northwest_Caithness_06052022_161528.blt", 4),
+    #("Scotland/2022/cnesair_ward_03_preferenceprofile.blt", 2),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-12---Annandale-East-and-Eskdale_06052022_171202.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_8___East_Kilbride_Central_North.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Kingswells-Sheddocksley-Summerhill-Ward_06052022_160546.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-6---North-West-Dumfries_06052022_171201.blt", 4),
+    #("Scotland/2022/Ward_4_Midlothian_West_preference_profile__open_from_within_MS_Word_or_similar_.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_4___Shetland_Central_06052022_120841.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-5---Abbey_06052022_171201.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Hazlehead-Queens-Cross-Countesswells-Ward_06052022_160545.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-1-lomond_06052022_120102.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-13-Glenrothes-West-and-Kinglassie_06052022_145551.blt", 3),
+    #("Scotland/2022/falkirk22_Preference Profile_w8.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_17___Hamilton_North_and_East.blt", 3),
+    #("Scotland/2022/Ward_5_Midlothian_East_preference_profile__open_from_within_MS_Word_or_similar_.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_10___East_Kilbride_East.blt", 3),
+    #("Scotland/2022/cnesair_ward_04_preferenceprofile.blt", 2),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_10___Morningside_06052022_160625.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_East_Sutherland_and_Edderton_06052022_161530.blt", 3),
+    #("Scotland/2022/falkirk22_Preference Profile_W5.blt", 3),
+    #("Scotland/2022/moray22_ward1.blt", 3),
+    #("Scotland/2022/falkirk22_Preference Profile_W4.blt", 4),
+    #("Scotland/2022/orkney22-W3.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-11-Kirkcaldy-Central_06052022_145551.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-1---Kirriemuir-and-Dean_06052022_150515(1).blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_15___Southside_Newington_06052022_155603.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Wester_Ross_Strathpeffer_and_Lochalsh_06052022_161539.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-18-St-Andrews_06052022_151928.blt", 4),
+    #("Scotland/2022/falkirk22_Preference Profile_w6.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-7-turriff-and-district_06052022_172118.blt", 4),
+    #("Scotland/2022/falkirk22_Preference Profile_w7.blt", 3),
+    #("Scotland/2022/moray22_ward2.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-7---Arbroath-East-and-Lunan_06052022_150515.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-6-peterhead-south-and-cruden_06052022_172115.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Inverness_Millburn_06052022_161539.blt", 3),
+    #("Scotland/2022/cnesair_ward10_preferenceprofile.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-7---Mid-and-Upper-Nithsdale_06052022_171202.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-6---North-East_06052022_161516.blt", 3),
+    #("Scotland/2022/orkney22-W4.blt", 4),
+    #("Scotland/2022/moray22_ward6.blt", 3),
+    #("Scotland/2022/falkirk22_Preference Profile_W3.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-11-Hillhead_06052022_163755.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_13___Cambuslang_West.blt", 3),
+    #("Scotland/2022/moray22_ward7.blt", 3),
+    #("Scotland/2022/orkney22-W5.blt", 3),
+    #("Scotland/2022/clacks_W3_Central_2022_6695.blt", 3),
+    #("Scotland/2022/clacks_W4_South_2022_6696.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_7___Shetland_South_06052022_120840.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-13-westhill-and-district_06052022_172124.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0010_ward-9-lomond-north_06052022_173349.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-15-aboyne-upper-deeside-and-donside_06052022_172124.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-2---Mid-Galloway-and-Wigtown-West_06052022_171201.blt", 4),
+    #("Scotland/2022/moray22_ward5.blt", 4),
+    #("Scotland/2022/moray22_ward4.blt", 3),
+    #("Scotland/2022/falkirk22_Preference Profile_W1.blt", 3),
+    #("Scotland/2022/orkney22-W6.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0012_ward-10-helensburgh-central_06052022_182005.blt", 4),
+    #("Scotland/2022/Ward_3_Dalkeith_preference_profile__open_from_within_MS_Word_or_similar_.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0001_ward-5-clydebank-central_06052022_120100.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_George-St-Harbour-Ward_06052022_160545.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_1___Clydesdale_West.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-9---Nith_06052022_171202.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-6-clydebank-waterfront_06052022_120103.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_2___Clydesdale_North.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_16___Bothwell_and_Uddingston.blt", 3),
     # ("Scotland/2022/PreferenceProfile_V0001_North_Isles_Ward_05082022_112827.blt", 1),  # ignore, only 1 seat
-    ("Scotland/2022/PreferenceProfile_V0001_Midstocket-Rosemount-Ward_06052022_160545.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Wick_and_East_Caithness_06052022_161532.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_19___Hamilton_South.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-12-Victoria-Park_06052022_163755.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_15___Blantyre.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-7---Maybole-North-Carrick-and-Coylton_06052022_142628.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Dingwall_and_Seaforth_06052022_161539.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_11___Rutherglen_South.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0002_ward-2-kintyre-and-the-islands_06052022_130502.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-10---Annandale-South_06052022_171202.blt", 4),
-    ("Scotland/2022/preferenceprofile_v0001_ward-2-troup_06052022_172123.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_6___Corstorphine_Murrayfield_06052022_160625.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-22-Dennistoun_06052022_163757.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Tain_and_Easter_Ross_06052022_161537.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-7---East-End_06052022_161516.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_12___Rutherglen_Central_and_North.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward_8___Colinton_Fairmilehead_06052022_160625.blt", 3),
-    ("Scotland/2022/clacks_W5_East_2022_6697.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-16-banchory-and-mid-deeside_06052022_172124.blt", 3),
-    ("Scotland/2022/cnesair_ward08_preferenceprofile.blt", 3),
-    ("Scotland/2022/preferenceprofile_v0001_ward-5-stirling-west_06052022_124253.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Inverness_Ness_side_06052022_161539.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Airyhall-Broomhill-Garthdee-Ward_06052022_160546.blt", 3),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-8---Lochar_06052022_171202.blt", 4),
-    ("Scotland/2022/PreferenceProfile_V0001_Ward-3---Dee-and-Glenkens_06052022_171147.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Midstocket-Rosemount-Ward_06052022_160545.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Wick_and_East_Caithness_06052022_161532.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_19___Hamilton_South.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-12-Victoria-Park_06052022_163755.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_15___Blantyre.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-7---Maybole-North-Carrick-and-Coylton_06052022_142628.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Dingwall_and_Seaforth_06052022_161539.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_11___Rutherglen_South.blt", 3),
+    #("Scotland/2022/preferenceprofile_v0002_ward-2-kintyre-and-the-islands_06052022_130502.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-10---Annandale-South_06052022_171202.blt", 4),
+    #("Scotland/2022/preferenceprofile_v0001_ward-2-troup_06052022_172123.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_6___Corstorphine_Murrayfield_06052022_160625.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-22-Dennistoun_06052022_163757.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Tain_and_Easter_Ross_06052022_161537.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-7---East-End_06052022_161516.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_12___Rutherglen_Central_and_North.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward_8___Colinton_Fairmilehead_06052022_160625.blt", 3),
+    #("Scotland/2022/clacks_W5_East_2022_6697.blt", 3),
+   # ("Scotland/2022/preferenceprofile_v0001_ward-16-banchory-and-mid-deeside_06052022_172124.blt", 3),
+   # ("Scotland/2022/cnesair_ward08_preferenceprofile.blt", 3),
+   # ("Scotland/2022/preferenceprofile_v0001_ward-5-stirling-west_06052022_124253.blt", 3),
+   # ("Scotland/2022/PreferenceProfile_V0001_Inverness_Ness_side_06052022_161539.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Airyhall-Broomhill-Garthdee-Ward_06052022_160546.blt", 3),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-8---Lochar_06052022_171202.blt", 4),
+    #("Scotland/2022/PreferenceProfile_V0001_Ward-3---Dee-and-Glenkens_06052022_171147.blt", 3),
     # Minneapolis
     ("Minneapolis/MPLS-2009-BET_2Seat_ParsedMB.txt", 2),
     ("Minneapolis/MPLS-2013-BET_2Seat_ParsedMB.txt", 2),
@@ -774,6 +802,10 @@ ubs = {
     "NT 19": 15890,
     "ACT 22": 11078,
     "NT 22": 11412,
+    "NT 13" : 2298,
+    "NT 25" : 13256,
+    "ACT 13" : 13391,
+    "ACT 25" : 23121,
     "Anderston/City 07": 99,
     "Baillieston 07": 105,
     "Calton 07": 376,
@@ -1060,7 +1092,7 @@ ubs = {
 
 
 def run_audit():
-    reps = 3
+    reps = 1
     counter = 0  # 1-5148
 
     # -3 == new without new ub
@@ -1071,16 +1103,16 @@ def run_audit():
     # 5 == new without dlb, aka New+LSE
     # 6 == new without dlb and lse, aka New
     # versions = [4, 5, 6, 0, 3, -1, -3]
-    versions = [4, 5, 6, 0, 3, -1]
-
+    #versions = [4, 5, 6, 0, 3, -1]
+    versions=[3, 0]
     print(
         "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb, new_ub")
     for version in versions:
-        for (datafile, seats) in datafiles:
+        for (datafile, seats) in data_rem:
             if "example" in datafile:
                 path = "./data/" + datafile
             else:
-                path = "../stv-rla/data/" + datafile
+                path = "../stvdata/" + datafile
             displayname = displaynames[datafile]
 
             # candidates = [0]
@@ -1088,26 +1120,29 @@ def run_audit():
             # if path.endswith(".blt"):
             #     candidates, ballots, _, cid2num, totvotes, seats = read_ballots_blt(path)
             # print(f"{displayname}, {len(candidates)}, {seats}, {counter}"); continue
-            sys.argv = ['', '-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}.log", '-s', str(seats),
-                        '-pc', '8', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
+            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}.log", '-s', str(seats),
+                        '-pc', '30', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
             if version >= 0:  # new ub
-                sys.argv += ['-ub', str(ubs[displayname])]
+                args += ['-ub', str(ubs[displayname])]
             if abs(version) == 3:  # new
-                sys.argv += ['-lse', '-eqlb', '-dlb']
+                args += ['-lse', '-eqlb', '-dlb']
             if version == 4:
-                sys.argv += ['-dlb', '-eqlb']
+                args += ['-dlb', '-eqlb']
             if version == 5:
-                sys.argv += ['-eqlb', '-lse']
+                args += ['-eqlb', '-lse']
             if version == 6:
-                sys.argv += ['-eqlb']
+                args += ['-eqlb']
+
             for _ in range(reps):
                 counter += 1
                 # print(version, datafile, counter); continue
-                if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
-                # print(" ".join(sys.argv))
+                #if counter != int(os.environ['SLURM_ARRAY_TASK_ID']): continue
+                #print(" ".join(sys.argv))
                 # with Profile() as profile:
                 # print(displayname)
-                exec(open("pymarginstv.py").read())
+                command = [sys.executable, "pymarginstv.py"] + args
+                run(command)
+                #exec(open("pymarginstv.py").read())
                     # (
                     #     Stats(profile)
                     #     .strip_dirs()
@@ -1124,15 +1159,15 @@ def run_ub():
         if "example" in datafile:
             path = "./data/" + datafile
         else:
-            path = "../stv-rla/data/" + datafile
+            path = "../stvdata/" + datafile
         if path.endswith(".txt"):
             path = path.split(".txt")[0] + ".blt"
         if path.endswith(".blt"):
             path = path.split(".blt")[0] + ".json"
         if path.endswith(".json"):
-            outfile = path.split(".json")[0] + ".vchange"
-            print(f'{path} 1st:')
-            os.system(f'../ConcreteSTV/target/debug/change_outcomes Minimal "{path}" -o "{outfile}"')
+            outfile = path.split(".json")[0] + "FP21.vchange"
+            print(f'{path} {outfile} 1st:')
+            os.system(f'../ConcreteSTV/target/debug/change_outcomes FederalPost2021 "{path}" -o "{outfile}"')
         else:
             print("path does not end with .txt, .blt, or .json")
 
@@ -1143,13 +1178,13 @@ def get_ub_csv():
         if "example" in datafile:
             path = "./data/" + datafile
         else:
-            path = "../stv-rla/data/" + datafile
+            path = "../stvdata/" + datafile
         if path.endswith(".txt"):
             path = path.split(".txt")[0] + ".json"
         if path.endswith(".blt"):
             path = path.split(".blt")[0] + ".json"
         if path.endswith(".json"):
-            infile = path.split(".json")[0] + ".vchange"
+            infile = path.split(".json")[0] + "FP21.vchange"
             with open(infile) as file:
                 res = json.load(file)
                 min_ub = min([change["ballots"]["n"] for change in res["changes"]])
@@ -1161,7 +1196,7 @@ def save_ub_changes_to_json():
         if "example" in datafile:
             path = "./data/" + datafile
         else:
-            path = "../stv-rla/data/" + datafile
+            path = "../stvdata/" + datafile
         if path.endswith(".blt"):
             path = path.split(".blt")[0] + ".json"
         if path.endswith(".json"):
@@ -1208,7 +1243,7 @@ def txt_to_blt():
         if "example" in datafile:
             path = "./data/" + datafile
         else:
-            path = "../stv-rla/data/" + datafile
+            path = "../stvdata/" + datafile
         if path.endswith(".txt"):
             dest = path.split(".txt")[0] + ".blt"
             output = ""
@@ -1243,10 +1278,49 @@ def txt_to_blt():
                 with open(dest, 'w') as file:
                     file.write(output)
 
+def simulate():
+        for (datafile, seats) in datafiles:
+            if "example" in datafile:
+                path = "./data/" + datafile
+            else:
+                path = "../stvdata/" + datafile
+            displayname = displaynames[datafile]
+
+            # candidates = [0]
+            # seats = 0
+            # if path.endswith(".blt"):
+            #     candidates, ballots, _, cid2num, totvotes, seats = read_ballots_blt(path)
+            # print(f"{displayname}, {len(candidates)}, {seats}, {counter}"); continue
+            print("---------")
+            print(displayname)
+            print("---------")
+            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_justsimSR.log", '-s', str(seats),
+                        '-just_sim', '-senate_rules', '-displayname', displayname, '-m']
+            command = [sys.executable, "pymarginstv.py"] + args
+            run(command)
+            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_justsim.log", '-s', str(seats),
+                        '-just_sim', '-displayname', displayname, '-m']
+            command = [sys.executable, "pymarginstv.py"] + args
+            run(command)
+
+            # compare
+            print("---------")
+            with open(f"log_{datafile.replace('/', '')}_justsimSR.log", "r") as file:
+                lines = file.readlines()
+                lastTwo1 = lines[len(lines)-2:-1]
+                with open(f"log_{datafile.replace('/', '')}_justsim.log", "r") as file:
+                    lines2 = file.readlines()
+                    lastTwo2 = lines2[len(lines2)-2:-1]
+                    if lastTwo1 != lastTwo2:
+                        print("{displayname} difference in outcome")
+            result = run(["diff", f"log_{datafile.replace('/', '')}_justsimSR.log", f"log_{datafile.replace('/', '')}_justsim.log"],\
+                    capture_output=True, text=True)
+            print(result.stdout)
 
 if __name__ == "__main__":
     run_audit()
-    # txt_to_blt()
-    # run_ub()
-    # get_ub_csv()
+    #txt_to_blt()
+    #run_ub()
+    #get_ub_csv()
     # save_ub_changes_to_json()
+    #simulate()
