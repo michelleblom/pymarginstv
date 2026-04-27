@@ -272,7 +272,10 @@ def read_ballots_json(path):
         cid = 0
         for cand in data["metadata"]["candidates"]:
             name = cand["name"]
-            party = int(cand["party"])
+            try:
+                party = int(cand["party"])
+            except KeyError:
+                party = -1
             try:
                 pos = int(cand["position"])
             except KeyError:
@@ -296,60 +299,69 @@ def read_ballots_json(path):
 
         # get party info
         pid = 0
-        for party in data["metadata"]["parties"]:
-            group = Group(pid)
+        try:
+            for party in data["metadata"]["parties"]:
+                group = Group(pid)
 
-            for num in party["candidates"]:
-                group.cands.append(num)
+                for num in party["candidates"]:
+                    group.cands.append(num)
 
-            id2group[pid] = group
+                id2group[pid] = group
 
-            pid += 1
+                pid += 1
+        except KeyError:
+            print("No parties or bad data in party lists for candidates.")
 
         # process atl ballots
         bcntr = 0
-        for atl in data["atl"]:
-            n = int(atl["n"])
+        try:
+            for atl in data["atl"]:
+                n = int(atl["n"])
 
-            groups = [id2group[int(g)] for g in atl["parties"]]
+                groups = [id2group[int(g)] for g in atl["parties"]]
 
-            prefs = []
-            for g in groups:
-                prefs.extend(g.cands)
+                prefs = []
+                for g in groups:
+                    prefs.extend(g.cands)
                 
-            blt = Ballot(bcntr, n, prefs, ncands, atl=True)
+                blt = Ballot(bcntr, n, prefs, ncands, atl=True)
 
-            fcand = candidates[prefs[0]]
-            fcand.ballots.append(bcntr)
-            fcand.fp_votes += n
+                fcand = candidates[prefs[0]]
+                fcand.ballots.append(bcntr)
+                fcand.fp_votes += n
 
-            fcand.num_atls += n
+                fcand.num_atls += n
 
-            total_votes += n
+                total_votes += n
 
-            ballots.append(blt)
-            bcntr += 1
+                ballots.append(blt)
+                bcntr += 1
+        except KeyError:
+            print("No ATL votes or bad data listing ATL parties.")
 
         # process btl ballots
-        for btl in data["btl"]:
-            n = int(btl["n"])
+        try:
+            for btl in data["btl"]:
+                n = int(btl["n"])
 
-            # no need to use cid2num since candidate ids range from 0 to 
-            # num_cands -1 already.
-            prefs = [int(c) for c in btl["candidates"]]
+                # no need to use cid2num since candidate ids range from 0 to
+                # num_cands -1 already.
+                prefs = [int(c) for c in btl["candidates"]]
 
-            blt = Ballot(bcntr, n, prefs, ncands, atl=False)
+                blt = Ballot(bcntr, n, prefs, ncands, atl=False)
 
-            fcand = candidates[prefs[0]]
-            fcand.ballots.append(bcntr)
-            fcand.fp_votes += n
+                fcand = candidates[prefs[0]]
+                fcand.ballots.append(bcntr)
+                fcand.fp_votes += n
 
-            fcand.num_btls += n
+                fcand.num_btls += n
 
-            total_votes += n
-            ballots.append(blt)
+                total_votes += n
+                ballots.append(blt)
 
-            bcntr += 1
+                bcntr += 1
+        except KeyError:
+            print("No BTL votes or bad data listing BTL candidates.")
     
     return candidates,ballots,id2group,cid2num,total_votes
             

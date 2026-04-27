@@ -102,7 +102,8 @@ if __name__ == "__main__":
 
     # Check for given input data type
     if args.data.endswith(".stv"):
-        candidates, ballots, _, cid2num, nballots = read_ballots_stv(args.data)
+        # VT TODO: I found that read_ballots_stv didn't work. Hope there's not a different kind of .stv.
+        candidates, ballots, _, cid2num, nballots = read_ballots_json(args.data)
 
     elif args.data.endswith(".blt"):
         candidates, ballots, _, cid2num, nballots, _ = read_ballots_blt(args.data)
@@ -160,7 +161,7 @@ if __name__ == "__main__":
         upper_bound = math.ceil(min(upper_bound, args.ub))
     original_upper_bound = upper_bound
 
-    print("WEUB {}, simple UB {}".format(weub, simple_ub),file=log,flush=True)
+    print("WEUB {}, simple UB {}, external UB {}.".format(weub, simple_ub, args.ub if external_upper_bound else "absent"),file=log,flush=True)
 
 
     # Start branch and bound.

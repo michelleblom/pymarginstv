@@ -468,7 +468,7 @@ displaynames = {
 }
 
 data_aus_big = [
-("FedAus19/FederalSenate2019VIC.json", 6)           
+("FedAus19/FederalSenate2019VIC.json", 6)
 ]
 
 data_rem = [
