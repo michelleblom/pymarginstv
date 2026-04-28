@@ -1165,9 +1165,9 @@ def run_ub():
         if path.endswith(".blt"):
             path = path.split(".blt")[0] + ".json"
         if path.endswith(".json"):
-            outfile = path.split(".json")[0] + "FP21.vchange"
-            print(f'{path} {outfile} 1st:')
-            os.system(f'../ConcreteSTV/target/debug/change_outcomes FederalPost2021 "{path}" -o "{outfile}"')
+            outfile = path.split(".json")[0] + ".vchange"
+            print(f'{path} 1st:')
+            os.system(f'../ConcreteSTV/target/debug/change_outcomes beSTV "{path}" -o "{outfile}"')
         else:
             print("path does not end with .txt, .blt, or .json")
 
