@@ -25,37 +25,55 @@ the format produced by `nsw_beSTV_changes.rs`.
 
 import sys
 import os
+
 import pandas as pd
 from collections import namedtuple
 from subprocess import run
+from concurrent.futures import ThreadPoolExecutor
 
 ContestMetadata = namedtuple("ContestMetadata", ["votes", "vacancies", "candidates", "upper_bound"])
-data_directory = "../stvdata/"
+data_directory = "stvdata/"
 
 def run_audit(metadata):
-    reps = 1
-    counter = 0  # 1-5148
-
     # version
     # 0 == baseline (with new ub), aka Baseline+U
+
     directory = data_directory + "nswLGE/"
-    for datafile in os.listdir(directory):
-        # Ignore the files that aren't stv files.
-        if not datafile.endswith(".stv"):
-            continue
+    futures = {}
 
-        path = directory + datafile
-        displayname = datafile.split(".")[0]
-        contest_data = metadata[displayname]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        for datafile in os.listdir(directory):
+            # Ignore the files that aren't stv files.
+            if not datafile.endswith(".stv"):
+                continue
 
-        args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{0}.log", '-s', str(contest_data.vacancies),
-                        '-pc', '30', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m',
-                        '-ub', str(int(contest_data.upper_bound))]
+            path = directory + datafile
+            displayname = datafile.split(".")[0]
+            contest_data = metadata[displayname]
 
-        for _ in range(reps):
-                counter += 1
-                command = [sys.executable, "pymarginstv.py"] + args
-                run(command)
+            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{0}.log", '-s', str(contest_data.vacancies),
+                    '-pc', '30', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
+
+            # Add upper bound from file if present.
+            if pd.notna(contest_data.upper_bound):
+                args += ['-ub', str(int(contest_data.upper_bound))]
+
+            # command = [sys.executable, "pymarginstv.py"] + args
+            future = executor.submit(run_pymarginstv, args)
+            print(f"Starting LGA: {displayname}")
+            futures[future] = displayname
+
+        for future, displayname in futures.items():
+            displayname = futures[future]
+            try:
+                result = future.result()
+                print(f"Success: {displayname}; {result}")
+            except Exception as e:
+                print(f"Failure: {displayname}")
+
+
+def run_pymarginstv(args):
+    return run([sys.executable, "pymarginstv.py"] + args, check=True, capture_output=True, text=True)
 
 def read_upper_bound_csv():
     upper_bounds = pd.read_csv(data_directory + "summary_NSW2021Changes_BESTV_BetterBounds.csv")
