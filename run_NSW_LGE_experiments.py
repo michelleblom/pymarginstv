@@ -25,6 +25,7 @@ the format produced by `nsw_beSTV_changes.rs`.
 
 import sys
 import os
+from asyncio import as_completed
 
 import pandas as pd
 from collections import namedtuple
@@ -74,17 +75,19 @@ def run_audit(metadata):
             print(f"Starting LGA: {displayname}")
             futures[future] = displayname
 
-        for future, displayname in futures.items():
+        for future in as_completed(futures):
             displayname = futures[future]
             try:
-                result = future.result(timeout=TIMEOUT)
+                result = future.result()
                 print(f"Success: {displayname}; {result}")
             except Exception as e:
                 print(f"Failure: {displayname}")
+            finally:
+                del futures[future]
 
 
 def run_pymarginstv(args):
-    return run([sys.executable, "pymarginstv.py"] + args, check=True, capture_output=True, text=True)
+    return run([sys.executable, "pymarginstv.py"] + args, check=True, capture_output=True, text=True, timeout=TIMEOUT)
 
 def read_upper_bound_csv():
     upper_bounds = pd.read_csv(data_directory + "summary_NSW2021Changes_BESTV_BetterBounds.csv")
