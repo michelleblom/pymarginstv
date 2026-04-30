@@ -41,7 +41,7 @@ def run_audit(metadata):
     directory = data_directory + "nswLGE/"
     futures = {}
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=16) as executor:
         for datafile in os.listdir(directory):
             # Ignore the files that aren't stv files.
             if not datafile.endswith(".stv"):
