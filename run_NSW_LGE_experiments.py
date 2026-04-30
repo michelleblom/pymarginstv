@@ -33,6 +33,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 ContestMetadata = namedtuple("ContestMetadata", ["votes", "vacancies", "candidates", "upper_bound"])
 data_directory = "stvdata/"
+TIMEOUT = 2000
+THREADS = 16
+# Skip data files if a log file is already present. Note this does *not* guarantee that the run completed successfully -
+# just that it started.
+SKIP_DONE = True
 
 def run_audit(metadata):
     # version
@@ -41,10 +46,16 @@ def run_audit(metadata):
     directory = data_directory + "nswLGE/"
     futures = {}
 
-    with ThreadPoolExecutor(max_workers=16) as executor:
+    # done logs look like log_LGENAME.stv_0.log
+    done_logs = list(filter(lambda l: l.endswith(".log"), os.listdir(".")))
+    done_log_names = set(map(lambda x: x.split(".")[0].split("_")[1], done_logs))
+
+    with ThreadPoolExecutor(max_workers=THREADS) as executor:
         for datafile in os.listdir(directory):
-            # Ignore the files that aren't stv files.
-            if not datafile.endswith(".stv"):
+
+            # Ignore the files that aren't stv files, or that have already been done if the SKIP_DONE flag is true..
+            # The LGENAME must match exactly, because quite a few are substrings of others
+            if not datafile.endswith(".stv") or (SKIP_DONE and datafile.split(".")[0] in done_log_names):
                 continue
 
             path = directory + datafile
@@ -66,7 +77,7 @@ def run_audit(metadata):
         for future, displayname in futures.items():
             displayname = futures[future]
             try:
-                result = future.result()
+                result = future.result(timeout=TIMEOUT)
                 print(f"Success: {displayname}; {result}")
             except Exception as e:
                 print(f"Failure: {displayname}")
