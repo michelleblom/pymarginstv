@@ -65,8 +65,9 @@ def run_audit(metadata):
         displayname = datafile.split(".")[0]
         contest_data = metadata[displayname]
 
-        args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{0}.log", '-s', str(contest_data.vacancies),
-                '-pc', THREADS, '-g', '0.01', '-agap', '0', '-limit', TIMEOUT, '-displayname', displayname, '-m']
+        args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{3}.log", '-s', str(contest_data.vacancies),
+                '-pc', THREADS, '-g', '0.01', '-agap', '0', '-limit', TIMEOUT, '-displayname', displayname, '-m',
+               '-lse', '-eqlb', '-dlb']
 
         # Add upper bound from file if present.
         if pd.notna(contest_data.upper_bound):
