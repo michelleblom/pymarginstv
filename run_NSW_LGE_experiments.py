@@ -33,64 +33,61 @@ from subprocess import run
 from concurrent.futures import ThreadPoolExecutor
 
 ContestMetadata = namedtuple("ContestMetadata", ["votes", "vacancies", "candidates", "upper_bound"])
-data_directory = "stvdata/"
-TIMEOUT = 2000
-THREADS = 16
+DATA_DIRECTORY = "../stvdata/"
+NSW_DATA_DIRECTORY = DATA_DIRECTORY + "nswLGE/"
+STV_UBS = DATA_DIRECTORY + "summary_NSW2021Changes_BESTV_BetterBounds.csv"
+TIMEOUT = '10800'
+THREADS = '30'
 # Skip data files if a log file is already present. Note this does *not* guarantee that the run completed successfully -
 # just that it started.
 SKIP_DONE = True
+# Skip the mayoral contests, which are actually IRV, i.e. single winner, and therefore uninteresting because
+# auditable by RAIRE.
+SKIP_MAYORAL = True
+
 
 def run_audit(metadata):
     # version
     # 0 == baseline (with new ub), aka Baseline+U
 
-    directory = data_directory + "nswLGE/"
-    futures = {}
-
     # done logs look like log_LGENAME.stv_0.log
     done_logs = list(filter(lambda l: l.endswith(".log"), os.listdir(".")))
     done_log_names = set(map(lambda x: x.split(".")[0].split("_")[1], done_logs))
 
-    with ThreadPoolExecutor(max_workers=THREADS) as executor:
-        for datafile in os.listdir(directory):
+    for datafile in os.listdir(NSW_DATA_DIRECTORY):
 
-            # Ignore the files that aren't stv files, or that have already been done if the SKIP_DONE flag is true..
-            # The LGENAME must match exactly, because quite a few are substrings of others
-            if not datafile.endswith(".stv") or (SKIP_DONE and datafile.split(".")[0] in done_log_names):
-                continue
+        # Ignore the files that aren't stv files, or that have already been done if the SKIP_DONE flag is true.
+        # The LGENAME must match exactly, because quite a few are substrings of others.
+        # Ignore Mayoral contests if requested.
+        if (not datafile.endswith(".stv") or
+                (SKIP_DONE and datafile.split(".")[0] in done_log_names) or
+                (SKIP_MAYORAL and "Mayoral" in datafile.split(".")[0])):
+            continue
 
-            path = directory + datafile
-            displayname = datafile.split(".")[0]
-            contest_data = metadata[displayname]
+        path = NSW_DATA_DIRECTORY + datafile
+        displayname = datafile.split(".")[0]
+        contest_data = metadata[displayname]
 
-            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{0}.log", '-s', str(contest_data.vacancies),
-                    '-pc', '30', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
+        args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{0}.log", '-s', str(contest_data.vacancies),
+                '-pc', THREADS, '-g', '0.01', '-agap', '0', '-limit', TIMEOUT, '-displayname', displayname, '-m']
 
-            # Add upper bound from file if present.
-            if pd.notna(contest_data.upper_bound):
-                args += ['-ub', str(int(contest_data.upper_bound))]
+        # Add upper bound from file if present.
+        if pd.notna(contest_data.upper_bound):
+            args += ['-ub', str(int(contest_data.upper_bound))]
 
-            # command = [sys.executable, "pymarginstv.py"] + args
-            future = executor.submit(run_pymarginstv, args)
-            print(f"Starting LGA: {displayname}")
-            futures[future] = displayname
-
-        for future in as_completed(futures):
-            displayname = futures[future]
-            try:
-                result = future.result()
-                print(f"Success: {displayname}; {result}")
-            except Exception as e:
-                print(f"Failure: {displayname}")
-            finally:
-                del futures[future]
+        print(f"Starting LGA: {displayname}")
 
 
-def run_pymarginstv(args):
-    return run([sys.executable, "pymarginstv.py"] + args, check=True, capture_output=True, text=True, timeout=TIMEOUT)
+        try:
+            command = [sys.executable, "pymarginstv.py"] + args
+            run(command)
+            print(f"Success: {displayname}.")
+        except Exception as e:
+            print(f"Failure: {displayname}.")
+
 
 def read_upper_bound_csv():
-    upper_bounds = pd.read_csv(data_directory + "summary_NSW2021Changes_BESTV_BetterBounds.csv")
+    upper_bounds = pd.read_csv(STV_UBS)
 
     contest_metadata = {}
     for index, row in upper_bounds.iterrows():
