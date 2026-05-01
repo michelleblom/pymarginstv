@@ -18,24 +18,21 @@
 This script is used to compare the results of margin calculation upper bounds (which can be taken from
 concreteSTV, or anywhere else) with the lower-bound calculationso of pymarginstv.
 It assumes that the ballot files are in `../stvdata/nswLGE`,
-It assumes an upper-bound csv file called `/summary_NSW2021Changes_BESTV_BetterBounds.csv` in `../stvdata/`
+It assumes an upper-bound csv file called `/summary_NSW2021Changes_BESTV_BetterBounds.csv` in `test/data`
  with columns "Electorate,Votes,Vacancies,Candidates,Min Manipulation", matching
 the format produced by `nsw_beSTV_changes.rs`.
 """
 
 import sys
 import os
-from asyncio import as_completed
 
 import pandas as pd
 from collections import namedtuple
 from subprocess import run
-from concurrent.futures import ThreadPoolExecutor
 
 ContestMetadata = namedtuple("ContestMetadata", ["votes", "vacancies", "candidates", "upper_bound"])
-DATA_DIRECTORY = "../stvdata/"
-NSW_DATA_DIRECTORY = DATA_DIRECTORY + "nswLGE/"
-STV_UBS = DATA_DIRECTORY + "summary_NSW2021Changes_BESTV_BetterBounds.csv"
+NSW_DATA_DIRECTORY = "../stvdata/nswLGE/"
+STV_UBS = "test/data/summary_NSW2021Changes_BESTV_BetterBounds.csv"
 TIMEOUT = '10800'
 THREADS = '30'
 # Skip data files if a log file is already present. Note this does *not* guarantee that the run completed successfully -
@@ -83,7 +80,7 @@ def run_audit(metadata):
             run(command)
             print(f"Success: {displayname}.")
         except Exception as e:
-            print(f"Failure: {displayname}.")
+            print(f"Failure: {displayname}. Error: {e}")
 
 
 def read_upper_bound_csv():
