@@ -266,11 +266,6 @@ class Frontier:
 
         self.node_map[node.id] = node
 
-        #if node.reported:
-        #  self.nodes.insert(0, node.id)
-        #  self.size += 1
-        #  return 0
-
         for i in range(len(self.nodes)):
             if node.dist < self.get_node(self.nodes[i]).dist:
                 self.nodes.insert(i, node.id)
@@ -318,34 +313,6 @@ def compute_last_round(order_c, order_a, seats, ncands):
     return min(loc - 1, LAST_ROUND)
 
 
-def get_order_q(order_c, order_a, LAST_ROUND, winners, order_c_index):
-    """
-        Determine the earliest and latest time that winners could have
-        achieved a quota, given that we have determined we only care
-        about winners that have been seated at or before LAST_ROUND.
-    """
-    order_q = {}
-    for w in winners:
-        pos = order_c_index[w]
-        if pos == -1:
-            pos = LAST_ROUND
-        if pos > LAST_ROUND:
-            continue
-
-        minrq = pos - 1
-        maxrq = pos - 1
-
-        for r in range(pos - 1, -1, -1):
-            if order_a[r] == 1:
-                minrq -= 1
-            else:
-                break
-
-        order_q[w] = (minrq, maxrq)
-
-    return order_q
-
-
 def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
     """
     This function calculates the lower bound on the number of votes that need to be changed
@@ -358,7 +325,7 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
     order_c (list): A list representing the order in which candidates were eliminated or seated.
     order_a (list): A list of 0s and 1s indicating whether a candidate was eliminated (0) or seated (1) in each round.
     quota (int): The quota for the election, i.e., the minimum number of votes a candidate needs to win a seat.
-    order_q (dict): A dictionary mapping candidates to their quota values.
+    order_q (dict): A dictionary mapping winning candidates to the first round in which they have a quota at the start of that round.
 
     Returns:
     int: The lower bound on the number of votes that need to be changed to alter the outcome of the election prefix.
@@ -382,8 +349,7 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
             min_ce = cands[ce].fp_votes
 
             # dict of remaining candidates (eliminated or seated after ce)
-            max_others = {c.num: 0 for c in cands if c.num not in gone_set and c.num != ce}
-            # min_others = {c.num: 0 for c in cands if c.num not in gone and c.num != ce}
+            others = {c.num: 0 for c in cands if c.num not in gone_set and c.num != ce}
 
             for b in ballots:
                 prefs = [p for p in b.prefs if p not in gone_set]
@@ -391,41 +357,34 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
                 if not prefs:  # ballot is exhausted
                     continue
 
-                _, elb_add, ub_add = calc_tallies(b, gone, transfer, winners)
+                _, ev_add = calc_tallies(b, gone, transfer, winners, order_q)
 
                 if prefs[0] != ce:  # transferred to other (including fp votes)
-                    max_others[prefs[0]] += ub_add
+                    others[prefs[0]] += ev_add
                 elif b.prefs[0] != ce:  # transferred to ce (fp votes already allocated)
-                    min_ce += elb_add
-                    # max_ce += ub_add
+                    min_ce += ev_add
 
-            for c, v in max_others.items():
+            for c, v in others.items():
                 elim_lb = max(elim_lb, max(0, 0.5 * (min_ce - v)))
 
         else:  # candidate seated
             if ce in order_q:  # candidate got a quota, else seated by default (last round)
-                lb_value = 0  # lb on value of ballots
-                ub_value = 0  # ub on value of ballots (quota <= lb_value <= ub_value <= len(ballots))
+                value = 0  # value of ballots
                 for b in ballots:
                     prefs = [p for p in b.prefs if p not in gone_set]
 
                     if prefs:  # ballot is not exhausted
-                        slb_add, _, ub_add = calc_tallies(b, gone, transfer, winners)
+                        sv_add, _ = calc_tallies(b, gone, transfer, winners, order_q)
                         if prefs[0] == ce:
-                            lb_value += slb_add
-                        if i >= 1 and order_a[i-1] == 1 and ce in prefs:  # ambiguous case: ballot could be in any pile
-                            ub_value += ub_add
-                        elif prefs[0] == ce:
-                            ub_value += ub_add
+                            value += sv_add
 
                 winners.append(ce)
 
-                cmax = ub_value
-                lb_value = max(lb_value, quota)  # restrict lb_value to be at lest quota
-                ub_value = max(lb_value, ub_value)  # restrict ub_value to be at lest lb_value
-                transfer[ce] = ((lb_value - quota)/lb_value, (ub_value - quota)/ub_value)
+                cmax = value
+                value = max(value, quota)  # restrict value to be at lest quota
+                transfer[ce] = (value - quota)/value
 
-                # cost to displace the candidate with largest tally that is also above quota 0nly active if
+                # cost to displace the candidate with largest tally that is also above quota only active if
                 # no eliminations/seatings has happened
                 displacement_cost = 0
                 if not gone:  # no eliminations yet
@@ -441,7 +400,7 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
     return max(0, lb), transfer
 
 
-def calc_tallies(b, gone, transfer, winners):
+def calc_tallies(b, c, gone, transfer, winners, order_q):
     """
     This function calculates the lower and upper bounds on the value of a ballot after transfers.
 
@@ -450,26 +409,21 @@ def calc_tallies(b, gone, transfer, winners):
     gone (list): A list of candidates that have been eliminated or seated.
     transfer (dict): A dictionary mapping candidates to their transfer values.
     winners (list): A list of candidates that have won, must be contained in gone
+    order_q (dict): A dictionary mapping winning candidates to the first round in which they have a quota at the start of that round.
 
     Returns:
     tuple: A tuple containing the seating-based lower bound, elimination-based lower bound, and upper bound on the
-           value of the ballot after transfers.
+           value of the ballot after transfers. Note that the seating-based lower bound is zero if the ballot could skip
+
     """
-    b_value_slb = b.votes  # seating lower bound
-    b_value_elb = b.votes  # elimination lower bound
-    b_value_ub = b.votes  # upper bound
-    final_block = []
-    for ep in reversed(gone):
-        if ep in winners:
-            final_block.append(ep)
-        else:
-            break
+    b_value_sv = b.votes  # contribution of ballot to next seated candidate
+    b_value_ev = b.votes  # contribution of ballot to next eliminated candidate
 
     eliminated = set()
     seated = set()
     bidx = 0
     eidx = 0
-    seat_block = False
+    move_r = 0 # round in which ballot arrived at b.prefs[bidx]
     while bidx < len(b.prefs) and eidx < len(gone):  # while ballot not fully transferred
         bp = b.prefs[bidx]
         ep = gone[eidx]
@@ -477,17 +431,16 @@ def calc_tallies(b, gone, transfer, winners):
             eliminated.add(ep)
             eidx += 1
         elif bp in eliminated:  # full transfer: candidate eliminated
-            seat_block = False  # (potential) previous seating block exited
+            move_r = max(move_r, eliminated[bp])
+            bidx += 1
+        elif bidx > 0 and bp in order_q and order_q[bp] <= move_r:
+            # bp already had a quota when the ballot was finding a new home
+            # bp skipped, no reduction in ballot value
             bidx += 1
         elif bp == ep:  # ballot is transferred through seating
-            b_value_elb *= transfer[bp][0]  # lb: transfer through every cand in seating block
-            if bp in final_block:
-                b_value_slb *= 0  # lb: cand in question is skipped if we're trying to seat them
-            else:
-                b_value_slb *= transfer[bp][0]
-            if not seat_block:  # not in a block
-                b_value_ub *= transfer[bp][1]  # ub: transfer via first only, skips rest of seating block
-            seat_block = True  # we have entered a block (possibly size one)
+            b_value_ev *= transfer[bp][0]  
+            b_value_sv *= transfer[bp][0]
+            move_r = eidx
             eidx += 1
             bidx += 1
         elif bp in seated:  # skipping: bp already seated
@@ -496,7 +449,13 @@ def calc_tallies(b, gone, transfer, winners):
             seated.add(ep)
             eidx += 1
 
-    return b_value_slb, b_value_elb, b_value_ub
+    # Check whether this ballot will skip c if they are seated
+    if bidx > 0 and bidx < len(b.prefs):
+        bp = b.prefs[bidx]
+        if bp == c and bp in order_q and order_q[bp] <= move_r:
+            b_value_sv = 0
+
+    return b_value_sv, b_value_ev
 
 
 def compute_elim_quota_lb_old(cands, ballots, order_c, order_a, quota, order_q):

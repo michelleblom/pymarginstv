@@ -12,13 +12,8 @@ epsilon = 0.0001
 # On this branch, we implement the US-style STV model.
 #
 
-def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot, \
-    LAST_ROUND, winners, tvalue, nqcr, qcr, tallies, rem, candpos,\
-    order_q, max_tallies):
-    """
-        Need to rewrite for this branch.
-       
-    """
+def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot,
+    LAST_ROUND, winners, tvalue, tallies, rem, candpos,order_q, max_tallies):
 
     # Ballot is currently sitting with 'ballotwith' at the start of round
     # 'rstart'
@@ -46,7 +41,7 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot, \
     tallies[ballotwith,rstart] += ballot_value
     
     for r in range(rstart, R):
-        if ballotwith != None:
+        if ballotwith is not None:
             max_tallies[ballotwith][r] += b.votes
 
             # The ballot is still with candidate 'ballotwith' at the 
@@ -88,46 +83,14 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot, \
                         withindex += 1
                         continue
 
-                    if ballotwith in winners:
-                        if ballotwith in order_q:
-                            # Could the new candidate already have a quota?
-                            # If so, they may be skipped.
-                            qposses = order_q[ballotwith]
-
-                            # Earliest round in which 'ballotwith' could
-                            # have achieved their quota.
-                            minqp = min(qposses)
-
-                            # Latest roundin which 'ballotwith' could have
-                            # achieved their quota.
-                            maxqp = max(qposses)
-
-                            if maxqp < r:
-                                # we skip this candidate; they will already
-                                # have a quota. 
-                                withindex += 1
-                                continue
-
-                            if minqp < r:
-                                # ballotwith could get it, but might not
-                                # imagine it does get it, let's play out
-                                # this reality with a recursive call.
-                                nbv = ballot_value*nqcr[ballotwith,r]
-                                distribute_ballots_t(r+1, R, ballotwith, \
-                                    cp_ballotwith, withindex, nbv, b, \
-                                    lballot, LAST_ROUND, winners, tvalue, \
-                                    nqcr, qcr, tallies, rem, candpos,\
-                                    order_q, max_tallies)
-
-                                # Now we are assuming that 'ballotwith' has
-                                # a quota at the start of round 'r', and the
-                                # ballot type is skipping them. We adjust
-                                # the ballot value with this caveat in place.
-                                ballot_value *= qcr[ballotwith,r]
-                                
-                                # Move on to next possibility.
-                                withindex += 1
-                                continue
+                    if ballotwith in winners and ballotwith in order_q:
+                        # Does the new candidate already have a quota?
+                        # If so, they are skipped.
+                        if order_q[ballotwith] < r:
+                            # we skip this candidate; they will already
+                            # have a quota. 
+                            withindex += 1
+                            continue
 
                         # otherwise, we will move to next break statement
 
@@ -158,8 +121,8 @@ class TerminateAtIntegerSolution(Eventhdlr):
             self.model.interruptSolve()
 
 
-def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
-    merge_map, supers, tot_ballots, args, quota, upperbound, LAST_ROUND, \
+def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
+    merge_map, supers, tot_ballots, args, quota, upperbound, LAST_ROUND,
     lowerbound, isleaf = False, log=None):
     """
         Compute the number of ballots we would have to alter in order to 
@@ -192,9 +155,8 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         winners      : Candidates who have been elected to a seat in order_c.
 
         order_q      : For those candidates who have been elected on a quota,
-                       order_q[w] gives a tuple (l,u) where l is the earliest
-                       round in which they could have achieved a quota (by
-                       vote transfers in that round) and u is the latest.
+                       order_q[w] returns the first round where they have a 
+                       quota at the start of the round. 
 
         merge_map    : It may be that we have apriori merged some candidates
                        into a super candidate. In this case, merge_map will
@@ -242,27 +204,6 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         isleaf       : Flag indicating whether the outcome prefix actually
                        represents a complete outcome. 
   
-
-        Simple lower bounding rules applied. We compute the minimum and 
-        maximum tallies candidates could have in any round. Candidates 'c'
-        elected on a quota in a round 'r' must have a quota in their tally. 
-        The minimum vote change required is max(0, Q - vcr_max[c,r]). 
-        When a candidate is eliminated, no candidate can have a quota. We
-        take the difference between candidates' minimum tallies and a quota
-        in that round to be the minimum vote change required. The eliminated
-        candidate's tally must also be less than (or equal to) that of 
-        all other candidates in that round. We take the difference between
-        their minimum tally, and the maximum tallies of other candidates, or
-        0 if the difference is negative, and divide by two to get the smallest
-        vote change required. We take the maximum of all these 'smallest 
-        required vote changes' to be a lower bound on the margin. That is the 
-        original lower bounding rule described in the paper on margin 
-        computation for STV. [Although there we did not divide by two and I
-        think you need to].
-
-        NOTE I have relaxed all integer variables (exc binaries) to be 
-        continuous, as we are looking for lower bounds anyway.
-
     """
 
     R = len(order_c)
@@ -278,7 +219,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         R = LAST_ROUND + 1
 
     # Form equivalence classes over ballots. 
-    classes, _, class_map = gen_equivalence_classes(order_c, rem, len(candidates))
+    classes, _, class_map = gen_equivalence_classes(order_c, rem)
 
     # Reduce ballots to equivalence classes
     reduce_ballots(len(candidates), order_c, rem, merge_map, ballots, \
@@ -293,8 +234,9 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     model.setParam("separating/closecuts/separelint", False)
     model.setParam("benders/default/cutstrengthenintpoint", 'i')
 
-    model.includeEventhdlr(TerminateAtIntegerSolution(model), "terminate_at_integer_solution",
-                           "Event handler that terminates solving when ceil(primal) == ceil(dual)")
+    model.includeEventhdlr(TerminateAtIntegerSolution(model), 
+        "terminate_at_integer_solution",
+        "Event handler that terminates solving when ceil(primal) == ceil(dual)")
 
     if isleaf:
         model.setRealParam("limits/time", args.thard)
@@ -328,8 +270,6 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
     ys = {}
 
     vcr = {}
-    qcr = {}
-    nqcr = {}
 
     # Transfer value applied to ballots leaving an elected candidates 
     # tally in round 'r' (assuming a candidate was seated in 'r'). Note these 
@@ -365,17 +305,6 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
 
             if r > 0:
                 tallies[c,r] += vcr[c,r-1]
-
-            # For the winners that get a quota at some point, create
-            # quota/not-quota binaries.
-            if c in winners and c in order_c:
-                qcr[c,r] = model.addVar(vtype="B", name="qcr(%s,%s)"%(c,r))
-                nqcr[c,r] = model.addVar(vtype="B", name="nqcr(%s,%s)"%(c,r))
-
-                model.addCons(nqcr[c,r] == 1 - qcr[c,r])
-                model.addCons(vcr[c,r] >= quota*qcr[c,r])
-                model.addCons(vcr[c,r] <= nqcr[c,r]*(quota-epsilon) + \
-                    qcr[c,r] * tot_ballots)
         
 
     for r in range(LAST_ROUND+1):
@@ -400,9 +329,18 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
                         model.addCons(vcr[ce,r] <= vcr[co,r])
 
         else:
-            # The candidate that is elected on a quota will have a quota.
-            if (ce,r) in qcr:
-                model.chgVarLb(qcr[ce,r], 1)
+            # Make sure all candidates who have achieved a quota by the 
+            # start of this round do have at least a quota's worth of votes.
+            # [Only add constraint for candidates that got their quota as 
+            # a result of the last rounds distribution/or the round is 0 and 
+            # they have a quota on first preferences. 
+            for co in nonsupers:
+                if co in order_q:
+                    rq = order_q[co]
+
+                    if rq == r:
+                        model.addCons(vcr[co,r] >= quota)
+                
 
             # Note that it is not necessarily true that the candidate, of
             # those with a quota, that has the highest tally is the one that
@@ -426,7 +364,6 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
                 # just been seated.
                 tvalue[r] = model.addVar(vtype="C",lb=0,ub=1.0,name="tv(%s)"%r)
 
-                model.chgVarUb(nqcr[ce,r], 0)
                 model.addCons((tvalue[r]-epsilon)*vcr[ce,r]<=(vcr[ce,r]-quota))
                 model.addCons((tvalue[r]+epsilon)*vcr[ce,r]>=(vcr[ce,r]-quota))
 
@@ -469,7 +406,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,\
         # Populate tallies[] expressions, defining who has this ballot
         # in different rounds.
         distribute_ballots_t(0, R, ballotwith, cp_ballotwith, withindex, 
-            ys[b.num], b, lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, \
+            ys[b.num], b, lballot, LAST_ROUND, winners, tvalue,
             tallies, rem, candpos, order_q, max_tallies)
   
     # Constraint enforces consistency  
