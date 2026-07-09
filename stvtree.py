@@ -18,7 +18,8 @@ class TreeNode:
 
         order_a  : Outcome prefix (whether an elimination or election occurred).
 
-        reported : True if order_c/order_a is a prefix of the reported outcome.
+        order_q  : The exact round in which candidates who receive a quota throughout
+                   the prefix have a quota at the start of the round.
 
         winners  : Original winners (identified by their number).
 
@@ -27,7 +28,7 @@ class TreeNode:
         
     """
 
-    def __init__(self, pid, order_c, order_a, reported, winners, rem, distance,\
+    def __init__(self, pid, order_c, order_a, order_q, reported, winners, rem, distance,\
         dist_ub, order_c_index):
 
         self.id = None
@@ -37,6 +38,11 @@ class TreeNode:
         self.order_a = order_a
         self.tuple_order_a = tuple(order_a)
         self.order_c_index = order_c_index
+        self.order_q = order_q
+
+        self.quotas = [[] for r in self.order_c]
+        for c,r in order_q:
+          self.quotas[r].append(c)
 
         self.rem = rem
 
@@ -57,6 +63,12 @@ class TreeNode:
 
         for r in range(len(self.order_c)):
             action = "e" if self.order_a[r] == 0 else "s"
+            if len(self.quotas[r]) > 0:
+              qlist = " ( "
+              for c in self.quotas[r]:
+                qlist += str(c) + " "
+              qlist += ")"
+              action += qlist
             summary += str(self.order_c[r]) + action + " "
 
         summary += "with distance {}/{}".format(self.dist, self.dist_ub)
@@ -201,7 +213,12 @@ class Frontier:
         if inode.order_a != node.order_a:
             return False
 
-
+        # For now, say that two notes are NOT similar if quotas are
+        # not received in the same rounds
+        for r in range(len(inode.order_c)):
+          if set(inode.quotas[r]) != set(node.quotas[r]):
+            return False
+          
         if agv:
             sim_seq = self.similar_seq(inode, node)
 
@@ -345,7 +362,6 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
         if order_a[i] == 0:  # candidate eliminated
             # Compute min vote 'ce' could have at this point, needs to be
             # less than max vote of other (non-super) candidates at this point
-            # max_ce = cands[ce].fp_votes
             min_ce = cands[ce].fp_votes
 
             # dict of remaining candidates (eliminated or seated after ce)
@@ -357,7 +373,7 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
                 if not prefs:  # ballot is exhausted
                     continue
 
-                _, ev_add = calc_tallies(b, gone, transfer, winners, order_q)
+                ev_add, _, _ = calc_tallies(b, gone, transfer, winners, order_q)
 
                 if prefs[0] != ce:  # transferred to other (including fp votes)
                     others[prefs[0]] += ev_add
@@ -373,9 +389,9 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
                 for b in ballots:
                     prefs = [p for p in b.prefs if p not in gone_set]
 
-                    if prefs:  # ballot is not exhausted
-                        sv_add, _ = calc_tallies(b, gone, transfer, winners, order_q)
-                        if prefs[0] == ce:
+                    if prefs and prefs[0] == ce:  # ballot is not exhausted
+                        sv_add, move_r = calc_tallies(b, gone, transfer, winners, order_q)
+                        if order_q[ce] > move_r:
                             value += sv_add
 
                 winners.append(ce)
@@ -400,62 +416,56 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
     return max(0, lb), transfer
 
 
-def calc_tallies(b, c, gone, transfer, winners, order_q):
+def calc_tallies(b, gone, transfer, winners, order_q):
     """
-    This function calculates the lower and upper bounds on the value of a ballot after transfers.
+    This function calculates the value of the given ballot after the candidates in gone
+    have been seated/eliminated in the order specified.
 
     Parameters:
     b (Ballot): The ballot type for which the value bounds are being calculated.
     gone (list): A list of candidates that have been eliminated or seated.
     transfer (dict): A dictionary mapping candidates to their transfer values.
     winners (list): A list of candidates that have won, must be contained in gone
-    order_q (dict): A dictionary mapping winning candidates to the first round in which they have a quota at the start of that round.
+    order_q (dict): A dictionary mapping winning candidates to the first round in which they 
+                    have a quota at the start of that round.
 
     Returns:
-    tuple: A tuple containing the seating-based lower bound, elimination-based lower bound, and upper bound on the
-           value of the ballot after transfers. Note that the seating-based lower bound is zero if the ballot could skip
+    tuple: A tuple containing the ballot value, and the last round in which it moved to a new candidate. 
 
     """
-    b_value_sv = b.votes  # contribution of ballot to next seated candidate
-    b_value_ev = b.votes  # contribution of ballot to next eliminated candidate
+    b_value = b.votes  # contribution of ballot to next candidate
 
-    eliminated = set()
+    eliminated = {}
     seated = set()
     bidx = 0
     eidx = 0
-    move_r = 0 # round in which ballot arrived at b.prefs[bidx]
+    move_r = -1 # last round in which ballot moved
     while bidx < len(b.prefs) and eidx < len(gone):  # while ballot not fully transferred
         bp = b.prefs[bidx]
         ep = gone[eidx]
-        if ep not in winners:  # eliminated candidate
-            eliminated.add(ep)
-            eidx += 1
-        elif bp in eliminated:  # full transfer: candidate eliminated
-            move_r = max(move_r, eliminated[bp])
+    
+        if bp in seated:  # skipping: bp already seated
             bidx += 1
+        elif bp in eliminated:  # full transfer: candidate eliminated
+            bidx += 1
+        elif ep not in winners:  # eliminated candidate
+            eliminated[ep] = eidx
+            if bp == ep: move_r = eidx
+            eidx += 1
         elif bidx > 0 and bp in order_q and order_q[bp] <= move_r:
             # bp already had a quota when the ballot was finding a new home
             # bp skipped, no reduction in ballot value
             bidx += 1
         elif bp == ep:  # ballot is transferred through seating
-            b_value_ev *= transfer[bp][0]  
-            b_value_sv *= transfer[bp][0]
+            b_value *= transfer[bp]  
             move_r = eidx
             eidx += 1
-            bidx += 1
-        elif bp in seated:  # skipping: bp already seated
             bidx += 1
         else:  # ep is seated before reached by ballot
             seated.add(ep)
             eidx += 1
-
-    # Check whether this ballot will skip c if they are seated
-    if bidx > 0 and bidx < len(b.prefs):
-        bp = b.prefs[bidx]
-        if bp == c and bp in order_q and order_q[bp] <= move_r:
-            b_value_sv = 0
-
-    return b_value_sv, b_value_ev
+        
+    return b_value, move_r 
 
 
 def compute_elim_quota_lb_old(cands, ballots, order_c, order_a, quota, order_q):
@@ -814,7 +824,7 @@ def compute_disp_lb_old(candidates, ballots, node_order_c, node_order_a, \
     return math.ceil(lowerbound)
 
 
-def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
+def treestv(ballots, candidates, winners, order_c, order_a, order_q, upperbound, \
             seats, args, quota, tot_ballots, agap=1, tlimit=None, log=None):
     """
         Main function for performing the branch-and-bound algorithm that
@@ -837,6 +847,9 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
         order_a      : List of 0s/1s indicating whether the candidate 
                        'processed' in each round was elected-1/eliminated-0.
+
+        order_q      : A dictionary mapping winning candidates to the first round 
+                       in which they have a quota at the start of that round.
 
         upperbound   : Computed upper bound on the margin of victory.
 
@@ -888,12 +901,11 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         for o in range(2):
             node_order_a = [o]
             node_winners = set([cand.num]) if o == 1 else []
+            node_order_q = { cand.num : 0 } if o == 1 else {}
 
-            reported = True if order_c[0] == cand.num and order_a[0] == o else False
-
-            children.append((node_order_c, order_c_index, node_order_a, node_winners, \
+            children.append((node_order_c, order_c_index, node_order_a, node_order_q, node_winners, \
                              winner_set, candidates, ballots, rem, quota, args, merge_map, \
-                             tot_ballots, running_ub, order_c, order_a, reported))
+                             tot_ballots, running_ub, order_c, order_a))
 
     result = []
     if args.pc > 1:
@@ -910,25 +922,19 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
         if log != None:
             print("EVALUATING {}/{} LB {} (D {} EQ {})".format( \
-                node.order_c, node.order_a, lb, dlb, eqlb), \
-                file=log, flush=True)
+                node.order_c, node.order_a, lb, dlb, eqlb),  file=log, flush=True)
 
             if lb < running_ub:
                 if node.dist == None:
-                    print("    DISTANCE None/Infeasible", file=log, \
-                          flush=True)
+                    print("    DISTANCE None/Infeasible", file=log, flush=True)
                 elif node.dist == -1:
-                    print("    No solution found by timeout", file=log, \
-                          flush=True)
-                    print("    Margin computation terminated", file=log, \
-                          flush=True)
+                    print("    No solution found by timeout", file=log,  flush=True)
+                    print("    Margin computation terminated", file=log,  flush=True)
                 else:
-                    print("    DISTANCE {:.2f}/{:.2f}".format(node.dist, \
-                                                              node.dist_ub), file=log, flush=True)
+                    print("    DISTANCE {:.2f}/{:.2f}".format(node.dist,  node.dist_ub), file=log, flush=True)
 
         if node.dist == -1:
-            return running_lb, running_ub, nexps, nsolves, \
-                frontier.ignore_cntr, frontier.agg_prune_cntr
+            return running_lb, running_ub, nexps, nsolves,  frontier.ignore_cntr, frontier.agg_prune_cntr
 
         # skip infeasible nodes
         if node.dist is None or node.dist >= running_ub:
@@ -938,16 +944,14 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
                 print("        Added to frontier", file=log, flush=True)
 
         if frontier.size > 0:
-            running_lb = frontier.get_lower_bound() # min(node.dist, min([frontier.get_node(n).dist \
-                                             #for n in frontier.nodes]))
+            running_lb = frontier.get_lower_bound() 
         else:
             running_lb = node.dist
 
         frontier.insert(node, lse=args.lse, agv=args.agv, log=log)
 
     if log != None:
-        print("Lower bound {}, upper bound {}".format(running_lb, \
-                                                      running_ub), file=log, flush=True)
+        print("Lower bound {}, upper bound {}".format(running_lb, running_ub), file=log, flush=True)
 
         print(frontier, file=log, flush=True)
 
@@ -970,8 +974,7 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         running_lb = frontier.get_lower_bound()
 
         if log != None:
-            print("Lower bound {}, upper bound {}".format(running_lb, \
-                                                          running_ub), file=log, flush=True)
+            print("Lower bound {}, upper bound {}".format(running_lb, running_ub), file=log, flush=True)
 
         if abs(running_ub - running_lb) <= agap:
             converged = True
@@ -1001,21 +1004,16 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             result = pool.starmap(expand_node, toexpand)
 
         for _, children in result:
-            #_, children = expand_node(fn, ballots, candidates, winner_set, \
-            #                          running_ub, ncands, args, quota, tot_ballots, merge_map, \
-            #                          order_c, order_a)
 
-            # evaluate children
-            min_dist = None
-            for isleaf, node_order_c, order_c_index, node_order_a, lb, dlb, eqlb, dist, \
-                    dist_ub, new_rem, node_winners, reported, solved in children:
+            for isleaf, node_order_c, order_c_index, node_order_a, node_order_q, lb, dlb, eqlb, dist, \
+                    dist_ub, new_rem, node_winners, solved in children:
 
                 if solved:
                     nsolves += 1
 
                 if log != None:
-                    print("EVALUATED {}/{} LB {} (D {} EQ {})".format( \
-                        node_order_c, node_order_a, lb, dlb, eqlb), \
+                    print("EVALUATED {}/{}/{} LB {} (D {} EQ {})".format( \
+                        node_order_c, node_order_a, node_order_q, lb, dlb, eqlb), \
                         file=log, flush=True)
 
                     if dist == None:
@@ -1048,9 +1046,8 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
 
                     frontier.prune(running_ub, log=log)
                 else:
-                    newn = TreeNode(fn.id, node_order_c, node_order_a, \
-                                    reported, node_winners, new_rem, dist, \
-                                    dist_ub, order_c_index)
+                    newn = TreeNode(fn.id, node_order_c, node_order_a, node_order_q, \
+                                    node_winners, new_rem, dist, dist_ub, order_c_index)
 
                     idx = frontier.insert(newn, lse=args.lse, agv=args.agv, log=log)
 
@@ -1075,11 +1072,6 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
             if abs(running_ub - running_lb) <= agap:
                 converged = True
                 break
-
-            # if args.ap:
-            # Update distances for expanded node (and ancestors) based on
-            # evaluations of expanded nodes children
-            #    frontier.back_propagate(fn.id)
 
         if frontier.size == 0:  # search space exhausted
             running_lb = running_ub  # running_ub must be a true lower bound
@@ -1117,36 +1109,26 @@ def treestv(ballots, candidates, winners, order_c, order_a, upperbound, \
         frontier.agg_prune_cntr
 
 
-def eval_child_initial(node_order_c, order_c_index, node_order_a, node_winners, winner_set, \
+def eval_child_initial(node_order_c, order_c_index, node_order_a, node_order_q, node_winners, winner_set, \
                        candidates, ballots, rem, quota, args, merge_map, tot_ballots, running_ub, \
-                       full_order_c, full_order_a, reported, log=None):
+                       full_order_c, full_order_a, log=None):
     # Is this a prefix of the original outcome?
     l = len(node_order_c)
     orig_prefix = node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == full_order_a[:l]
 
-    # if node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == \
-    #         full_order_a[:l]:
-    #     return 0, 0, 0, TreeNode(-1, node_order_c, node_order_a, node_winners, \
-    #                              rem, 0, 0), False
-
-    # Compute order_q map
-    order_q = get_order_q(node_order_c, node_order_a, 0, node_winners, order_c_index)
 
     transfer = None
     if args.eqlb:
         eqlb, transfer = compute_elim_quota_lb_new(candidates, ballots, node_order_c, \
-                                     node_order_a, quota, order_q)
+                                     node_order_a, quota, node_order_q)
     else:
         eqlb = compute_elim_quota_lb_old(candidates, ballots, node_order_c, \
-                                     node_order_a, quota, order_q)
+                                     node_order_a, quota, node_order_q)
 
     if orig_prefix:
         eqlb = 0
 
-    if False: #args.dlbmb:
-        disp_lowerbound = compute_disp_lb_old(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota,
-                                              args.seats)
-    elif args.dlb and transfer is not None:
+    if args.dlb and transfer is not None:
         disp_lowerbound = compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota,
                                               args.seats, transfer, running_ub)
     else:
@@ -1156,53 +1138,35 @@ def eval_child_initial(node_order_c, order_c_index, node_order_a, node_winners, 
 
     if lb >= running_ub:
         return lb, disp_lowerbound, eqlb, TreeNode(-1, node_order_c, \
-           node_order_a, reported, node_winners, rem, lb, lb, order_c_index), False
+           node_order_a, node_winners, rem, lb, lb, order_c_index), False
 
     # Evaluate distance for our new tree node.
     _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
-                                   node_order_a, rem, node_winners, order_q, merge_map, [], \
+                                   node_order_a, rem, node_winners, node_order_q, merge_map, [], \
                                    tot_ballots, args, quota, running_ub, 0, lb)
 
     return lb, disp_lowerbound, eqlb, TreeNode(-1, node_order_c, \
-          node_order_a, reported, node_winners, rem, dist, dist_ub, order_c_index), True
+          node_order_a, node_winners, rem, dist, dist_ub, order_c_index), True
 
 
-def eval_child(parent_dist, node_order_c, order_c_index, node_order_a, args, ncands, \
+def eval_child(parent_dist, node_order_c, order_c_index, node_order_a, node_order_q, args, ncands, \
                node_winners, winner_set, candidates, ballots, tot_ballots, rem, \
-               quota, running_ub, full_order_c, full_order_a, isleaf, reported, log=None):
-
-    # Is this a prefix of the original outcome?
-    #l = len(node_order_c)
-    #orig_prefix = node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == full_order_a[:l]
-
-    # if node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == \
-    #         full_order_a[:l]:
-    #     return False, node_order_c, node_order_a, 0, 0, 0, 0, 0, rem, \
-    #         node_winners, False
+               quota, running_ub, isleaf, log=None):
 
     # Work out the round at which we can stop forming constraints,
     # compute bounds on when candidate could achieve their quotas,
     # solve the distance-to model.
     LAST_ROUND = compute_last_round(node_order_c, node_order_a, args.seats, ncands)
 
-    order_q = get_order_q(node_order_c, node_order_a, LAST_ROUND, node_winners, order_c_index)
-
     transfer = None
     if args.eqlb:
         eqlb, transfer = compute_elim_quota_lb_new(candidates, ballots, node_order_c, \
-                                     node_order_a, quota, order_q)
+                                     node_order_a, quota, node_order_q)
     else:
         eqlb = compute_elim_quota_lb_old(candidates, ballots, node_order_c, \
-                                     node_order_a, quota, order_q)
+                                     node_order_a, quota, node_order_q)
 
-    if reported:
-        assert eqlb == 0, f"eqlb is {eqlb}, should be 0. {node_order_c[:l]}/{node_order_a[:l]}"
-        eqlb = 0
-
-    if False: #args.dlbmb:
-        disp_lowerbound = compute_disp_lb_old(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota,
-                                              args.seats)
-    elif args.dlb and transfer:
+    if args.dlb and transfer:
         disp_lowerbound = compute_disp_lb_new(candidates, ballots, node_order_c, node_order_a, winner_set, rem, quota,
                                               args.seats, transfer, running_ub)
     else:
@@ -1215,16 +1179,16 @@ def eval_child(parent_dist, node_order_c, order_c_index, node_order_a, args, nca
     if lowerbound >= running_ub:  # or (not isleaf and sum(node_order_a) == 0):
         return (isleaf, node_order_c, order_c_index, node_order_a, lowerbound, \
                 disp_lowerbound, eqlb, lowerbound, lowerbound, rem, \
-                node_winners, reported, False)
+                node_winners, False)
 
     if args.nominlps:
         return (isleaf, node_order_c, order_c_index, node_order_a, lowerbound, \
                 disp_lowerbound, eqlb, lowerbound, lowerbound, rem, \
-                node_winners, reported, False)
+                node_winners, False)
 
     if args.m:
         m_order_c, m_order_a, m_order_q, merge_map, supers, round_conv = \
-            merge_outcome(node_order_c, node_order_a, order_q, rem)
+            merge_outcome(node_order_c, node_order_a, node_order_q, rem)
 
         LAST_ROUND = compute_last_round(m_order_c, m_order_a, args.seats, \
                                         len(m_order_c) + len(rem))
@@ -1232,18 +1196,18 @@ def eval_child(parent_dist, node_order_c, order_c_index, node_order_a, args, nca
         _, dist, dist_ub = stvdistance(candidates, ballots, m_order_c, \
                                        m_order_a, rem, node_winners, m_order_q, merge_map, \
                                        supers, tot_ballots, args, quota, running_ub, LAST_ROUND, \
-                                       lowerbound, isleaf, reported)
+                                       lowerbound, isleaf)
 
     else:
         merge_map = {c.num: c.num for c in candidates}
         # merge_map = dict()
         _, dist, dist_ub = stvdistance(candidates, ballots, node_order_c, \
-                                       node_order_a, rem, node_winners, order_q, merge_map, \
+                                       node_order_a, rem, node_winners, node_order_q, merge_map, \
                                        [], tot_ballots, args, quota, running_ub, LAST_ROUND, \
                                        lowerbound, isleaf)
 
     return isleaf, node_order_c, order_c_index, node_order_a, lowerbound, disp_lowerbound, \
-        eqlb, dist, dist_ub, rem, node_winners, reported, True
+        eqlb, dist, dist_ub, rem, node_winners, True
 
 
 def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands, \
@@ -1300,42 +1264,32 @@ def expand_node(fnode, ballots, candidates, winner_set, running_ub, ncands, \
                 # equals the number of candidates in rem?
                 if winner_set - node_winners == set(rem):
                     continue
-                # node_order_c += rem
-                # node_winners.update(rem)
-                # node_order_a += [1]*nrem
-                # new_rem = []
-                # seats_filled = args.seats
+
                 isleaf = True
 
             if node_winners == winner_set:
                 # This represents the original outcome
                 continue
 
-            # If the child is following the reported outcome, keep a record
-            # of it and add it as the last child in the list to be returned.
-            if full_order_c[:len(node_order_c)] == node_order_c and \
-              full_order_a[:len(node_order_a)] == node_order_a:
-              reported =  (fnode.dist, node_order_c, order_c_index, node_order_a, args, \
-                             ncands, node_winners, winner_set, candidates, ballots, \
-                             tot_ballots, new_rem, quota, running_ub, full_order_c, \
-                             full_order_a, isleaf, True)
-            else:
-              children.append((fnode.dist, node_order_c, order_c_index, node_order_a, args, \
+
+            if o == 0:
+                children.append((fnode.dist, node_order_c, order_c_index, node_order_a, fnode.order_q, args, \
                              ncands, node_winners, winner_set, candidates, ballots, \
                              tot_ballots, new_rem, quota, running_ub, full_order_c, \
                              full_order_a, isleaf, False))
-
-           # for c in candidates:
-           #     assert(c.num in node_order_c or c.num in new_rem)
-
-    if reported is not None:
-      children.append(reported)
+            else:
+                  for i in range(len(node_order_a)-1, -1, -1):
+                      if node_order_a[i] == 1:
+                          node_order_q = fnode.order_q + { r : i}
+                          children.append((fnode.dist, node_order_c, order_c_index, node_order_a, node_order_q, args, \
+                             ncands, node_winners, winner_set, candidates, ballots, \
+                             tot_ballots, new_rem, quota, running_ub, full_order_c, \
+                             full_order_a, isleaf, False))
+                      else:
+                          break
 
     result = []
-    #if args.pc > 1:
-    #    with Pool(processes=args.pc) as pool:
-    #        result = pool.starmap(eval_child, children)
-    #else:
+
     for c in children:
         result.append(eval_child(*c))
 

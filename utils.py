@@ -1158,13 +1158,12 @@ def merge_outcome(order_c, order_a, order_q, rem):
 
     # Create merged version of order_q, note no candidates that will end
     # up being merged will have an entry in m_order_q.
-    for c,(r1,r2) in order_q.items():
-        if not r1 in round_conv or not r2 in round_conv:
-            print("{} {} {}, {}/{}, {}/{}".format(r1, r2, round_conv, \
+    for c,r in order_q.items():
+        if not r in round_conv:
+            print("{} {}, {}/{}, {}/{}".format(r, round_conv,
                 m_order_c, m_order_a, order_c, order_a))
  
-    m_order_q = { c : (round_conv[r1],round_conv[r2]) \
-        for c,(r1,r2) in order_q.items() }
+    m_order_q = { c : round_conv[r] for c,r in order_q.items() }
 
     for r in rem:
         merge_map[r] = r

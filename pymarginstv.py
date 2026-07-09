@@ -167,7 +167,7 @@ if __name__ == "__main__":
     # Start branch and bound.
     tstart = time.time()
     lb, ub, nexps, nsolves, ignores, agg_prunes = treestv(ballots, candidates, \
-        winners, order_c, order_a, upper_bound, args.seats, args, quota, \
+        winners, order_c, order_a, order_q, upper_bound, args.seats, args, quota, \
         totvotes, agap=args.agap, tlimit=args.limit, log=log)
     tend = time.time()
 
