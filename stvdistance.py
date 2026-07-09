@@ -209,6 +209,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
     R = len(order_c)
 
     cands = order_c + rem
+    N = len(cands)
 
     # Rework order_c/order_a on the basis of LAST_ROUND
     if LAST_ROUND < R-1:
@@ -219,7 +220,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
         R = LAST_ROUND + 1
 
     # Form equivalence classes over ballots. 
-    classes, _, class_map = gen_equivalence_classes(order_c, rem)
+    classes, _, class_map = gen_equivalence_classes(order_c, rem, N)
 
     # Reduce ballots to equivalence classes
     reduce_ballots(len(candidates), order_c, rem, merge_map, ballots, \

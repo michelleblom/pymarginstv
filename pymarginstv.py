@@ -25,7 +25,7 @@ from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
     read_ballots_blt, simulate_stv, compute_weub, compute_simple_ub, \
     merge_outcome
 
-from stvtree import treestv, compute_last_round, get_order_q, eval_child
+from stvtree import treestv, compute_last_round, eval_child
 
 from stvdistance import stvdistance
 
