@@ -209,7 +209,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
     R = len(order_c)
 
     cands = order_c + rem
-    N = len(cands)
+    N = len(candidates)
 
     # Rework order_c/order_a on the basis of LAST_ROUND
     if LAST_ROUND < R-1:

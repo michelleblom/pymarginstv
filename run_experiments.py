@@ -487,6 +487,10 @@ data_aus_small = [
     ("FedAus22/2022NT.json", 2)
 ]
 
+datatest= [
+            ("Ireland/DublinNorth2002_ballots.txt", 4)
+        ]
+
 datafiles = [
     # GLASGOW, SCOTLAND 2007
     ("Scotland/2007/GCC_07_Anderson_ballots.txt", 4), ("Scotland/2007/GCC_07_Baillieston_ballots.txt", 4),
@@ -1104,15 +1108,15 @@ def run_audit():
     # 6 == new without dlb and lse, aka New
     # versions = [4, 5, 6, 0, 3, -1, -3]
     #versions = [4, 5, 6, 0, 3, -1]
-    versions=[3, 0]
+    versions=[3]
     print(
         "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb, new_ub")
     for version in versions:
-        for (datafile, seats) in data_rem:
+        for (datafile, seats) in datatest:
             if "example" in datafile:
                 path = "./data/" + datafile
             else:
-                path = "../stvdata/" + datafile
+                path = "../stv-rla/data/" + datafile
             displayname = displaynames[datafile]
 
             # candidates = [0]
@@ -1120,7 +1124,7 @@ def run_audit():
             # if path.endswith(".blt"):
             #     candidates, ballots, _, cid2num, totvotes, seats = read_ballots_blt(path)
             # print(f"{displayname}, {len(candidates)}, {seats}, {counter}"); continue
-            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}.log", '-s', str(seats),
+            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}_wQuotaPrefixes.log", '-s', str(seats),
                         '-pc', '30', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
             if version >= 0:  # new ub
                 args += ['-ub', str(ubs[displayname])]

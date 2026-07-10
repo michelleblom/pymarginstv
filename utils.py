@@ -58,6 +58,8 @@ class Ballot:
         self.ranks = [-1]*totcand
 
         for i in range(len(prefs)):
+            if prefs[i] >= len(self.ranks):
+                print("here")
             self.ranks[prefs[i]] = i;
 
     def __str__(self):
@@ -240,6 +242,9 @@ def read_ballots_txt(path):
             votes = int(toks[1])
 
             cprefs = [cid2num[p] for p in prefs]
+
+            if len(candidates) in cprefs:
+                print("Invalid canidate number in preferences")
 
             ballot = Ballot(bcntr, votes, cprefs, ncands, atl=False)
             ballots.append(ballot)
