@@ -350,20 +350,31 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
 
     elim_lb = 0
     quota_lb = 0
+    no_quota_lb = 0
 
     winners = []
     transfer = dict()
 
+    last_seating_block = set()
+    if order_a[-1] == 1:
+        for i in range(len(order_c), -1):
+            if order_a[i] == 1:
+                last_seating_block.append(order_c[i])
+            else:
+                break
+    
     for i in range(len(order_c)):
         ce = order_c[i]
 
         if order_a[i] == 0:  # candidate eliminated
+            tallies = [0 for cand in cands]
+
             # Compute min vote 'ce' could have at this point, needs to be
             # less than max vote of other (non-super) candidates at this point
-            min_ce = cands[ce].fp_votes
+            #min_ce = cands[ce].fp_votes
 
             # dict of remaining candidates (eliminated or seated after ce)
-            others = {c.num: 0 for c in cands if c.num not in gone_set and c.num != ce}
+            #others = {c.num: 0 for c in cands if c.num not in gone_set and c.num != ce}
 
             for b in ballots:
                 prefs = [p for p in b.prefs if p not in gone_set]
@@ -374,14 +385,51 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
                 ev_add, _ = calc_tallies(b, gone, transfer, winners, order_q)
 
                 if prefs[0] != ce:  # transferred to other (including fp votes)
-                    others[prefs[0]] += ev_add
-                elif b.prefs[0] != ce:  # transferred to ce (fp votes already allocated)
-                    min_ce += ev_add
+                   # others[prefs[0]] += ev_add
+                   tallies[prefs[0]] += ev_add
+                else:
+                   tallies[ce] += ev_add
+                   #b.prefs[0] != ce:  # transferred to ce (fp votes already allocated)
+                   # min_ce += ev_add
 
-            for c, v in others.items():
-                elim_lb = max(elim_lb, max(0, 0.5 * (min_ce - v)))
+            # No one should have a quota
+            no_quota_lb = max(0, tallies[ce] - quota)
+            others = [c.num for c in cands if c.num not in gone_set and c.num !- ce]
+            for c in others:
+                elim_lb = max(elim_lb, max(0, 0.5 * (tallies[ce] - tallies[c])))
+                no_quota_lb = max(no_quota_lb, max(0, tallies[c] - quota))
+
 
         else:  # candidate seated
+            #min_tallies = [0 for cand in cands]
+            #max_tallies = [0 for cand in cands]
+
+            #for b in ballots:
+            #    prefs = [p for p in b.prefs if p not in gone_set]
+
+            #    if prefs:
+            #        sv_add, move_r = calc_tallies(b, gone, transfer, winners, order_q)
+            #        move_through_lsb = False
+            #        for p in prefs:
+            #            if p in order_q and order_q[p] > move_r:
+            #                min_tallies[p] += sv_add
+            #                max_tallies[p] += sv_add
+            #                break
+
+            #            if p in last_seating_block:
+            #                max_tallies[p] += sv_add
+            #                move_through_lsb = True
+            #                continue
+
+            #            if !move_through_lsb:
+            #                min_tallies[p] += sv_add
+                        
+            #            max_tallies[p] += sv_add
+            #            break
+
+            #quotas = [c for c,r in order_q.items() if r == i]
+
+                        
             if ce in order_q:  # candidate got a quota, else seated by default (last round)
                 value = 0  # value of ballots
                 for b in ballots:
@@ -401,7 +449,7 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
                 # cost to displace the candidate with largest tally that is also above quota only active if
                 # no eliminations/seatings has happened
                 displacement_cost = 0
-                if not gone:  # no eliminations yet
+                if not gone:  # no eliminations or seatings yet
                     fp_others_max = max([cands[c.num].fp_votes for c in cands if c.num not in gone_set and c.num != ce])
                     displacement_cost = max(0, 0.5 * (fp_others_max - cmax))  # if someone has reached quota, we need to surpass their votes
 
@@ -410,7 +458,7 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
         gone.append(ce)
         gone_set.add(ce)
 
-    lb = math.ceil(max(elim_lb, quota_lb))
+    lb = math.ceil(max(elim_lb, quota_lb, no_quota_lb))
     return max(0, lb), transfer
 
 
