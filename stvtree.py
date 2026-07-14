@@ -357,9 +357,9 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
 
     last_seating_block = set()
     if order_a[-1] == 1:
-        for i in range(len(order_c), -1):
+        for i in range(len(order_c)-1, -1, -1):
             if order_a[i] == 1:
-                last_seating_block.append(order_c[i])
+                last_seating_block.add(order_c[i])
             else:
                 break
     
