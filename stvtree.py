@@ -394,56 +394,66 @@ def compute_elim_quota_lb_new(cands, ballots, order_c, order_a, quota, order_q):
 
             # No one should have a quota
             no_quota_lb = max(0, tallies[ce] - quota)
-            others = [c.num for c in cands if c.num not in gone_set and c.num !- ce]
+            others = [c.num for c in cands if c.num not in gone_set and c.num != ce]
             for c in others:
                 elim_lb = max(elim_lb, max(0, 0.5 * (tallies[ce] - tallies[c])))
                 no_quota_lb = max(no_quota_lb, max(0, tallies[c] - quota))
 
 
         else:  # candidate seated
-            #min_tallies = [0 for cand in cands]
-            #max_tallies = [0 for cand in cands]
+            min_tallies = [0 for _ in cands]
+            max_tallies = [0 for _ in cands]
 
-            #for b in ballots:
-            #    prefs = [p for p in b.prefs if p not in gone_set]
+            for b in ballots:
+                prefs = [p for p in b.prefs if p not in gone_set]
 
-            #    if prefs:
-            #        sv_add, move_r = calc_tallies(b, gone, transfer, winners, order_q)
-            #        move_through_lsb = False
-            #        for p in prefs:
-            #            if p in order_q and order_q[p] > move_r:
-            #                min_tallies[p] += sv_add
-            #                max_tallies[p] += sv_add
-            #                break
+                if prefs:
+                    sv_add, move_r = calc_tallies(b, gone, transfer, winners, order_q)
+                    move_through_lsb = False
+                    for p in prefs:
+                        if p in order_q:
+                            if order_q[p] > move_r:
+                                min_tallies[p] += sv_add
+                                max_tallies[p] += sv_add
+                                break
+                            else:
+                                continue
+                            
+                        if p in last_seating_block:
+                            max_tallies[p] += sv_add
+                            move_through_lsb = True
+                            continue
 
-            #            if p in last_seating_block:
-            #                max_tallies[p] += sv_add
-            #                move_through_lsb = True
-            #                continue
-
-            #            if !move_through_lsb:
-            #                min_tallies[p] += sv_add
+                        if not move_through_lsb:
+                            min_tallies[p] += sv_add
                         
-            #            max_tallies[p] += sv_add
-            #            break
+                        max_tallies[p] += sv_add
+                        break
 
-            #quotas = [c for c,r in order_q.items() if r == i]
-
+            rem = [c.num for c in cands if c.num not in gone_set]
+            for c in rem:
+                if c in order_q and order_q[c] <= i:
+                    quota_lb = max(quota_lb, quota - max_tallies[c])
+                elif c not in last_seating_block:
+                    no_quota_lb = max(no_quota_lb, min_tallies[c] - quota);
                         
             if ce in order_q:  # candidate got a quota, else seated by default (last round)
-                value = 0  # value of ballots
-                for b in ballots:
-                    prefs = [p for p in b.prefs if p not in gone_set]
+                #value = 0  # value of ballots
+                #for b in ballots:
+                #    prefs = [p for p in b.prefs if p not in gone_set]
 
-                    if prefs and prefs[0] == ce:  # ballot is not exhausted
-                        sv_add, move_r = calc_tallies(b, gone, transfer, winners, order_q)
-                        if order_q[ce] > move_r:
-                            value += sv_add
+                #    if prefs and prefs[0] == ce:  # ballot is not exhausted
+                #        sv_add, move_r = calc_tallies(b, gone, transfer, winners, order_q)
+                #        if order_q[ce] > move_r:
+                #            value += sv_add
 
                 winners.append(ce)
 
-                cmax = value
-                value = max(value, quota)  # restrict value to be at lest quota
+                # Min/max tally should be the same
+                mint,maxt = min_tallies[ce],max_tallies[ce]
+                assert(abs(maxt-mint)<= epsilon)
+                cmax = maxt
+                value = max(cmax, quota)  # restrict value to be at lest quota
                 transfer[ce] = (value - quota)/value
 
                 # cost to displace the candidate with largest tally that is also above quota only active if
