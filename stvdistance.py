@@ -355,7 +355,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
             # we should ensure that the first seated candidate after either
             # an elimination, or at the start of the prefix, is the one with
             # the highest tally at that point. 
-            if r == 0 or order_a[r] == 0:
+            if r == 0 or order_a[r-1] == 0:
                 for co in nonsupers:
                     if ce != co and candpos[co] > r:
                         model.addCons(vcr[ce,r] >= vcr[co,r])
