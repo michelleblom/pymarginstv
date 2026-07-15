@@ -23,7 +23,7 @@ import sys
 import os
 import glob
 import json
-from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, read_ballots_blt
+from utils import read_ballots_txt, read_ballots_json, read_ballots_blt
 from subprocess import run
 
 from cProfile import Profile
@@ -487,6 +487,7 @@ data_aus_small = [
     ("FedAus22/2022NT.json", 2)
 ]
 
+
 datascotland= [
     ("Scotland/2007/GCC_07_Anderson_ballots.txt", 4), ("Scotland/2007/GCC_07_Baillieston_ballots.txt", 4),
     ("Scotland/2007/GCC_07_Calton_ballots.txt", 3), ("Scotland/2007/GCC_07_Canal_ballots.txt", 4),
@@ -496,8 +497,7 @@ datascotland= [
     ("Scotland/2007/GCC_07_Hillhead_ballots.txt", 4), ("Scotland/2007/GCC_07_Langside_ballots.txt", 3),
     ("Scotland/2007/GCC_07_Linn_ballots.txt", 4), ("Scotland/2007/GCC_07_Maryhill_ballots.txt", 4),
     ("Scotland/2007/GCC_07_Newlands_ballots.txt", 3), ("Scotland/2007/GCC_07_NorthEast_ballots.txt", 4),
-    ("Scotland/2007/GCC_07_Partick_ballots.txt", 4), ("Scotland/2007/GCC_07_Pollockshields_ballots.txt", 3),
-    ("Scotland/2007/GCC_07_Shettleston_ballots.txt", 4), ("Scotland/2007/GCC_07_SouthsideCentral_ballots.txt", 4)
+    ("Scotland/2007/GCC_07_Partick_ballots.txt", 4), ("Scotland/2007/GCC_07_Pollockshields_ballots.txt", 3)
         ]
 
 datafiles = [
@@ -1133,8 +1133,8 @@ def run_audit():
             # if path.endswith(".blt"):
             #     candidates, ballots, _, cid2num, totvotes, seats = read_ballots_blt(path)
             # print(f"{displayname}, {len(candidates)}, {seats}, {counter}"); continue
-            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}_wQuotaPrefixes_OnElimNoQuotas.log", '-s', str(seats),
-                        '-pc', '30', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
+            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}_wQuotaPrefixes_OnElimNoQuotas_Claude.log", '-s', str(seats),
+                        '-pc', '1', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
             if version >= 0:  # new ub
                 args += ['-ub', str(ubs[displayname])]
             if abs(version) == 3:  # new

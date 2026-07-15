@@ -15,15 +15,26 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
-import os
+from __future__ import annotations
+
 import numpy as np
-import statistics
 import math
-import re
 import json
 
-def find_item_index_next(item_list, item_to_find):
-    return next((i for i, x in enumerate(item_list) if x == item_to_find), -1)
+from typing import Optional, Protocol, TextIO
+
+
+class CandidateLike(Protocol):
+    """
+        Structural type for candidate records: the full Candidate class
+        below, or any lightweight stand-in (e.g. stvtree.CandLite) that
+        exposes a candidate number and first-preference tally.
+    """
+    @property
+    def num(self) -> int: ...
+
+    @property
+    def fp_votes(self) -> float: ...
 
 
 class Ballot:
@@ -39,11 +50,12 @@ class Ballot:
         Note: sometimes this data structure is used to represent a single
         ballot, or a collection of ballots cast with the same ranking.
     """
-    def __init__(self, num, votes, prefs, totcand, atl=False):
+    def __init__(self, num: int, votes: float, prefs: list[int], \
+        totcand: int, atl: bool = False) -> None:
         self.num = num # Numeric identifier for ballot
 
         # Total votes expressed on the papers of this ballot type/ballot
-        self.votes = votes 
+        self.votes = votes
 
         # Ranking over candidates
         self.prefs = prefs
@@ -54,15 +66,13 @@ class Ballot:
         # Number of papers cast of this ballot type.
         self.papers = votes
 
-        # Indexes of each candidate 
-        self.ranks = [-1]*totcand
+        # Indexes of each candidate
+        self.ranks: list[int] = [-1]*totcand
 
         for i in range(len(prefs)):
-            if prefs[i] >= len(self.ranks):
-                print("here")
-            self.ranks[prefs[i]] = i;
+            self.ranks[prefs[i]] = i
 
-    def __str__(self):
+    def __str__(self) -> str:
         """
             Convert ballot to a string representation.
         """
@@ -84,73 +94,38 @@ class Candidate:
         list. Group id/position/ATL/BTL/mentions are not used in this
         codebase. 
     """
-    def __init__(self, num, idn):
+    def __init__(self, num: int, idn: int) -> None:
         self.num = num
         self.id = idn
-        self.name = None
-        self.group_id = None
-        self.position = None
+        self.name: Optional[str] = None
+        self.group_id: Optional[int] = None
+        self.position: Optional[int] = None
 
         self.num_atls = 0
         self.num_btls = 0
 
-        self.ballots = []
-        self.fp_votes = 0
-
-        self.mentions = []
+        # Ids of ballots whose first preference is this candidate.
+        self.ballots: list[int] = []
+        self.fp_votes: float = 0
 
         # For simulation purposes
-        self.sim_votes = 0
-        self.max_votes = 0
-        self.bweights = []
+        self.sim_votes: float = 0
+        self.bweights: list[tuple[int, float]] = []
         self.standing = 1
         self.seat = -1
-        self.surplus = 0
-
-class Outcome:
-    """
-        
-    """
-    def __init__(self):
-        self.cand = []
-        self.action = []
+        self.surplus: float = 0
 
 class Group:
-    def __init__(self, idstr):
+    def __init__(self, idstr: int) -> None:
         self.id = idstr
-        self.cands = []
+        self.cands: list[int] = []
 
 
-def read_outcome(path, cid2num):
-    outcome = Outcome()
-
-    with open(path, "r") as otc:
-        lines = otc.readlines()
-
-        # First line contains candidate numbers
-        # in order of seating/elimination. After
-        # all seats have been filled, the remaining
-        # candidates will be listed in no particular
-        # order.
-        toks = lines[0].strip().split(',')
-
-        outcome.cand = [cid2num[int(c)] for c in toks]
-
-        # The second line contains a series of 0s or
-        # 1s, separated by commas, indicating whether
-        # a seating or elimination happened in that
-        # position.
-        toks = lines[1].strip().split(',')
-
-        outcome.action = [int(a) for a in toks]
-
-    return outcome
-
-
-def read_ballots_blt(path):
-    ballots = []
-    candidates = []
-    cid2num = {}
+def read_ballots_blt(path: str) -> tuple[list[Candidate], list[Ballot], \
+    dict[int, Group], dict[int, int], int, int]:
+    ballots: list[Ballot] = []
+    candidates: list[Candidate] = []
+    cid2num: dict[int, int] = {}
 
     total_votes = 0
 
@@ -193,18 +168,16 @@ def read_ballots_blt(path):
 
             total_votes += n
 
-            for p in prefs:
-                candidates[p].mentions.append(bcntr)
-
             bcntr += 1
 
     return candidates,ballots,{},cid2num,total_votes,seats
 
 
-def read_ballots_txt(path):
-    ballots = []
-    candidates = []
-    cid2num = {}
+def read_ballots_txt(path: str) -> tuple[list[Candidate], list[Ballot], \
+    dict[int, Group], dict[int, int], int]:
+    ballots: list[Ballot] = []
+    candidates: list[Candidate] = []
+    cid2num: dict[int, int] = {}
 
     total_votes = 0
     us_ver = True if path.endswith(".us") else False
@@ -255,18 +228,16 @@ def read_ballots_txt(path):
 
             total_votes += votes
 
-            for p in cprefs:
-                candidates[p].mentions.append(bcntr)
-
             bcntr += 1
 
     return candidates,ballots,{},cid2num,total_votes
 
-def read_ballots_json(path):
-    ballots = []
-    candidates = []
-    id2group = {}
-    cid2num = {}
+def read_ballots_json(path: str) -> tuple[list[Candidate], list[Ballot], \
+    dict[int, Group], dict[int, int], int]:
+    ballots: list[Ballot] = []
+    candidates: list[Candidate] = []
+    id2group: dict[int, Group] = {}
+    cid2num: dict[int, int] = {}
 
     total_votes = 0
 
@@ -371,154 +342,19 @@ def read_ballots_json(path):
     return candidates,ballots,id2group,cid2num,total_votes
             
 
-def read_ballots_stv(path):
-    ballots = []
-    candidates = []
-    id2group = {}
-    cid2num = {}
-
-    total_votes = 0
-
-    with open(path, "r") as cvr:
-        lines = cvr.readlines()
-
-        # Skip the first 3 lines, the fourth line
-        # indicates the number of candidates
-        ncands = int(lines[3].strip())
-
-        # The next 'ncands' lines represent candidate 
-        # details
-        cntr = 0
-        for i in range(4, 4+ncands):
-            toks = lines[i].strip().split('\t')
-
-            # toks = [Name, Group, Position in Group]
-            cand = Candidate(cntr,cntr)
-            cand.name = toks[0]
-            cand.group_id = toks[1]
-            cand.position = int(toks[2])
-
-            cid2num[cntr] = cntr
-            candidates.append(cand)
-            cntr += 1
-
-        # Get group info
-        ngroups = int(lines[5+ncands].strip())
-
-        for i in range(6+ncands, 6+ncands+ngroups):
-            toks = lines[i].strip().split('\t')
-
-            # toks = [Group ID, Group name]
-            group = Group(toks[0])
-            group.name = "" if len(toks) < 2 else toks[1]
-    
-            id2group[group.id] = group
-
-        # Add candidates to their groups
-        for cand in candidates:
-            id2group[cand.group_id].cands.append(cand.num)
-
-        # Continue until we get to RATLS (above the line entries)
-        lcntr = 6+ncands+ngroups
-        numratls = 0
-        for i in range(6+ncands+ngroups, len(lines)):
-            line = lines[i].strip()
-
-            if line.startswith("RATLs"):
-                # Next line details the number of RATLs
-                numratls = int(lines[i+1].strip())
-                
-                lcntr = i+2
-                break
-
-        bcntr = 0
-
-        assert(lcntr > 0)
-
-        # Read above the line votes
-        for i in range(lcntr, lcntr + numratls):
-            toks = lines[i].strip().split()
-               
-            # Last element of toks is the number of votes with
-            # the given ranking of groups. We translate the above
-            # the line vote into the sequence of candidates that the
-            # vote would move between.
-            votes = int(toks[-1])
-            prefs = []
-
-            for gid in toks[:-1]:
-                group = id2group[gid]
-                for c in group.cands:
-                    prefs.append(c)
-
-            ballot = Ballot(bcntr, votes, prefs, ncands, atl=True)
-            ballots.append(ballot)
-
-            fpcand = candidates[prefs[0]]
-            fpcand.ballots.append(bcntr)
-            fpcand.fp_votes += votes
-
-            fpcand.num_atls += votes
-
-            total_votes += votes
-
-            bcntr += 1
-
-        # lcntr+numratls+1 is the line detailing the nubmer of BTL entries
-        numbtls = int(lines[lcntr+numratls+1].strip())
-
-        for i in range(lcntr+numratls+2,lcntr+numratls+2+numbtls):
-            toks = lines[i].strip().split()
-
-            votes = int(toks[-1])
-            prefs = [int(c) for c in toks[0].split(',')]
-
-            ballot = Ballot(bcntr, votes, prefs, ncands)
-            ballots.append(ballot)
-            
-            fpcand = candidates[prefs[0]]
-            fpcand.ballots.append(bcntr)
-            fpcand.fp_votes += votes
-
-            fpcand.num_btls += votes
-
-            total_votes += votes
-
-            bcntr += 1
-
-    return candidates,ballots,id2group,cid2num,total_votes
-
-
-def index_of(item, values):
-    idx = 0
-    for i in values:
-        if i == item:
-            return idx
-        idx += 1
-
-    return None 
-
-def next_cand(prefs, excluded):
-    for p in prefs:
-        if p in excluded:
-            continue
-
-        return p
-
-    return None
-
-def compute_simple_ub(candidates, quota, winners):
+def compute_simple_ub(candidates: list[Candidate], quota: int, \
+    winners: list[int]) -> float:
     sub = np.inf
 
     for c in candidates:
         if not c.num in winners:
-            qdiff = quota - c.fp_votes
-
             sub = min(sub, quota - c.fp_votes)
 
     return sub
 
-def compute_weub(candidates, winners, order_c, order_a, tallies):
+def compute_weub(candidates: list[Candidate], winners: list[int], \
+    order_c: list[int], order_a: list[int], \
+    tallies: dict[int, list[float]]) -> float:
     seated = set(winners)
     standing = set([c.num for c in candidates]) 
 
@@ -561,19 +397,21 @@ def compute_weub(candidates, winners, order_c, order_a, tallies):
                        
 
 
-def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
-    winners, log=None):
-    
-    ncand = len(candidates)
-    cand_tallies_by_round = { cand.num : [0]*ncand for cand in candidates }
+def simulate_stv(ballots: list[Ballot], candidates: list[Candidate], \
+    nseats: int, order_c: list[int], order_a: list[int], \
+    order_q: dict[int, int], winners: list[int], \
+    log: Optional[TextIO] = None) -> tuple[int, dict[int, list[float]], float]:
 
-    totvotes = 0
+    ncand = len(candidates)
+    cand_tallies_by_round: dict[int, list[float]] = \
+        { cand.num : [0]*ncand for cand in candidates }
+
+    totvotes: float = 0
     if log != None:
         print("First preference tallies: ", file=log, flush=True)
 
     for cand in candidates:
         cand.sim_votes = 0
-        cand.max_votes = 0
         cand.bweights = []
         cand.standing = 1
         cand.seat = -1
@@ -582,8 +420,6 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
         for bid in cand.ballots:
             cand.bweights.append((bid, 1))
             cand.sim_votes += ballots[bid].votes
-
-        cand.max_votes = cand.sim_votes
 
         cand_tallies_by_round[cand.num][0] = cand.sim_votes
 
@@ -599,7 +435,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
     if log != None:
         print(f"The quota for election is {quota}", file=log, flush=True)
 
-    surpluses = []      
+    surpluses: list[Candidate] = []
 
     currseat = 0
 
@@ -634,7 +470,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                 print("Number of candidates left standing equals number of "\
                     "remaining seats", file=log, flush=True)
 
-            slist = []
+            slist: list[int] = []
             for cand in candidates:
                 if cand.standing:
                     inserted = False
@@ -666,21 +502,21 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
         if surpluses == []:
             # Eliminated candidate with fewest votes.
             # Distribute votes at their current value.
-            leastvotes = -1
-            toeliminate = -1
+            leastvotes: float = -1
+            toeliminate: Optional[Candidate] = None
 
             for cand in candidates:
                 if cand.standing:
                     if log != None:
                         print("Candidate {}, {}, has {} votes".format(cand.id, cand.name,\
                             cand.sim_votes), file=log, flush=True)
-                    
+
                     if leastvotes == -1 or cand.sim_votes < leastvotes:
                         leastvotes = cand.sim_votes
                         toeliminate = cand
 
-           
-            if toeliminate != -1: 
+
+            if toeliminate is not None:
                 order_c.append(toeliminate.num)
                 order_a.append(0)
 
@@ -716,7 +552,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
             r += 1
 
         else:
-            new_surpluses = []
+            new_surpluses: list[Candidate] = []
 
             while surpluses != []:
                 # Start with candidate with the largest surplus
@@ -739,7 +575,7 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
                     # Distribute surplus
                     distribute_surplus(elect, candidates, ballots, log)
 
-                next_surpluses = []
+                next_surpluses: list[Candidate] = []
                 for cand in candidates:
                     if cand.surplus != -1 or not cand.standing:
                         continue
@@ -771,7 +607,8 @@ def simulate_stv(ballots, candidates, nseats, order_c, order_a, order_q, \
 
     return quota, cand_tallies_by_round, totvotes
 
-def next_candidate(prefs, cnum, candidates):
+def next_candidate(prefs: list[int], cnum: int, \
+    candidates: list[Candidate]) -> int:
     idx = prefs.index(cnum)
 
     for p in prefs[idx+1:]:
@@ -784,7 +621,7 @@ def next_candidate(prefs, cnum, candidates):
     return -1 
 
 
-def insert_surplus(surpluses, cand):
+def insert_surplus(surpluses: list[Candidate], cand: Candidate) -> None:
     for i in range(len(surpluses)):
         if cand.surplus >= surpluses[i].surplus:
             surpluses.insert(i, cand)
@@ -793,7 +630,8 @@ def insert_surplus(surpluses, cand):
     surpluses.append(cand)
 
 
-def distribute_surplus(elect, candidates, ballots, log):
+def distribute_surplus(elect: Candidate, candidates: list[Candidate], \
+    ballots: list[Ballot], log: Optional[TextIO]) -> None:
     elect.standing = 0
 
     if elect.surplus < 0.001: return
@@ -804,7 +642,7 @@ def distribute_surplus(elect, candidates, ballots, log):
         print("Transfer value is {}".format(tvalue), file=log)
 
     # Each ballot in elect's tally now has value of 'tvalue'
-    totransfer = [[] for c in candidates]
+    totransfer: list[list[tuple[int, float]]] = [[] for c in candidates]
 
     for bid,w in elect.bweights:
         blt = ballots[bid]
@@ -817,7 +655,7 @@ def distribute_surplus(elect, candidates, ballots, log):
     for cand in candidates:
         tlist = totransfer[cand.num]
 
-        total = 0
+        total: float = 0
         for bid,weight in tlist:
             blt = ballots[bid]
 
@@ -836,10 +674,11 @@ def distribute_surplus(elect, candidates, ballots, log):
     elect.surplus = -1
 
 
-def eliminate_candidate(toelim, candidates, ballots, log):
+def eliminate_candidate(toelim: Candidate, candidates: list[Candidate], \
+    ballots: list[Ballot], log: Optional[TextIO]) -> None:
     toelim.standing = 0
 
-    totransfer = [[] for c in candidates]
+    totransfer: list[list[tuple[int, float]]] = [[] for c in candidates]
 
     # Distribute all ballots (at their current value) to rem candidates
     for bid,weight in toelim.bweights:
@@ -853,7 +692,7 @@ def eliminate_candidate(toelim, candidates, ballots, log):
     for cand in candidates:
         tlist = totransfer[cand.num]
 
-        total = 0
+        total: float = 0
         for bid,weight in tlist:
             blt = ballots[bid]
 
@@ -870,45 +709,7 @@ def eliminate_candidate(toelim, candidates, ballots, log):
                     total, toelim.name, cand.name), file=log, flush=True)
 
 
-def print_summary(candidates,id2group, seats, quota, order_c, order_a,\
-    order_q, winners):
-    print(f"Candidates,{len(candidates)},Groups,{len(id2group)}")
-    print(f"Seats,{seats}")
-    print(f"Quota,{quota}")
-    
-    order_c_ids = [str(candidates[c].id) for c in order_c]
-
-    order_c_str = "Outcome-ns"
-    order_a_str = "Outcome-ns"
-
-    for i in range(len(candidates)):
-        order_c_str += "," + order_c_ids[i]
-        order_a_str += "," + str(order_a[i])
-
-    
-    print(order_c_str)
-    print(order_a_str)
-
-    for w in winners:
-        print("Quota,{},{}".format(w, order_q[w]))
-
-    for i in range(len(id2group)):
-        gstr = "Group,{},Candidates".format(i)
-
-        group = id2group[i] 
-        for cnum in group.cands:
-            gstr += "," + str(candidates[cnum].id)
-
-        print(gstr)
-
-    for cand in candidates:
-        islast = 1 if id2group[cand.group_id].cands[-1] == cand.num else 0
-
-        print("Candidates,{},{},{},{},{},{},({})".format(cand.id,cand.num_atls,\
-            cand.num_btls,cand.group_id,cand.position-1,islast,cand.name))
-   
-
-def next_mod(mask, n):
+def next_mod(mask: list[int], n: int) -> int:
     i = 0
     while i < n and mask[i]:
         mask[i] = 0
@@ -921,14 +722,15 @@ def next_mod(mask, n):
     return 0
 
 
-def CreateEquivalenceClasses(order_c, totcand):
+def CreateEquivalenceClasses(order_c: list[int], totcand: int) \
+    -> tuple[list[Ballot], int, dict[tuple[int, ...], int]]:
     ncand = len(order_c)
     mask = [0]*ncand
 
-    cmap = {}
+    cmap: dict[tuple[int, ...], int] = {}
 
     cntr = 0
-    classes = []
+    classes: list[Ballot] = []
 
     while next_mod(mask, ncand):
         j = -1
@@ -961,7 +763,8 @@ def CreateEquivalenceClasses(order_c, totcand):
 # Note that total number of possible ballot types (assuming smallest number 
 # of possible rankings is 1) with n candidates:
 # \sum_{i = 1}^{n} n! / (n-i)!
-def gen_equivalence_classes(order_c, remainder, totcand):
+def gen_equivalence_classes(order_c: list[int], remainder: list[int], \
+    totcand: int) -> tuple[list[Ballot], int, dict[tuple[int, ...], int]]:
     first,cntr,cmap = CreateEquivalenceClasses(order_c, totcand)
 
     second = []
@@ -979,8 +782,9 @@ def gen_equivalence_classes(order_c, remainder, totcand):
 
 
 
-def reduce_ballots(ncands, order_c, remainder, merge_map, ballots, rballots,\
-    classmap):
+def reduce_ballots(ncands: int, order_c: list[int], remainder: list[int], \
+    merge_map: dict[int, int], ballots: list[Ballot], \
+    rballots: list[Ballot], classmap: dict[tuple[int, ...], int]) -> None:
 
     candpos = [0]*ncands
 
@@ -1025,8 +829,10 @@ def reduce_ballots(ncands, order_c, remainder, merge_map, ballots, rballots,\
         rbal.papers += b.papers
 
 
-def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
-    segments, supers, merge_all=True):
+def add_elim_sequence(elim_seq: list[int], m_order_c: list[int], \
+    m_order_a: list[int], merge_map: dict[int, int], \
+    segments: list[list[int]], supers: list[int], \
+    merge_all: bool = True) -> None:
 
     """
         elim_seq    -  A sequence of consecutively eliminated candidates.
@@ -1097,25 +903,27 @@ def add_elim_sequence(elim_seq, m_order_c, m_order_a, merge_map, \
         m_order_a.append(0)
 
 
-def merge_outcome(order_c, order_a, order_q, rem):
-    merge_map = {}
+def merge_outcome(order_c: list[int], order_a: list[int], \
+    order_q: dict[int, int], rem: list[int]) -> tuple[list[int], list[int], \
+    dict[int, int], dict[int, int], list[int]]:
+    merge_map: dict[int, int] = {}
 
     # We reformulate the prefix order (order_c and order_a) into its merged
     # representation
-    m_order_c = []
-    m_order_a = []
+    m_order_c: list[int] = []
+    m_order_a: list[int] = []
 
     # List of ids corresponding to the new merged candidates.
-    supers = []
+    supers: list[int] = []
 
     # Find blocks of at least 3 eliminations in order_a
-    elim_seq = []
+    elim_seq: list[int] = []
 
     # Partition order_c into segments according to which candidates will
     # be merged together. For example, segments = [[1],[2,3,4],[5]] will
     # indicate that candidates 1 and 5 remain 'un-merged', but candidates
-    # 2-4 will be merged to create a new candidate (with id 2). 
-    segments = []
+    # 2-4 will be merged to create a new candidate (with id 2).
+    segments: list[list[int]] = []
     for i in range(len(order_a)):
         ci = order_c[i]
         if order_a[i] == 1:
@@ -1173,5 +981,5 @@ def merge_outcome(order_c, order_a, order_q, rem):
     for r in rem:
         merge_map[r] = r
 
-    return m_order_c, m_order_a, m_order_q, merge_map, supers, round_conv
+    return m_order_c, m_order_a, m_order_q, merge_map, supers
  

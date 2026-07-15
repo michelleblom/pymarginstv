@@ -14,20 +14,17 @@
 #    You should have received a copy of the GNU Affero General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import os
-import sys
+from __future__ import annotations
+
 import argparse
 import math
 from time import perf_counter
 import time
 
-from utils import read_ballots_stv, read_ballots_txt, read_ballots_json, \
-    read_ballots_blt, simulate_stv, compute_weub, compute_simple_ub, \
-    merge_outcome
+from utils import read_ballots_txt, read_ballots_json, \
+    read_ballots_blt, simulate_stv, compute_weub, compute_simple_ub
 
-from stvtree import treestv, compute_last_round, eval_child
-
-from stvdistance import stvdistance
+from stvtree import treestv
 
 
 if __name__ == "__main__":
@@ -68,15 +65,8 @@ if __name__ == "__main__":
     # Input: whether to use enhanced pruning strategy
     parser.add_argument('-lse', action='store_true', default=False)
 
-    # Input: whether to use initial candidate manipulations 
-    parser.add_argument('-icm', action='store_true', default=False)
-
     # Input: whether to use new eqlb bounding mechanism
     parser.add_argument('-eqlb', action='store_true', default=False)
-    
-    # Input: whether to perform aggressive pruning during
-    # structural equivalency testing
-    parser.add_argument('-agv', action='store_true', default=False)
 
     # Input: whether to only use lower bounding heuristics during search
     parser.add_argument("-nominlps", action='store_true', default=False)
@@ -97,28 +87,21 @@ if __name__ == "__main__":
 
     log = open(args.log, "w")
 
-    # Read STV data file
-    candidates, ballots, cid2num = None, None, None
-
-    # Check for given input data type
-    if args.data.endswith(".stv"):
-        # VT TODO: I found that read_ballots_stv didn't work. Hope there's not a different kind of .stv.
-        candidates, ballots, _, cid2num, nballots = read_ballots_json(args.data)
-
-    elif args.data.endswith(".blt"):
-        candidates, ballots, _, cid2num, nballots, _ = read_ballots_blt(args.data)
+    # Read STV data file: check for given input data type
+    if args.data.endswith(".blt"):
+        candidates, ballots = read_ballots_blt(args.data)[:2]
 
     elif args.data.endswith(".json"):
-        candidates, ballots, _, cid2num, nballots = read_ballots_json(args.data)
+        candidates, ballots = read_ballots_json(args.data)[:2]
 
     else:
-        candidates, ballots, _, cid2num, nballots = read_ballots_txt(args.data)
+        candidates, ballots = read_ballots_txt(args.data)[:2]
 
     # Simulated election outcome: order_c contains candidates in order
     # of when they are elected/eliminated; order_a contains a series of 1s/0s
     # where 1 represents an election/0 an elimination. 
-    order_c = [] 
-    order_a = []
+    order_c: list[int] = []
+    order_a: list[int] = []
 
     # Map between candidates who win on a quota, and the range of rounds
     # in which they could have achieved their quota (with a -1 representing
@@ -126,8 +109,8 @@ if __name__ == "__main__":
     # order_q[w] = (-1,0) says that w could have had their quota on first
     # preferences or they could have achieved it through the vote transfers
     # in round 0.
-    order_q = {}
-    winners = []
+    order_q: dict[int, int] = {}
+    winners: list[int] = []
 
     # Simulate election, return quota, candidate tallies per round, and
     # the total valid ballots cast.
@@ -167,8 +150,7 @@ if __name__ == "__main__":
     # Start branch and bound.
     tstart = time.time()
     lb, ub, nexps, nsolves, ignores, agg_prunes = treestv(ballots, candidates, \
-        winners, order_c, order_a, order_q, upper_bound, args.seats, args, quota, \
-        totvotes, agap=args.agap, tlimit=args.limit, log=log)
+        winners, order_c, order_a, upper_bound, args, quota, totvotes, log=log)
     tend = time.time()
 
     print("{}--{}, {}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores, \

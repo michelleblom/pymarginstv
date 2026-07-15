@@ -1,10 +1,15 @@
-from pyscipopt import Model, SCIP_PARAMSETTING, SCIP_PARAMEMPHASIS, \
-    Eventhdlr, SCIP_EVENTTYPE, Sepa
+from __future__ import annotations
 
-from utils import gen_equivalence_classes, reduce_ballots
+from pyscipopt import Model, SCIP_PARAMEMPHASIS, Eventhdlr, SCIP_EVENTTYPE
 
-import time
+from utils import Ballot, CandidateLike, gen_equivalence_classes, \
+    reduce_ballots
+
+import argparse
+import gc
 import math
+
+from typing import Any, Optional, Sequence
 
 epsilon = 0.0001
 
@@ -12,12 +17,15 @@ epsilon = 0.0001
 # On this branch, we implement the US-style STV model.
 #
 
-def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot,
-    LAST_ROUND, winners, tvalue, tallies, rem, candpos,order_q, max_tallies):
+def distribute_ballots_t(R: int, bw: int, cp_bw: int, wi: int, bvalue: Any,
+    b: Ballot, lballot: int, LAST_ROUND: int, winners: set[int],
+    tvalue: dict[int, Any], tallies: dict[tuple[int, int], Any],
+    rem: list[int], candpos: dict[int, int],
+    order_q: dict[int, int]) -> None:
 
-    # Ballot is currently sitting with 'ballotwith' at the start of round
-    # 'rstart'
-    ballotwith = bw
+    # Ballot is currently sitting with 'ballotwith' at the start of round 0.
+    # Becomes None once the ballot is exhausted.
+    ballotwith: Optional[int] = bw
 
     # To keep track of the last person the ballot was with (used to know
     # when we have changed 'ballotwith' over the course of the following loop)
@@ -35,16 +43,14 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot,
     withindex = wi
 
     # Indicate that the ballot is with 'ballotwith' at the start of round
-    # 'start' (note: we do not include ballots in tallies[c,r] that reached
+    # 0 (note: we do not include ballots in tallies[c,r] that reached
     # candidate c in a round before r-1, these are already captured by the
     # presence of variable vcr[c,r-1] in the tallies[c,r] expression).
-    tallies[ballotwith,rstart] += ballot_value
-    
-    for r in range(rstart, R):
-        if ballotwith is not None:
-            max_tallies[ballotwith][r] += b.votes
+    tallies[bw,0] += ballot_value
 
-            # The ballot is still with candidate 'ballotwith' at the 
+    for r in range(R):
+        if ballotwith is not None:
+            # The ballot is still with candidate 'ballotwith' at the
             # start of this round, but we need to decide if it should
             # move to another candidate in this round.
             if last_ballotwith != ballotwith:
@@ -104,16 +110,16 @@ def distribute_ballots_t(rstart, R, bw, cp_bw, wi, bvalue, b, lballot,
 
 
 class TerminateAtIntegerSolution(Eventhdlr):
-    def __init__(self, model):
+    def __init__(self, model: Any) -> None:
         Eventhdlr.__init__(model)
 
-    def eventinit(self):
+    def eventinit(self) -> None:
         self.model.catchEvent(SCIP_EVENTTYPE.BESTSOLFOUND, self)
 
-    def eventexit(self):
+    def eventexit(self) -> None:
         self.model.dropEvent(SCIP_EVENTTYPE.BESTSOLFOUND, self)
 
-    def eventexec(self, event):
+    def eventexec(self, event: Any) -> None:
         primal_bound = self.model.getPrimalbound()
         dual_bound = self.model.getDualbound()
         if math.ceil(primal_bound) == math.ceil(dual_bound):
@@ -121,9 +127,12 @@ class TerminateAtIntegerSolution(Eventhdlr):
             self.model.interruptSolve()
 
 
-def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
-    merge_map, supers, tot_ballots, args, quota, upperbound, LAST_ROUND,
-    lowerbound, isleaf = False, log=None):
+def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
+    order_c: list[int], order_a: list[int], rem: list[int],
+    winners: set[int], order_q: dict[int, int], merge_map: dict[int, int],
+    supers: list[int], tot_ballots: float, args: argparse.Namespace,
+    quota: int, upperbound: float, LAST_ROUND: int, lowerbound: float,
+    isleaf: bool = False) -> tuple[bool, Optional[int], Optional[int]]:
     """
         Compute the number of ballots we would have to alter in order to 
         achieve the outcome prefix stated in order_c and order_a. 
@@ -182,12 +191,8 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
                        consider when trying to achieve the given outcome
                        prefix.
 
-        LAST_ROUND   : Do not form constraints relating to rounds that 
+        LAST_ROUND   : Do not form constraints relating to rounds that
                        occur after LAST_ROUND in order_c.
-
-        log          : Will either be None or an output stream to use when
-                       printing out diagnostics.
-
 
         lowerbound   : Max of displacement/quota lower bound. This represents 
                        a lower bound on the number of votes we have to change
@@ -261,31 +266,28 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
     #     to a different signature.
     # ys: Number of ballots of signature s in new profile.
     #
-    # vcr: Tally of candidate c at the start of round r. 
-    # qcr: Binary variable with value 1 if the tally of candidate c at the
-    #      the start of round r is at least a quota and 0 otherwise.
-    # nqcr: not qcr (useful in model building)
+    # vcr: Tally of candidate c at the start of round r.
 
-    ps = {}
-    ms = {}
-    ys = {}
+    ps: dict[int, Any] = {}
+    ms: dict[int, Any] = {}
+    ys: dict[int, Any] = {}
 
-    vcr = {}
+    vcr: dict[tuple[int, int], Any] = {}
 
     # Transfer value applied to ballots leaving an elected candidates 
     # tally in round 'r' (assuming a candidate was seated in 'r'). Note these 
     # variables will only be defined for rounds where a candidate was seated
     # in a round that is not equal to LAST_ROUND.
-    tvalue = {}
+    tvalue: dict[int, Any] = {}
 
 
     # mapping between candidate and their index in the order_c prefix, equal
     # to R+1 (where R is the length of the prefix) if they are still standing
     # at the end of the prefix.
-    candpos = { c : 0 for c in cands }
+    candpos: dict[int, int] = {}
     nonsupers = {c for c in cands if (not c in supers)}
 
-    tallies = {}
+    tallies: dict[tuple[int, int], Any] = {}
     for c in cands:
         pos = R+1
         if c in order_c:
@@ -321,9 +323,8 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
                 if pos >= r: # If 'c' is still standing at the start of 'r'
                     model.addCons(vcr[c,r] <= quota - epsilon)
 
-            # The eliminated candidate (assuming they are not a merged 
+            # The eliminated candidate (assuming they are not a merged
             # candidate) must be the one with the smallest tally.
-            ce = order_c[r]
             if ce in nonsupers:
                 for co in nonsupers:
                     if ce != co and candpos[co] > r:
@@ -355,7 +356,7 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
             # we should ensure that the first seated candidate after either
             # an elimination, or at the start of the prefix, is the one with
             # the highest tally at that point. 
-            if r == 0 or order_a[r] == 0:
+            if r == 0 or order_a[r-1] == 0:
                 for co in nonsupers:
                     if ce != co and candpos[co] > r:
                         model.addCons(vcr[ce,r] >= vcr[co,r])
@@ -368,13 +369,8 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
                 model.addCons((tvalue[r]-epsilon)*vcr[ce,r]<=(vcr[ce,r]-quota))
                 model.addCons((tvalue[r]+epsilon)*vcr[ce,r]>=(vcr[ce,r]-quota))
 
-    sum_ps = 0
-    sum_ms = 0
-
-    # Data structure to store maximum round-by-round tallies for candidates
-    # over the course of the outcome prefix.
-    max_tallies = { c : [0]*R for c in cands}
-
+    sum_ps: Any = 0
+    sum_ms: Any = 0
 
     for b in classes:
         ps[b.num] = model.addVar(vtype="C", lb=0, ub=upperbound, \
@@ -406,9 +402,9 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
 
         # Populate tallies[] expressions, defining who has this ballot
         # in different rounds.
-        distribute_ballots_t(0, R, ballotwith, cp_ballotwith, withindex, 
+        distribute_ballots_t(R, ballotwith, cp_ballotwith, withindex,
             ys[b.num], b, lballot, LAST_ROUND, winners, tvalue,
-            tallies, rem, candpos, order_q, max_tallies)
+            tallies, rem, candpos, order_q)
   
     # Constraint enforces consistency  
     model.addCons(sum_ps == sum_ms)
@@ -433,11 +429,22 @@ def stvdistance(candidates, ballots, order_c, order_a, rem, winners, order_q,
 
     model.optimize()
 
-    if model.getStatus() == "infeasible":
-        return False, None, None
+    try:
+        if model.getStatus() == "infeasible":
+            return False, None, None
 
-    else:
-        # As we are usually going to stop solving when we get to an 
-        # allowed gap, return lower bound on objective.
-        return True, max(0, int(math.ceil(model.getDualbound()))), \
-            max(0, int(math.ceil(model.getPrimalbound())))
+        else:
+            # As we are usually going to stop solving when we get to an
+            # allowed gap, return lower bound on objective.
+            return True, max(0, int(math.ceil(model.getDualbound()))), \
+                max(0, int(math.ceil(model.getPrimalbound())))
+    finally:
+        # Release SCIP's memory for this problem immediately: the model and
+        # its event handler form a reference cycle, so without this the C
+        # memory is only freed whenever the cyclic garbage collector runs.
+        # The collect() reclaims the SCIP environments of previous models
+        # whose cycles are still awaiting collection; without it, worker
+        # processes accumulate several MB per solve.
+        model.freeProb()
+        del model
+        gc.collect()
