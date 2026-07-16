@@ -21,7 +21,7 @@ import numpy as np
 import math
 import json
 
-from typing import Optional, Protocol, TextIO
+from typing import Iterable, Optional, Protocol, TextIO
 
 
 class CandidateLike(Protocol):
@@ -399,8 +399,7 @@ def compute_weub(candidates: list[Candidate], winners: list[int], \
 
 def simulate_stv(ballots: list[Ballot], candidates: list[Candidate], \
     nseats: int, order_c: list[int], order_a: list[int], \
-    order_q: dict[int, int], winners: list[int], \
-    log: Optional[TextIO] = None) -> tuple[int, dict[int, list[float]], float]:
+    winners: list[int], log: Optional[TextIO] = None) -> tuple[int, dict[int, list[float]], float]:
 
     ncand = len(candidates)
     cand_tallies_by_round: dict[int, list[float]] = \
@@ -457,7 +456,7 @@ def simulate_stv(ballots: list[Ballot], candidates: list[Candidate], \
                 cand.surplus = max(0, cand.sim_votes - quota)
                 insert_surplus(surpluses, cand)
 
-                order_q[cand.num] = r
+                #order_q[cand.num] = r
 
         if standing == 0:
             break
@@ -539,7 +538,7 @@ def simulate_stv(ballots: list[Ballot], candidates: list[Candidate], \
                         cand.surplus = max(0, cand.sim_votes - quota)
                         surpluses.append(cand)
 
-                        order_q[cand.num] = r
+                        #order_q[cand.num] = r
 
                         if log != None:
                             print(f"Candidate {cand.id}, {cand.name}, has a quota.", \
@@ -583,7 +582,7 @@ def simulate_stv(ballots: list[Ballot], candidates: list[Candidate], \
                     if cand.sim_votes >= quota:
                         cand.surplus = max(0, cand.sim_votes - quota)
                         insert_surplus(next_surpluses, cand)
-                        order_q[cand.num] = r
+                        #order_q[cand.num] = r
 
                 new_surpluses.extend(next_surpluses)
             
@@ -904,8 +903,8 @@ def add_elim_sequence(elim_seq: list[int], m_order_c: list[int], \
 
 
 def merge_outcome(order_c: list[int], order_a: list[int], \
-    order_q: dict[int, int], rem: list[int]) -> tuple[list[int], list[int], \
-    dict[int, int], dict[int, int], list[int]]:
+    order_q: dict[int, tuple[int, int]], rem: list[int]) -> tuple[list[int], \
+    list[int], dict[int, tuple[int, int]], dict[int, int], list[int]]:
     merge_map: dict[int, int] = {}
 
     # We reformulate the prefix order (order_c and order_a) into its merged
@@ -971,15 +970,46 @@ def merge_outcome(order_c: list[int], order_a: list[int], \
 
     # Create merged version of order_q, note no candidates that will end
     # up being merged will have an entry in m_order_q.
-    for c,r in order_q.items():
-        if not r in round_conv:
-            print("{} {}, {}/{}, {}/{}".format(r, round_conv,
+    for c,(lo,hi) in order_q.items():
+        if not lo in round_conv or not hi in round_conv:
+            print("({},{}) {}, {}/{}, {}/{}".format(lo, hi, round_conv,
                 m_order_c, m_order_a, order_c, order_a))
- 
-    m_order_q = { c : round_conv[r] for c,r in order_q.items() }
+
+    m_order_q = { c : (round_conv[lo], round_conv[hi]) \
+        for c,(lo,hi) in order_q.items() }
 
     for r in rem:
         merge_map[r] = r
 
     return m_order_c, m_order_a, m_order_q, merge_map, supers
+
+
+def get_order_q(order_a: list[int], LAST_ROUND: int, \
+    winners: Iterable[int], order_c_index: dict[int, int]) \
+    -> dict[int, tuple[int, int]]:
+    """
+        Determine the earliest and latest time that winners could have
+        achieved a quota, given that we have determined we only care
+        about winners that have been seated at or before LAST_ROUND.
+    """
+    order_q = {}
+    for w in winners:
+        pos = order_c_index[w]
+        if pos == -1:
+            pos = LAST_ROUND
+        if pos > LAST_ROUND:
+            continue
+
+        minrq = pos - 1
+        maxrq = pos - 1
+
+        for r in range(pos - 1, -1, -1):
+            if order_a[r] == 1:
+                minrq -= 1
+            else:
+                break
+
+        order_q[w] = (minrq, maxrq)
+
+    return order_q
  

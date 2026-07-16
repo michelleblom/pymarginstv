@@ -14,19 +14,18 @@ from typing import Any, Optional, Sequence
 epsilon = 0.0001
 
 #
-# US-style STV model; without quota achievements expressed in order prefixes
+# On this branch, we implement the US-style STV model.
 #
 
-def distribute_ballots_t(rstart: int, R: int, bw: int, cp_bw: int, wi: int, \
-    bvalue: Any, b: Ballot, lballot: int, LAST_ROUND: int, \
-    winners: set[int], tvalue: dict[int, Any], \
-    nqcr: dict[tuple[int, int], Any], qcr: dict[tuple[int, int], Any], \
-    tallies: dict[tuple[int, int], Any], rem: list[int], \
-    candpos: dict[int, int], order_q: dict[int, tuple[int, int]]) -> None:
+def distribute_ballots_t(R: int, bw: int, cp_bw: int, wi: int, bvalue: Any,
+    b: Ballot, lballot: int, LAST_ROUND: int, winners: set[int],
+    tvalue: dict[int, Any], tallies: dict[tuple[int, int], Any],
+    rem: list[int], candpos: dict[int, int],
+    order_q: dict[int, int]) -> None:
 
-    # Ballot is currently sitting with 'ballotwith' at the start of round
-    # 'rstart'
-    ballotwith = bw
+    # Ballot is currently sitting with 'ballotwith' at the start of round 0.
+    # Becomes None once the ballot is exhausted.
+    ballotwith: Optional[int] = bw
 
     # To keep track of the last person the ballot was with (used to know
     # when we have changed 'ballotwith' over the course of the following loop)
@@ -44,13 +43,13 @@ def distribute_ballots_t(rstart: int, R: int, bw: int, cp_bw: int, wi: int, \
     withindex = wi
 
     # Indicate that the ballot is with 'ballotwith' at the start of round
-    # 'start' (note: we do not include ballots in tallies[c,r] that reached
+    # 0 (note: we do not include ballots in tallies[c,r] that reached
     # candidate c in a round before r-1, these are already captured by the
     # presence of variable vcr[c,r-1] in the tallies[c,r] expression).
-    tallies[ballotwith,rstart] += ballot_value
-    
-    for r in range(rstart, R):
-        if ballotwith != None:
+    tallies[bw,0] += ballot_value
+
+    for r in range(R):
+        if ballotwith is not None:
             # The ballot is still with candidate 'ballotwith' at the
             # start of this round, but we need to decide if it should
             # move to another candidate in this round.
@@ -90,40 +89,14 @@ def distribute_ballots_t(rstart: int, R: int, bw: int, cp_bw: int, wi: int, \
                         withindex += 1
                         continue
 
-                    if ballotwith in winners:
-                        if ballotwith in order_q:
-                            # Could the new candidate already have a quota?
-                            # If so, they may be skipped. The range gives
-                            # the earliest and latest rounds in which
-                            # 'ballotwith' could have achieved their quota.
-                            minqp, maxqp = order_q[ballotwith]
-
-                            if maxqp < r:
-                                # we skip this candidate; they will already
-                                # have a quota. 
-                                withindex += 1
-                                continue
-
-                            if minqp < r:
-                                # ballotwith could get it, but might not
-                                # imagine it does get it, let's play out
-                                # this reality with a recursive call.
-                                nbv = ballot_value*nqcr[ballotwith,r]
-                                distribute_ballots_t(r+1, R, ballotwith, \
-                                    cp_ballotwith, withindex, nbv, b, \
-                                    lballot, LAST_ROUND, winners, tvalue, \
-                                    nqcr, qcr, tallies, rem, candpos,\
-                                    order_q)
-
-                                # Now we are assuming that 'ballotwith' has
-                                # a quota at the start of round 'r', and the
-                                # ballot type is skipping them. We adjust
-                                # the ballot value with this caveat in place.
-                                ballot_value *= qcr[ballotwith,r]
-                                
-                                # Move on to next possibility.
-                                withindex += 1
-                                continue
+                    if ballotwith in winners and ballotwith in order_q:
+                        # Does the new candidate already have a quota?
+                        # If so, they are skipped.
+                        if order_q[ballotwith] < r:
+                            # we skip this candidate; they will already
+                            # have a quota. 
+                            withindex += 1
+                            continue
 
                         # otherwise, we will move to next break statement
 
@@ -153,9 +126,10 @@ class TerminateAtIntegerSolution(Eventhdlr):
             # print(f"{primal_bound=}, {dual_bound=}. Optimal integer solution found. Terminating", flush=True)
             self.model.interruptSolve()
 
+
 def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
     order_c: list[int], order_a: list[int], rem_cands: list[int],
-    winners: set[int], order_q: dict[int, tuple[int,int]], merge_map: dict[int, int],
+    winners: set[int], order_q: dict[int, int], merge_map: dict[int, int],
     supers: list[int], tot_ballots: float, args: argparse.Namespace,
     quota: int, upperbound: float, LAST_ROUND: int, lowerbound: float,
     isleaf: bool = False) -> tuple[bool, Optional[int], Optional[int]]:
@@ -190,9 +164,8 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
         winners      : Candidates who have been elected to a seat in order_c.
 
         order_q      : For those candidates who have been elected on a quota,
-                       order_q[w] gives a tuple (l,u) where l is the earliest
-                       round in which they could have achieved a quota (by
-                       vote transfers in that round) and u is the latest.
+                       order_q[w] returns the first round where they have a 
+                       quota at the start of the round. 
 
         merge_map    : It may be that we have apriori merged some candidates
                        into a super candidate. In this case, merge_map will
@@ -234,20 +207,14 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
                        a certain round, a quota.
 
         isleaf       : Flag indicating whether the outcome prefix actually
-                       represents a complete outcome.
-
-        The lowerbound and upperbound arguments are precomputed by the
-        caller (see the lower bounding functions in stvtree.py) and are
-        enforced here as constraints on the objective.
-
-        NOTE I have relaxed all integer variables (exc binaries) to be
-        continuous, as we are looking for lower bounds anyway.
-
+                       represents a complete outcome. 
+  
     """
 
     R = len(order_c)
 
-    cands = order_c + rem_cands
+    cands = order_c + rem
+    N = len(candidates)
 
     # Rework order_c/order_a on the basis of LAST_ROUND
     rem = rem_cands
@@ -258,8 +225,9 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
 
         R = LAST_ROUND + 1
 
+
     # Form equivalence classes over ballots. 
-    classes, _, class_map = gen_equivalence_classes(order_c, rem, len(candidates))
+    classes, _, class_map = gen_equivalence_classes(order_c, rem, N)
 
     # Reduce ballots to equivalence classes
     reduce_ballots(len(candidates), order_c, rem, merge_map, ballots, \
@@ -274,8 +242,9 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
     model.setParam("separating/closecuts/separelint", False)
     model.setParam("benders/default/cutstrengthenintpoint", 'i')
 
-    model.includeEventhdlr(TerminateAtIntegerSolution(model), "terminate_at_integer_solution",
-                           "Event handler that terminates solving when ceil(primal) == ceil(dual)")
+    model.includeEventhdlr(TerminateAtIntegerSolution(model), 
+        "terminate_at_integer_solution",
+        "Event handler that terminates solving when ceil(primal) == ceil(dual)")
 
     if isleaf:
         model.setRealParam("limits/time", args.thard)
@@ -299,36 +268,34 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
     #     to a different signature.
     # ys: Number of ballots of signature s in new profile.
     #
-    # vcr: Tally of candidate c at the start of round r. 
-    # qcr: Binary variable with value 1 if the tally of candidate c at the
-    #      the start of round r is at least a quota and 0 otherwise.
-    # nqcr: not qcr (useful in model building)
+    # vcr: Tally of candidate c at the start of round r.
 
-    ps = {}
-    ms = {}
-    ys = {}
+    ps: dict[int, Any] = {}
+    ms: dict[int, Any] = {}
+    ys: dict[int, Any] = {}
 
-    vcr = {}
-    qcr = {}
-    nqcr = {}
+    vcr: dict[tuple[int, int], Any] = {}
 
     # Transfer value applied to ballots leaving an elected candidates 
     # tally in round 'r' (assuming a candidate was seated in 'r'). Note these 
     # variables will only be defined for rounds where a candidate was seated
     # in a round that is not equal to LAST_ROUND.
-    tvalue = {}
+    tvalue: dict[int, Any] = {}
 
 
     # mapping between candidate and their index in the order_c prefix, equal
     # to R+1 (where R is the length of the prefix) if they are still standing
     # at the end of the prefix.
-    order_c_pos = { c : i for i, c in enumerate(order_c) }
-    candpos = { c : order_c_pos.get(c, R+1) for c in cands }
+    candpos: dict[int, int] = {}
     nonsupers = {c for c in cands if (not c in supers)}
 
-    tallies = {}
+    tallies: dict[tuple[int, int], Any] = {}
     for c in cands:
-        pos = candpos[c]
+        pos = R+1
+        if c in order_c:
+            pos = order_c.index(c)
+        
+        candpos[c] = pos
 
         for r in range(R):
             if pos < r: 
@@ -343,17 +310,6 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
 
             if r > 0:
                 tallies[c,r] += vcr[c,r-1]
-
-            # For the winners that get a quota at some point, create
-            # quota/not-quota binaries.
-            if c in winners and c in order_c:
-                qcr[c,r] = model.addVar(vtype="B", name="qcr(%s,%s)"%(c,r))
-                nqcr[c,r] = model.addVar(vtype="B", name="nqcr(%s,%s)"%(c,r))
-
-                model.addCons(nqcr[c,r] == 1 - qcr[c,r])
-                model.addCons(vcr[c,r] >= quota*qcr[c,r])
-                model.addCons(vcr[c,r] <= nqcr[c,r]*(quota-epsilon) + \
-                    qcr[c,r] * tot_ballots)
         
 
     for r in range(LAST_ROUND+1):
@@ -377,9 +333,18 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
                         model.addCons(vcr[ce,r] <= vcr[co,r])
 
         else:
-            # The candidate that is elected on a quota will have a quota.
-            if (ce,r) in qcr:
-                model.chgVarLb(qcr[ce,r], 1)
+            # Make sure all candidates who have achieved a quota by the 
+            # start of this round do have at least a quota's worth of votes.
+            # [Only add constraint for candidates that got their quota as 
+            # a result of the last rounds distribution/or the round is 0 and 
+            # they have a quota on first preferences. 
+            for co in nonsupers:
+                if co in order_q:
+                    rq = order_q[co]
+
+                    if rq == r:
+                        model.addCons(vcr[co,r] >= quota)
+                
 
             # Note that it is not necessarily true that the candidate, of
             # those with a quota, that has the highest tally is the one that
@@ -406,8 +371,8 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
                 model.addCons((tvalue[r]-epsilon)*vcr[ce,r]<=(vcr[ce,r]-quota))
                 model.addCons((tvalue[r]+epsilon)*vcr[ce,r]>=(vcr[ce,r]-quota))
 
-    sum_ps = 0
-    sum_ms = 0
+    sum_ps: Any = 0
+    sum_ms: Any = 0
 
     for b in classes:
         ps[b.num] = model.addVar(vtype="C", lb=0, ub=upperbound, \
@@ -439,8 +404,8 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
 
         # Populate tallies[] expressions, defining who has this ballot
         # in different rounds.
-        distribute_ballots_t(0, R, ballotwith, cp_ballotwith, withindex,
-            ys[b.num], b, lballot, LAST_ROUND, winners, tvalue, nqcr, qcr, \
+        distribute_ballots_t(R, ballotwith, cp_ballotwith, withindex,
+            ys[b.num], b, lballot, LAST_ROUND, winners, tvalue,
             tallies, rem, candpos, order_q)
   
     # Constraint enforces consistency  

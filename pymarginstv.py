@@ -77,6 +77,10 @@ if __name__ == "__main__":
 
     parser.add_argument("-ub", type=int, default=None)
 
+    # Input: whether to include quota achievement as part of the order
+    # prefixes created and searched through by the margin computation method.
+    parser.add_argument("-useqprefix", action='store_true', default=False)
+
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
 
@@ -103,19 +107,12 @@ if __name__ == "__main__":
     order_c: list[int] = []
     order_a: list[int] = []
 
-    # Map between candidates who win on a quota, and the range of rounds
-    # in which they could have achieved their quota (with a -1 representing
-    # a candidate who may have had a quota on first preferences. For example,
-    # order_q[w] = (-1,0) says that w could have had their quota on first
-    # preferences or they could have achieved it through the vote transfers
-    # in round 0.
-    order_q: dict[int, int] = {}
     winners: list[int] = []
 
     # Simulate election, return quota, candidate tallies per round, and
     # the total valid ballots cast.
     quota, tallies, totvotes = simulate_stv(ballots, candidates, args.seats,\
-        order_c, order_a, order_q, winners, log=log)
+        order_c, order_a, winners, log=log)
 
     if args.just_sim:
         if log != None:

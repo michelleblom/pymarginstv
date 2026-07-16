@@ -1133,7 +1133,7 @@ def run_audit():
             # if path.endswith(".blt"):
             #     candidates, ballots, _, cid2num, totvotes, seats = read_ballots_blt(path)
             # print(f"{displayname}, {len(candidates)}, {seats}, {counter}"); continue
-            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}_wQuotaPrefixes_OnElimNoQuotas_Claude.log", '-s', str(seats),
+            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}.log", '-s', str(seats),
                         '-pc', '1', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
             if version >= 0:  # new ub
                 args += ['-ub', str(ubs[displayname])]
