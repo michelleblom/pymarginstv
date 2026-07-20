@@ -213,7 +213,7 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
 
     R = len(order_c)
 
-    cands = order_c + rem
+    cands = order_c + rem_cands
     N = len(candidates)
 
     # Rework order_c/order_a on the basis of LAST_ROUND
