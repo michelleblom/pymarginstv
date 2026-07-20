@@ -41,6 +41,11 @@ ChildResult = tuple[bool, list[int], list[int], dict[int, QRange], float, \
 FNodeData = tuple[list[int], list[int], dict[int, QRange], list[int], \
     set[int], float]
 
+# Argument tuple for eval_child(): (parent_dist, order_c, order_a, order_q,
+# winners, rem, isleaf, running_ub).
+ChildArgs = tuple[float, list[int], list[int], dict[int, QRange], \
+    set[int], list[int], bool, float]
+
 
 def outcome_signature(order_c: list[int], order_a: list[int], \
     order_q: dict[int, QRange]) -> Signature:
@@ -1067,7 +1072,11 @@ def treestv(ballots: list[Ballot], candidates: list[Candidate], \
         args         : Command line arguments (args.agap gives the gap
                        between the running lower and upper bounds on the
                        margin at which we terminate the branch-and-bound
-                       algorithm; args.limit gives the max solve time).
+                       algorithm; args.limit gives the max solve time;
+                       args.pc gives the number of worker processes;
+                       args.para selects whether parallelism is applied
+                       across frontier nodes or across the children of a
+                       single expanded node).
 
         quota        : Quota for the election
 
@@ -1104,8 +1113,14 @@ def treestv(ballots: list[Ballot], candidates: list[Candidate], \
     initargs = (ballots, lite_cands, winner_set, ncands, args, quota, \
         tot_ballots, list(order_c), list(order_a))
 
-    # Set up the evaluation context in this process too, for args.pc == 1.
+    # Set up the evaluation context in this process too, for args.pc == 1
+    # and for generate_children() when parallelising over children.
     _init_worker(*initargs)
+
+    # Where to apply parallelism (see the -para flag): 'nodes' expands up
+    # to args.pc frontier nodes concurrently, 'children' expands one node
+    # at a time and evaluates its children concurrently.
+    par_children = getattr(args, 'para', 'nodes') == 'children'
 
     pool = None
     if args.pc > 1:
@@ -1218,8 +1233,12 @@ def treestv(ballots: list[Ballot], candidates: list[Candidate], \
                 converged = True
                 break
 
-            # Expand node with smallest assigned distance (first in frontier)
-            fnodes = frontier.pop(args.pc)
+            # Expand node(s) with smallest assigned distance (first in
+            # frontier). In 'nodes' mode we pop up to args.pc nodes and
+            # expand them in parallel (each worker evaluating all children
+            # of its node); in 'children' mode we pop a single node and
+            # parallelise the evaluation of its children instead.
+            fnodes = frontier.pop(1 if par_children else args.pc)
             nexps += 1
 
             toexpand: list[tuple[FNodeData, float]] = []
@@ -1233,10 +1252,13 @@ def treestv(ballots: list[Ballot], candidates: list[Candidate], \
                 toexpand.append(((fn.order_c, fn.order_a, fn.order_q, \
                     fn.rem, fn.winners, fn.dist), running_ub))
 
-            if pool is not None:
-                expanded = pool.starmap(expand_node, toexpand)
-            else:
+            if pool is None:
                 expanded = [expand_node(*t) for t in toexpand]
+            elif par_children:
+                expanded = [pool.starmap(eval_child, \
+                    generate_children(*t)) for t in toexpand]
+            else:
+                expanded = pool.starmap(expand_node, toexpand)
 
             for child_results in expanded:
 
@@ -1526,15 +1548,20 @@ def eval_child(parent_dist: float, node_order_c: list[int], \
         lowerbound, disp_lowerbound, eqlb, dist, dist_ub, rem, node_winners, True
 
 
-def expand_node(fnode_data: FNodeData, running_ub: float) \
-    -> list[ChildResult]:
+def generate_children(fnode_data: FNodeData, running_ub: float) \
+    -> list[ChildArgs]:
+    """
+        Generate the argument tuples for eval_child() for every child of
+        the given frontier node (each candidate that can be appended to
+        the node's outcome prefix, seated or eliminated, yields one or
+        more children), without evaluating them.
+    """
     assert _CTX is not None
     _, candidates, winner_set, ncands, args, _, _, _, _ = _CTX
 
     forder_c, forder_a, forder_q, frem, fwinners, fdist = fnode_data
 
-    children: list[tuple[float, list[int], list[int], dict[int, QRange], \
-        set[int], list[int], bool, float]] = []
+    children: list[ChildArgs] = []
 
     # Add a candidate to the end of the outcome prefix represented
     # by the selected node. That candidate can either be seated or
@@ -1601,10 +1628,9 @@ def expand_node(fnode_data: FNodeData, running_ub: float) \
                     children.append((fdist, node_order_c, node_order_a, \
                         node_order_q, node_winners, new_rem, isleaf, running_ub))
 
+    return children
 
-    result: list[ChildResult] = []
 
-    for c in children:
-        result.append(eval_child(*c))
-
-    return result
+def expand_node(fnode_data: FNodeData, running_ub: float) \
+    -> list[ChildResult]:
+    return [eval_child(*c) for c in generate_children(fnode_data, running_ub)]

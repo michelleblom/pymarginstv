@@ -56,6 +56,14 @@ if __name__ == "__main__":
     # Input: Number of children to evaluate in parallel, default 1
     parser.add_argument('-pc', type=int, default=1)
 
+    # Input: where to apply parallelism during the search (when -pc > 1).
+    # 'nodes': expand up to -pc frontier nodes in parallel, with each
+    # worker evaluating all children of its node ('nodes', the default);
+    # 'children': expand one frontier node at a time and evaluate its
+    # children in parallel across -pc workers.
+    parser.add_argument('-para', choices=['nodes', 'children'], \
+        default='nodes')
+
     # Input: max solve time (s) for algorithm 
     parser.add_argument('-limit', type=int, default=10000)
 

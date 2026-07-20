@@ -487,6 +487,13 @@ data_aus_small = [
     ("FedAus22/2022NT.json", 2)
 ]
 
+data_test_set = [
+   ("Scotland/2007/GCC_07_Anderson_ballots.txt", 4), ("Scotland/2007/GCC_07_Baillieston_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_Calton_ballots.txt", 3), ("Scotland/2007/GCC_07_Canal_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_Craigton_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_Partick_ballots.txt", 4), ("Scotland/2007/GCC_07_Pollockshields_ballots.txt", 3)
+        ]
+
 
 datascotland= [
     ("Scotland/2007/GCC_07_Anderson_ballots.txt", 4), ("Scotland/2007/GCC_07_Baillieston_ballots.txt", 4),
@@ -1115,14 +1122,15 @@ def run_audit():
     # 4 == new without lse, aka New+DLB
     # 5 == new without dlb, aka New+LSE
     # 6 == new without dlb and lse, aka New
-    # 7 == new + Both + useqprefix
+    # 7 == new + Both + useqprefix (para -- expand nodes)
+    # 8 == new + Both + useqprefix + para(eval children)
     # versions = [4, 5, 6, 0, 3, -1, -3]
     #versions = [4, 5, 6, 0, 3, -1]
-    versions=[7]
+    versions=[7, 8]
     print(
         "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb, new_ub")
     for version in versions:
-        for (datafile, seats) in data_aus_big:
+        for (datafile, seats) in data_test_set:
             if "example" in datafile:
                 path = "./data/" + datafile
             else:
@@ -1135,7 +1143,7 @@ def run_audit():
             #     candidates, ballots, _, cid2num, totvotes, seats = read_ballots_blt(path)
             # print(f"{displayname}, {len(candidates)}, {seats}, {counter}"); continue
             args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}.log", '-s', str(seats),
-                        '-pc', '1', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
+                        '-pc', '5', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
             if version >= 0 and displayname in ubs:  # new ub
                 args += ['-ub', str(ubs[displayname])]
             if abs(version) == 3:  # new
@@ -1148,6 +1156,8 @@ def run_audit():
                 args += ['-eqlb']
             if version == 7:
                 args += ['-lse', '-eqlb', '-dlb', '-useqprefix']
+            if version == 8:
+                args += ['-lse', '-eqlb', '-dlb', '-useqprefix', '-para', 'children']
 
 
             for _ in range(reps):
