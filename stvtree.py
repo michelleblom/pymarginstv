@@ -1584,7 +1584,16 @@ def expand_node(fnode_data: FNodeData, running_ub: float) \
                     forder_q, node_winners, new_rem, isleaf, running_ub))
             else:
                 if args.useqprefix:
-                    for i in range(len(node_order_a)-1, -1, -1):
+                    # Quota-round variants for r: any round in the run of
+                    # consecutive seatings ending at r's own round. Scan
+                    # from r's round (index len(forder_a)), not from the
+                    # end of node_order_a: when this child fills the last
+                    # seat, node_order_a has just been padded with the
+                    # remaining eliminations, and scanning from the padded
+                    # end would break immediately and generate no child at
+                    # all, silently dropping every leaf outcome that ends
+                    # with a seating.
+                    for i in range(len(forder_a), -1, -1):
                         if node_order_a[i] == 1:
                             node_order_q = {**forder_q, r : (i, i)}
                             children.append((fdist, node_order_c, node_order_a, \
