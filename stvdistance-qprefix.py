@@ -225,6 +225,14 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
 
         R = LAST_ROUND + 1
 
+    last_seating_block_start = N
+    if order_a[-1] == 1:
+        for i in range(len(order_c)-1, -1, -1):
+            if order_a[i] == 1:
+                last_seating_block_start = i
+            else:
+                break
+
 
     # Form equivalence classes over ballots. 
     classes, _, class_map = gen_equivalence_classes(order_c, rem, N)
@@ -344,6 +352,12 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
 
                     if rq == r:
                         model.addCons(vcr[co,r] >= quota)
+
+                    elif r < last_seating_block_start and rq > r:
+                        model.addCons(vcr[co,r] <= quota-epsilon)
+                elif r < last_seating_block_start and candpos[co] > r:
+                    model.addCons(vcr[co,r] <= quota-epsilon)
+
                 
 
             # Note that it is not necessarily true that the candidate, of
