@@ -31,23 +31,26 @@ QRange = tuple[int, int]
 # Canonical outcome-prefix signature: see outcome_signature().
 Signature = tuple[tuple[Any, ...], frozenset[tuple[int, QRange]]]
 
-# Result of evaluating a child node in eval_child(): (isleaf, order_c,
-# order_a, order_q, lb, dlb, eqlb, dist, dist_ub, rem, winners, solved).
-ChildResult = tuple[bool, list[int], list[int], dict[int, QRange], float, \
-    float, float, Optional[float], Optional[float], list[int], set[int], bool]
-
 class EqlbCtx(NamedTuple):
     N: int                       # number of candidates
-    transfer: dict[int, float]   # Transfer values of prefix winners
+    transfer: dict[int, tuple[float,float]]   # Transfer values of prefix winners
     elim_lb: float               # elim_lb accumulated over prefix rounds
     quota_lb: float              # quota_lb accumulated over prefix rounds
     no_quota_lb: float           # noquota_lb accumulated over prefix rounds
+    nq_cons_added: list[set[int]] # For each prior round, candidates for whom 
+                                  # no quota constraints were added
     winners: set[int]
     gone: list[int]
     gone_set: set[int]
     gone_pos: dict[int, int]
 
     round: int                   # last round in which context was updated.
+
+# Result of evaluating a child node in eval_child(): (isleaf, order_c,
+# order_a, order_q, lb, dlb, eqlb, dist, dist_ub, rem, winners, solved).
+ChildResult = tuple[bool, Optional[EqlbCtx], list[int], list[int], dict[int, QRange], float, \
+    float, float, Optional[float], Optional[float], list[int], set[int], bool]
+
 
 # Frontier node data shipped to expand_node(): (order_c, order_a, order_q,
 # rem, winners, dist).
@@ -112,12 +115,12 @@ class TreeNode:
     dist: Optional[float]
     dist_ub: Optional[float]
     winners: set[int]
-    eqlbctx: EqlbCtx
+    eqlbctx: Optional[EqlbCtx]
     sig: Signature
 
     def __init__(self, order_c: list[int], order_a: list[int], \
         order_q: dict[int, QRange], winners: set[int], rem: list[int], \
-        eqlbctx: EqlbCtx, distance: Optional[float], dist_ub: Optional[float]) -> None:
+        eqlbctx: Optional[EqlbCtx], distance: Optional[float], dist_ub: Optional[float]) -> None:
 
         self.id = None
 
@@ -341,6 +344,175 @@ def compute_last_round(order_c: list[int], order_a: list[int], seats: int, \
     return min(loc - 1, LAST_ROUND)
 
 
+def NVcompute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike], \
+    ballots: list[Ballot], order_c: list[int], order_a: list[int], \
+    quota: int, order_q: dict[int, QRange]) -> EqlbCtx:
+    """
+    This function calculates the lower bound on the number of votes that need to be changed
+    to alter the outcome of an election prefix. It does this by considering the elimination and quota
+    constraints of the election.
+
+    Parameters:
+    cands (list): A list of Candidate objects representing the candidates in the election.
+    ballots (list): A list of Ballot objects representing the ballots cast in the election.
+    order_c (list): A list representing the order in which candidates were eliminated or seated.
+    order_a (list): A list of 0s and 1s indicating whether a candidate was eliminated (0) or 
+                    seated (1) in each round.
+    quota (int): The quota for the election, i.e., the minimum number of votes a candidate 
+                 needs to win a seat.
+    order_q (dict): A dictionary mapping winning candidates to the range (earliest, latest) of 
+                    rounds in which they could first have a quota at the start of the round (degenerate 
+                    in q-prefix mode).
+
+    Returns:
+    tuple: The lower bound on the number of votes that need to be changed to alter the outcome of 
+           the election prefix, and a map from each seated winner to their transfer value.
+    """
+
+    last_seating_block: set[int] = set()
+    if order_a[-1] == 1:
+        for i in range(len(order_c)-1, -1, -1):
+            if order_a[i] == 1:
+                last_seating_block.add(order_c[i])
+            else:
+                break
+
+    elim_lb = eqlbctx.elim_lb
+    quota_lb = eqlbctx.quota_lb
+    no_quota_lb = eqlbctx.no_quota_lb
+    nq_cons_added = [{*eqlbctx.nq_cons_added[i]} for i in range(eqlbctx.N)]
+    transfer = {**eqlbctx.transfer}    
+    gone = [*eqlbctx.gone]
+    gone_set = {*eqlbctx.gone_set}
+    gone_pos = {**eqlbctx.gone_pos}  
+    winners = {*eqlbctx.winners}
+    start = eqlbctx.round
+
+    PXLEN = len(order_c)
+    # Check: did we just come out of a sequence of at least two seatings and are now eliminating
+    # a candidate? If so, check whether we need to compute some additional no-quota bounds.
+    if PXLEN >= 3:
+        # Does the tail of order_a look like this: [1, 1, 0]
+        if order_a[-3:] == [1, 1, 0] or start < PXLEN - 1:
+            # jump to last election
+            j = PXLEN - 2
+            while j >= 0 and order_a[j] != 1:
+                 j -= 1
+            while j >= 0 and order_a[j] == 1:     
+                 nqlb, nqs = backcompute_nq_bound(j, eqlbctx, cands, ballots, order_c, order_q, quota)
+                 no_quota_lb = max(no_quota_lb, nqlb)
+                 nq_cons_added[j].update(nqs)
+                 j -= 1
+
+    for i in range(start, PXLEN):
+        ce = order_c[i]
+
+        if order_a[i] == 0:  # candidate eliminated
+            if i == 0:
+                tallies: list[float] = [cand.fp_votes for cand in cands]
+            else:
+                tallies: list[float] = [0] * eqlbctx.N
+                for b in ballots:
+                    first = -1
+                    for p in b.prefs:
+                        if p not in gone_set:
+                            first = p
+                            break
+
+                    if first == -1:  # ballot is exhausted
+                        continue
+
+                    ev_add, _ = calc_tallies_q_prefix(b, gone, transfer, winners, order_q,\
+                        gone_pos)
+
+                    tallies[first] += ev_add
+
+            # No one should have a quota
+            no_quota_lb = max(0, tallies[ce] - quota)
+            others = [c.num for c in cands if c.num not in gone_set and c.num != ce]
+            for c in others:
+                elim_lb = max(elim_lb, max(0, 0.5 * (tallies[ce] - tallies[c])))
+                no_quota_lb = max(no_quota_lb, max(0, tallies[c] - quota))
+                nq_cons_added[i].add(c)
+
+
+        else:  # candidate seated
+
+            if i == 0:
+                min_tallies: list[float] = [cand.fp_votes for cand in cands]
+                max_tallies = min_tallies
+            else:
+                min_tallies: list[float] = [0] * eqlbctx.N
+                max_tallies: list[float] = [0] * eqlbctx.N
+
+                for b in ballots:
+                    sv_add = None
+                    move_through_lsb = False
+                    move_r = -1
+                    for p in b.prefs:
+                        if p in gone_set:
+                            continue
+
+                        if sv_add is None:
+                            sv_add, move_r = calc_tallies_q_prefix(b, gone, \
+                                transfer, winners, order_q, gone_pos)
+
+                        if p in order_q:
+                            if order_q[p][0] > move_r:
+                                # p cannot have a quota yet in any scenario:
+                                # the ballot stays with p.
+                                min_tallies[p] += sv_add
+                                max_tallies[p] += sv_add
+                                break
+                            else:
+                                continue
+
+                        if p in last_seating_block:
+                            max_tallies[p] += sv_add
+                            move_through_lsb = True
+                            continue
+
+                        if not move_through_lsb:
+                            min_tallies[p] += sv_add
+
+                        max_tallies[p] += sv_add
+                        break
+
+            rem = [c.num for c in cands if c.num not in gone_set]
+            for c in rem:
+                if c in order_q and order_q[c][0] <= i:
+                    quota_lb = max(quota_lb, quota - max_tallies[c])
+
+            if ce in order_q:  # candidate got a quota, else seated by default (last round)
+                winners.add(ce)
+
+                # Min/max tally should be the same
+                mint,maxt = min_tallies[ce],max_tallies[ce]
+                assert(abs(maxt-mint)<= epsilon)
+                cmax = maxt
+                value = max(cmax, quota)  # restrict value to be at lest quota
+                tv = (value - quota)/value
+                transfer[ce] = (tv, tv)
+
+                # cost to displace the candidate with largest tally that is also above quota only active if
+                # no eliminations/seatings has happened
+                displacement_cost: float = 0
+                if not gone:  # no eliminations or seatings yet
+                    fp_others_max = max([cands[c.num].fp_votes for c in cands \
+                                         if c.num not in gone_set and c.num != ce])
+                    # if someone has reached quota, we need to surpass their votes
+                    displacement_cost = max(0, 0.5 * (fp_others_max - cmax))  
+
+                quota_lb = max(quota_lb, quota - cmax, displacement_cost)
+
+        gone.append(ce)
+        gone_set.add(ce)
+        gone_pos[ce] = i
+
+    return EqlbCtx(eqlbctx.N, transfer, elim_lb, quota_lb, no_quota_lb, nq_cons_added, \
+                   winners, gone, gone_set, gone_pos, len(order_c))
+
+
 def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike], \
     ballots: list[Ballot], order_c: list[int], order_a: list[int], \
     quota: int, order_q: dict[int, QRange]) -> EqlbCtx:
@@ -387,15 +559,11 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
     start = 0
 
 
-    #elim_lb = eqlbctx.elim_lb
-    #quota_lb = eqlbctx.quota_lb
-    #no_quota_lb = eqlbctx.no_quota_lb
-    #transfer = {**eqlbctx.transfer}    
-    #gone = [*eqlbctx.gone]
-    #gone_set = {*eqlbctx.gone_set}
-    #gone_pos = {**eqlbctx.gone_pos}  
-    #winners = {*eqlbctx.winners}
-    #start = eqlbctx.round
+    #if order_c == [9,2] and order_a == [1,1] and order_q == {9: (0, 0), 2: (1, 1), 0: (0, 0)}:
+    #    print("stop here")
+
+    #alt_ctx = NVcompute_elim_quota_lb_STV26_q_prefix(eqlbctx, cands, ballots, order_c, order_a, quota, \
+    #                                                order_q)
 
     for i in range(start, len(order_c)):
         ce = order_c[i]
@@ -439,6 +607,7 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
                 for b in ballots:
                     sv_add = None
                     move_through_lsb = False
+                    move_r = -1
                     for p in b.prefs:
                         if p in gone_set:
                             continue
@@ -486,7 +655,8 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
                 assert(abs(maxt-mint)<= epsilon)
                 cmax = maxt
                 value = max(cmax, quota)  # restrict value to be at lest quota
-                transfer[ce] = (value - quota)/value
+                tv = (value - quota)/value
+                transfer[ce] = (tv,tv)
 
                 # cost to displace the candidate with largest tally that is also above quota only active if
                 # no eliminations/seatings has happened
@@ -503,11 +673,68 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
         gone_set.add(ce)
         gone_pos[ce] = i
 
-    return EqlbCtx(eqlbctx.N, transfer, elim_lb, quota_lb, no_quota_lb, winners, gone, gone_set, \
-                   gone_pos, len(order_c))
+    #if alt_ctx.elim_lb != elim_lb:
+    #    print("Diff in elim_lb for {}/{}/{} {} vs {}", order_c, order_a, order_q, elim_lb, alt_ctx.elim_lb)
+
+    #if alt_ctx.quota_lb != quota_lb:
+    #    print("Diff in quota_lb for {}/{}/{} {} vs {}", order_c, order_a, order_q, quota_lb, alt_ctx.quota_lb) 
+
+    #if alt_ctx.no_quota_lb != no_quota_lb:
+    #    print("Diff in no_quota_lb for {}/{}/{} {} vs {}", order_c, order_a, order_q, no_quota_lb, alt_ctx.no_quota_lb)       
+
+    return EqlbCtx(eqlbctx.N, transfer, elim_lb, quota_lb, no_quota_lb, [], #alt_ctx.nq_cons_added, \
+                   winners, gone, gone_set, gone_pos, len(order_c))
 
 
-def calc_tallies_q_prefix(b: Ballot, gone: list[int], transfer: dict[int, float], \
+def backcompute_nq_bound(i : int, ctx : EqlbCtx, cands: Sequence[CandidateLike], ballots: list[Ballot],\
+                         order_c : list[int], order_q: dict[int, QRange], quota : int):
+
+    gone = order_c[:i+1]
+    gone_set = set(gone)
+    rem_qs = [c for c in order_q.keys() if c not in gone_set and order_q[c][0] > i  \
+              and not(c in ctx.nq_cons_added[i])]
+
+    no_quota_lb = 0
+    nq_cons_added = set()
+
+    if rem_qs == []:
+        return no_quota_lb, nq_cons_added
+
+    if i == 0:
+        tallies: list[float] = [cand.fp_votes for cand in cands]
+    else:
+        tallies: list[float] = [0] * ctx.N
+
+        for b in ballots:
+            sv_add = None
+            move_r = -1
+            for p in b.prefs:
+                if p in gone_set:
+                    continue
+    
+                if sv_add is None:
+                    sv_add, move_r = calc_tallies_q_prefix(b, gone, \
+                        ctx.transfer, ctx.winners, order_q, ctx.gone_pos)
+
+                if p in order_q:
+                    if order_q[p][0] > move_r:
+                        tallies[p] += sv_add
+                        break
+                    else:
+                        continue
+
+                tallies[p] += sv_add
+                break
+
+    for c in rem_qs:
+        no_quota_lb = max(no_quota_lb, tallies[c] - quota)
+        nq_cons_added.add(c)
+
+    return no_quota_lb, nq_cons_added
+
+
+
+def calc_tallies_q_prefix(b: Ballot, gone: list[int], transfer: dict[int, tuple[float,float]], \
     winners: Container[int], order_q: dict[int, QRange], \
     gone_pos: Optional[dict[int, int]] = None) -> tuple[float, int]:
     """
@@ -562,7 +789,7 @@ def calc_tallies_q_prefix(b: Ballot, gone: list[int], transfer: dict[int, float]
             # bp skipped, no reduction in ballot value
             bidx += 1
         elif bp == ep:  # ballot is transferred through seating
-            b_value *= transfer[bp]
+            b_value *= transfer[bp][0]
             move_r = eidx
             eidx += 1
             bidx += 1
@@ -615,7 +842,7 @@ def compute_elim_quota_lb_STV26(cands: Sequence[CandidateLike], \
 
             # dict of remaining candidates (eliminated or seated after ce)
             if i == 0:
-                max_others = {c.num: cands[c.num].fp_votes for c in cands if c.num != ce}
+                max_others : dict[int,float] = {c.num: cands[c.num].fp_votes for c in cands if c.num != ce}
             else:
                 max_others = {c.num: 0 for c in cands if c.num not in gone_set and c.num != ce}
 
@@ -759,7 +986,7 @@ def compute_elim_quota_lb_BST19(cands: Sequence[CandidateLike], \
             min_ce = cands[ce].fp_votes
 
             if i == 0:
-                max_others = {c.num: cands[c.num].fp_votes for c in cands if c.num != ce}
+                max_others : dict[int,float] = {c.num: cands[c.num].fp_votes for c in cands if c.num != ce}
             else:
                 max_others = {c.num: 0 for c in cands if c.num not in gone_set and c.num != ce}
 
@@ -817,7 +1044,7 @@ def compute_elim_quota_lb_BST19(cands: Sequence[CandidateLike], \
 def compute_disp_lb_STV26_q_prefix(candidates: Sequence[CandidateLike], \
     ballots: list[Ballot], node_order_c: list[int], node_order_a: list[int], \
     node_order_q: dict[int, QRange], winner_set: set[int], rem: list[int], \
-    quota: int, seats: int, transfer: dict[int, float]) -> int:
+    quota: int, seats: int, transfer: dict[int, tuple[float,float]]) -> int:
     """
         Consider a prefix where it is clear that at least one original loser
         still standing has to displace one of the original winners still
@@ -1025,7 +1252,7 @@ def compute_disp_lb_STV26(candidates: Sequence[CandidateLike], \
 
     winners = {c for i, c in enumerate(node_order_c) if node_order_a[i] == 1}
 
-    min_r = {c.num: 0 for c in candidates if c.num in rem}
+    min_r : dict[int,float] = {c.num: 0 for c in candidates if c.num in rem}
     filtered_ballots = []
     for b in ballots:
         prefs = [p for p in b.prefs if p in rem]
@@ -1269,7 +1496,7 @@ def treestv(ballots: list[Ballot], candidates: list[Candidate], \
             fnodes = frontier.pop(args.pc)
             nexps += 1
 
-            toexpand: list[tuple[FNodeData, float]] = []
+            toexpand: list[tuple[FNodeData, float]] = [] # pyright: ignore[reportInvalidTypeForm]
 
             # expand nodes until frontier is empty or we have converged
             for fn in fnodes:
@@ -1462,7 +1689,7 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
     orig_prefix = node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == full_order_a[:l]
 
     transfer = None
-    _eqlbctx = EqlbCtx(ncands, {}, 0, 0, 0, set(), [], set(), {}, 0)
+    _eqlbctx = EqlbCtx(ncands, {}, 0, 0, 0, [set()]*ncands, set(), [], set(), {}, 0)
     if args.eqlb:
         if args.useqprefix:
             _eqlbctx = compute_elim_quota_lb_STV26_q_prefix(_eqlbctx, candidates, \
@@ -1516,8 +1743,8 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, node_order_c: list[int], \
     ballots, candidates, winner_set, ncands, args, quota, tot_ballots, \
         _, _ = _CTX
 
-    transfer = None
-    _eqlbctx = None
+    transfer  = None
+    _eqlbctx  = None
     if args.eqlb:
         if args.useqprefix:
             _eqlbctx = compute_elim_quota_lb_STV26_q_prefix(eqlbctx, candidates, \
@@ -1578,8 +1805,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, node_order_c: list[int], \
         lowerbound, disp_lowerbound, eqlb, dist, dist_ub, rem, node_winners, True
 
 
-def expand_node(fnode_data: FNodeData, running_ub: float) \
-    -> list[ChildResult]:
+def expand_node(fnode_data: FNodeData, running_ub: float) -> list[ChildResult]:  # pyright: ignore[reportInvalidTypeForm]
     assert _CTX is not None
     _, candidates, winner_set, ncands, args, _, _, _, _ = _CTX
 
@@ -1645,14 +1871,16 @@ def expand_node(fnode_data: FNodeData, running_ub: float) \
                     # end would break immediately and generate no child at
                     # all, silently dropping every leaf outcome that ends
                     # with a seating.
-                    for i in range(len(forder_a), -1, -1):
-                        if node_order_a[i] == 1:
-                            node_order_q = {**forder_q, r : (i, i)}
-                            children.append((fdist, eqlbctx, node_order_c, node_order_a, \
-                                node_order_q, node_winners, new_rem, isleaf, \
-                                running_ub))
-                        else:
-                            break
+                    LENF = len(forder_a)
+                    minqr = LENF
+                    if forder_a[-1] == 1:
+                        minqr = forder_q[forder_c[-1]][0] 
+
+                    for i in range(LENF, minqr-1, -1):
+                        node_order_q = {**forder_q, r : (i, i)}
+                        children.append((fdist, eqlbctx, node_order_c, node_order_a, \
+                            node_order_q, node_winners, new_rem, isleaf, \
+                            running_ub))
                 else:
                     LAST_ROUND = compute_last_round(node_order_c, \
                         node_order_a, args.seats, ncands)
