@@ -369,47 +369,10 @@ def compute_round_tallies(cands: Sequence[CandidateLike], ballots: list[Ballot],
     return tallies
 
 
-def precompute_round_vals(cands: Sequence[CandidateLike], ballots: list[Ballot], \
-    gone: list[int], gone_set: set[int], transfer: Any, winners: set[int], \
-    order_q: dict[int, QRange], gone_pos: dict[int, int], N: int) \
-    -> tuple[list[float], list[float], list[int]]:
-    """
-    One ballot pass over a parent prefix returning, together:
-      - `tallies`: each still-standing candidate's tally at the start of the new
-        round (serves every ELIMINATION child, as compute_round_tallies does);
-      - `sv`, `mr`: per-ballot (value, move_r) from calc_tallies_q_prefix.
-
-    `sv`/`mr` serve the *top* quota-round SEATING variant of the new round --
-    the one where order_q[ce][0] equals the seating round itself. There the skip
-    test `order_q[ce][0] <= move_r` in calc_tallies_q_prefix can never fire
-    (move_r < that round), so calc_tallies is independent of ce and equals this
-    parent-prefix pass. Lower quota-round variants (only generated when the
-    parent ends in a seating run) are NOT covered and must fall back.
-    """
-    tallies: list[float] = [0.0] * N
-    sv: list[float] = [0.0] * len(ballots)
-    mr: list[int] = [-1] * len(ballots)
-    for bidx, b in enumerate(ballots):
-        first = -1
-        for p in b.prefs:
-            if p not in gone_set:
-                first = p
-                break
-        if first == -1:  # ballot is exhausted: contributes nothing anywhere
-            continue
-        value, move_r = calc_tallies_q_prefix(b, gone, transfer, winners, \
-            order_q, gone_pos)
-        sv[bidx] = value
-        mr[bidx] = move_r
-        tallies[first] += value
-    return tallies, sv, mr
-
-
 def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike], \
     ballots: list[Ballot], order_c: list[int], order_a: list[int], \
     quota: int, order_q: dict[int, QRange], \
-    precomputed_elim_tallies: Optional[list[float]] = None, \
-    precomputed_ballot_vals: Optional[tuple[list[float], list[int]]] = None) -> EqlbCtx:
+    precomputed_elim_tallies: Optional[list[float]] = None) -> EqlbCtx:
     """
     This function calculates the lower bound on the number of votes that need to be changed
     to alter the outcome of an election prefix. It does this by considering the elimination and quota
@@ -495,28 +458,26 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
             if i == 0:
                 min_tallies: list[float] = [cand.fp_votes for cand in cands]
                 max_tallies = min_tallies
+            elif precomputed_elim_tallies is not None and i == start \
+                    and ce in order_q and order_q[ce][0] == i:
+                # Top quota-round variant (ce's quota round == its own seating
+                # round). Then ce's quota round i exceeds every ballot's move_r
+                # (which is < i), so ce is never skipped and stops each ballot
+                # that reaches it -- i.e. it behaves as an ordinary first-standing
+                # stopper; and no last_seating_block member is reachable (the rest
+                # of the block is in `gone`). The min and max tallies therefore
+                # both collapse to the first-standing tallies already computed for
+                # the eliminations, so no ballot walk is needed here.
+                min_tallies = precomputed_elim_tallies
+                max_tallies = precomputed_elim_tallies
             else:
                 min_tallies: list[float] = [0] * eqlbctx.N
                 max_tallies: list[float] = [0] * eqlbctx.N
 
-                # The per-ballot (value, move_r) computed by calc_tallies is
-                # independent of the seated candidate ce iff ce's quota round is
-                # the seating round itself (top variant): then the skip test
-                # order_q[ce][0] <= move_r can never fire (move_r < that round).
-                # In that case an expansion can share one precomputed pass; lower
-                # quota-round variants must recompute (sv_add stays lazy).
-                use_pre = (precomputed_ballot_vals is not None and i == start \
-                    and ce in order_q and order_q[ce][0] == i)
-                pre_sv, pre_mr = precomputed_ballot_vals if use_pre else (None, None)
-
-                for bidx, b in enumerate(ballots):
+                for b in ballots:
+                    sv_add = None
                     move_through_lsb = False
-                    if use_pre:
-                        sv_add = pre_sv[bidx]
-                        move_r = pre_mr[bidx]
-                    else:
-                        sv_add = None
-                        move_r = -1
+                    move_r = -1
                     for p in b.prefs:
                         if p in gone_set:
                             continue
@@ -1611,7 +1572,16 @@ def treestv(ballots: list[Ballot], candidates: list[Candidate], \
                 toexpand.append(((fn.eqlbctx, fn.order_c, fn.order_a, fn.order_q, \
                     fn.rem, fn.winners, fn.dist), running_ub))
 
-            if pool is not None:
+            if pool is not None and getattr(args, "evalpara", False):
+                # Child-granularity parallelism: generate every popped node's
+                # children (with their shared amortisation) here, then evaluate
+                # all children across the pool. Mirrors the initial frontier.
+                all_specs = [c for t in toexpand for c in generate_children(*t)]
+                flat = pool.starmap(eval_child, all_specs)
+                expanded = [flat]
+            elif pool is not None:
+                # Node-granularity parallelism: each worker expands one node
+                # (generating and evaluating its children).
                 expanded = pool.starmap(expand_node, toexpand)
             else:
                 expanded = [expand_node(*t) for t in toexpand]
@@ -1848,8 +1818,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, node_order_c: list[int], \
                node_order_a: list[int], node_order_q: dict[int, QRange], \
                node_winners: set[int], rem: list[int], isleaf: bool, \
                running_ub: float, precomputed_disp: Optional[float] = None, \
-               precomputed_elim_tallies: Optional[list[float]] = None, \
-               precomputed_ballot_vals: Optional[tuple[list[float], list[int]]] = None) \
+               precomputed_elim_tallies: Optional[list[float]] = None) \
                -> ChildResult:
     assert _CTX is not None
     ballots, candidates, winner_set, ncands, args, quota, tot_ballots, \
@@ -1861,7 +1830,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, node_order_c: list[int], \
         if args.useqprefix:
             _eqlbctx = compute_elim_quota_lb_STV26_q_prefix(eqlbctx, candidates, \
                 ballots, node_order_c, node_order_a, quota, node_order_q, \
-                precomputed_elim_tallies, precomputed_ballot_vals)
+                precomputed_elim_tallies)
         else:
             _eqlbctx = compute_elim_quota_lb_STV26(eqlbctx, candidates, ballots, \
                 node_order_c, node_order_a, quota, node_order_q)
@@ -1922,15 +1891,20 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, node_order_c: list[int], \
         lowerbound, disp_lowerbound, eqlb, dist, dist_ub, rem, node_winners, True
 
 
-def expand_node(fnode_data: FNodeData, running_ub: float) -> list[ChildResult]:  # pyright: ignore[reportInvalidTypeForm]
+def generate_children(fnode_data: FNodeData, running_ub: float) -> list:  # pyright: ignore[reportInvalidTypeForm]
+    """
+    Build the list of eval_child argument tuples for one frontier node,
+    including the per-expansion amortisation (build_disp_cache / round tallies).
+    Does NOT evaluate the children -- see expand_node (node-granularity
+    parallelism) and the --evalpara path in treestv (child-granularity).
+    """
     assert _CTX is not None
     ballots, candidates, winner_set, ncands, args, quota, _, _, _ = _CTX
 
     eqlbctx, forder_c, forder_a, forder_q, frem, fwinners, fdist = fnode_data
 
     children: list[tuple[float, EqlbCtx, list[int], list[int], dict[int, QRange], \
-        set[int], list[int], bool, float, Optional[float], Optional[list[float]], \
-        Optional[tuple[list[float], list[int]]]]] = []
+        set[int], list[int], bool, float, Optional[float], Optional[list[float]]]] = []
 
     # Displacement-LB amortisation: every eliminate child of this node shares
     # the same per-ballot values (eliminations never rescale a ballot), so we
@@ -1942,17 +1916,16 @@ def expand_node(fnode_data: FNodeData, running_ub: float) -> list[ChildResult]: 
         disp_cache = build_disp_cache(candidates, ballots, forder_c, forder_a, \
             forder_q, frem, eqlbctx.transfer)
 
-    # eqlb amortisation: one ballot pass over the parent prefix yields both the
-    # elimination-round tallies (shared by every eliminate child) and per-ballot
-    # (value, move_r) which serve the top quota-round seating variant of each
-    # seated candidate (see precompute_round_vals).
+    # eqlb amortisation: one ballot pass over the parent prefix gives the
+    # first-standing tally of each still-standing candidate at the new round.
+    # This serves every elimination child directly, and (see the seating branch
+    # of compute_elim_quota_lb_STV26_q_prefix) also serves the top quota-round
+    # seating variant of each candidate, where min == max == these tallies.
     elim_tallies = None
-    ballot_vals = None
     if args.eqlb and args.useqprefix:
-        elim_tallies, _sv, _mr = precompute_round_vals(candidates, ballots, \
-            eqlbctx.gone, eqlbctx.gone_set, eqlbctx.transfer, eqlbctx.winners, \
-            forder_q, eqlbctx.gone_pos, ncands)
-        ballot_vals = (_sv, _mr)
+        elim_tallies = compute_round_tallies(candidates, ballots, eqlbctx.gone, \
+            eqlbctx.gone_set, eqlbctx.transfer, eqlbctx.winners, forder_q, \
+            eqlbctx.gone_pos, ncands)
 
     # Add a candidate to the end of the outcome prefix represented
     # by the selected node. That candidate can either be seated or
@@ -2006,7 +1979,7 @@ def expand_node(fnode_data: FNodeData, running_ub: float) -> list[ChildResult]: 
                         forder_c, forder_a, winner_set, frem, quota, args.seats)
                 children.append((fdist, eqlbctx, node_order_c, node_order_a, \
                     forder_q, node_winners, new_rem, isleaf, running_ub, disp_val, \
-                    elim_tallies, None))
+                    elim_tallies))
             else:
                 if args.useqprefix:
                     # Quota-round variants for r: any round in the run of
@@ -2026,12 +1999,12 @@ def expand_node(fnode_data: FNodeData, running_ub: float) -> list[ChildResult]: 
                     for i in range(LENF, minqr-1, -1):
                         node_order_q = {**forder_q, r : (i, i)}
                         # Only the top variant (i == LENF, quota at the seating
-                        # round) can reuse the shared per-ballot pass; lower
-                        # variants recompute (ballot_vals=None).
-                        bvals = ballot_vals if i == LENF else None
+                        # round) can reuse the shared tallies (min == max ==
+                        # first-standing); lower variants do the full walk.
+                        et = elim_tallies if i == LENF else None
                         children.append((fdist, eqlbctx, node_order_c, node_order_a, \
                             node_order_q, node_winners, new_rem, isleaf, \
-                            running_ub, None, None, bvals))
+                            running_ub, None, et))
                 else:
                     LAST_ROUND = compute_last_round(node_order_c, \
                         node_order_a, args.seats, ncands)
@@ -2040,12 +2013,13 @@ def expand_node(fnode_data: FNodeData, running_ub: float) -> list[ChildResult]: 
                         node_winners, order_c_index)
                     children.append((fdist, eqlbctx, node_order_c, node_order_a, \
                         node_order_q, node_winners, new_rem, isleaf, running_ub, \
-                        None, None, None))
+                        None, None))
 
 
-    result: list[ChildResult] = []
+    return children
 
-    for c in children:
-        result.append(eval_child(*c))
 
-    return result
+def expand_node(fnode_data: FNodeData, running_ub: float) -> list[ChildResult]:  # pyright: ignore[reportInvalidTypeForm]
+    """Node-granularity expansion: generate this node's children and evaluate
+    them (serially within this call). Used when parallelism is over nodes."""
+    return [eval_child(*c) for c in generate_children(fnode_data, running_ub)]

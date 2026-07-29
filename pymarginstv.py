@@ -81,6 +81,13 @@ if __name__ == "__main__":
     # prefixes created and searched through by the margin computation method.
     parser.add_argument("-useqprefix", action='store_true', default=False)
 
+    # Parallelism granularity for the branch-and-bound expansion phase.
+    # Default (off): parallelise over node expansion (one worker per popped
+    # node). With --evalpara: parallelise over child evaluation (eval_child)
+    # across all children of the popped nodes. Only has effect when -pc > 1.
+    parser.add_argument("-evalpara", "--evalpara", dest='evalpara', \
+        action='store_true', default=False)
+
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
 
