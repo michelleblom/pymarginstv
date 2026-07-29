@@ -297,6 +297,20 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
     candpos: dict[int, int] = {}
     nonsupers = {c for c in cands if (not c in supers)}
 
+    # Valid, order-independent tally bounds to tighten the nonconvex relaxation:
+    #  - reachable[c]: a candidate can only ever hold ballots that rank them, so
+    #    their tally in any round is <= (reported votes on ballots ranking c) +
+    #    the <= upperbound ballots we may add.
+    #  - fp_by_num[c]: reported first preferences. Round 0 tallies equal first
+    #    preferences in *every* elimination order, so vcr[c,0] is within
+    #    +/- upperbound of fp[c] (only round 0 is order-independent this way).
+    fp_by_num = {cd.num: cd.fp_votes for cd in candidates}
+    reachable = [0.0] * N
+    for cl in classes:
+        for p in set(cl.prefs):
+            if p < N:
+                reachable[p] += cl.votes
+
     tallies: dict[tuple[int, int], Any] = {}
     for c in cands:
         pos = R+1
@@ -310,8 +324,14 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
                 break
 
             # Create variables for tallies of candidates at the start of
-            # each round
-            vcr[c,r] = model.addVar(vtype="C", lb=0, ub=tot_ballots, \
+            # each round, with tightened (but valid) bounds.
+            if r == 0 and c in nonsupers:
+                vlb = max(0.0, fp_by_num[c] - upperbound)
+                vub = min(tot_ballots, fp_by_num[c] + upperbound)
+            else:
+                vlb = 0.0
+                vub = min(tot_ballots, reachable[c] + upperbound)
+            vcr[c,r] = model.addVar(vtype="C", lb=vlb, ub=vub, \
                 name="vcr(%s,%s)"%(c,r))
 
             tallies[c,r] = 0
@@ -395,8 +415,8 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
         ms[b.num] = model.addVar(vtype="C", lb=0, ub=min(upperbound,b.votes),\
             name="ms(%s)"%b.num)
 
-        ys[b.num] = model.addVar(vtype="C", lb=0, ub=tot_ballots, \
-            name="ys(%s)"%b.num)
+        ys[b.num] = model.addVar(vtype="C", lb=0, \
+            ub=min(tot_ballots, b.votes + upperbound), name="ys(%s)"%b.num)
 
         sum_ps += ps[b.num]
         sum_ms += ms[b.num]
