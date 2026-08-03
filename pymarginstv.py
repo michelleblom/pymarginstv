@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import math
 from time import perf_counter
 import time
@@ -70,6 +71,10 @@ if __name__ == "__main__":
 
     # Input: whether to only use lower bounding heuristics during search
     parser.add_argument("-nominlps", action='store_true', default=False)
+
+    # Flag true when we want to solve MINLPs/NLPs for all nodes (if 
+    # pre-computed lowerbounds are less than running RUL/UB)
+    parser.add_argument("-allminlps", action='store_true', default=False)
     
     parser.add_argument("-just_sim", action='store_true', default=False)
 
@@ -107,6 +112,12 @@ if __name__ == "__main__":
 
     else:
         candidates, ballots = read_ballots_txt(args.data)[:2]
+
+    # The ballot list lives for the whole run and is never collectable, but a
+    # cyclic collection still has to traverse all of it. Move it to gc's
+    # permanent generation so it is skipped from here on (this also keeps the
+    # pages shared with forked workers under -pc > 1).
+    gc.freeze()
 
     # Simulated election outcome: order_c contains candidates in order
     # of when they are elected/eliminated; order_a contains a series of 1s/0s

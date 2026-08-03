@@ -487,6 +487,14 @@ data_aus_small = [
     ("FedAus22/2022NT.json", 2)
 ]
 
+data_aus_small_2 = [
+    ("FedAus19/FederalSenate2019NT.json", 2),
+    ("FedAus19/FederalSenate2019ACT.json", 2),
+]
+
+testone = [
+("Scotland/2007/GCC_07_NorthEast_ballots.txt", 4)
+]
 
 datascotland= [
     ("Scotland/2007/GCC_07_Anderson_ballots.txt", 4), ("Scotland/2007/GCC_07_Baillieston_ballots.txt", 4),
@@ -498,6 +506,11 @@ datascotland= [
     ("Scotland/2007/GCC_07_Linn_ballots.txt", 4), ("Scotland/2007/GCC_07_Maryhill_ballots.txt", 4),
     ("Scotland/2007/GCC_07_Newlands_ballots.txt", 3), ("Scotland/2007/GCC_07_NorthEast_ballots.txt", 4),
     ("Scotland/2007/GCC_07_Partick_ballots.txt", 4), ("Scotland/2007/GCC_07_Pollockshields_ballots.txt", 3)
+        ]
+
+scotland_subset = [
+         ("Scotland/2007/GCC_07_Anderson_ballots.txt", 4), ("Scotland/2007/GCC_07_Baillieston_ballots.txt", 4),
+    ("Scotland/2007/GCC_07_Calton_ballots.txt", 3)
         ]
 
 datafiles = [
@@ -1118,7 +1131,7 @@ def run_audit():
     # 7 == new + Both + useqprefix
     # versions = [4, 5, 6, 0, 3, -1, -3]
     #versions = [4, 5, 6, 0, 3, -1]
-    versions=[7]
+    versions=[8]
     print(
         "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb, new_ub")
     for version in versions:
@@ -1134,8 +1147,8 @@ def run_audit():
             # if path.endswith(".blt"):
             #     candidates, ballots, _, cid2num, totvotes, seats = read_ballots_blt(path)
             # print(f"{displayname}, {len(candidates)}, {seats}, {counter}"); continue
-            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}.log", '-s', str(seats),
-                        '-pc', '1', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
+            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}_Post3AugOpt5PC_nominlps1.log", '-s', str(seats),
+                        '-pc', '5', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
             if version >= 0 and displayname in ubs:  # new ub
                 args += ['-ub', str(ubs[displayname])]
             if abs(version) == 3:  # new
@@ -1148,6 +1161,9 @@ def run_audit():
                 args += ['-eqlb']
             if version == 7:
                 args += ['-lse', '-eqlb', '-dlb', '-useqprefix']
+            if version == 8:
+                args += ['-lse', '-eqlb', '-dlb', '-useqprefix', '-nominlps']
+
 
 
             for _ in range(reps):
@@ -1172,7 +1188,7 @@ def run_ub():
     """
     Requires https://github.com/AndrewConway/ConcreteSTV installed in `../ConcreteSTV/target/debug`
     """
-    for (datafile, _) in datafiles:
+    for (datafile, _) in datascotland:
         if "example" in datafile:
             path = "./data/" + datafile
         else:

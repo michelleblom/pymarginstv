@@ -6,8 +6,8 @@ from utils import Ballot, CandidateLike, gen_equivalence_classes, \
     reduce_ballots
 
 import argparse
-import gc
 import math
+import time
 
 from typing import Any, Optional, Sequence
 
@@ -127,6 +127,35 @@ class TerminateAtIntegerSolution(Eventhdlr):
             self.model.interruptSolve()
 
 
+class TerminateOnPruningBound(Eventhdlr):
+    """
+    Interrupt the solve as soon as the dual bound alone decides the tree
+    node's fate. The caller prunes an outcome prefix whenever
+    ceil(dual bound) reaches the running upper bound, so once the bound gets
+    there the (often expensive) remainder of the infeasibility or optimality
+    proof adds nothing.
+    """
+    def __init__(self, model: Any, upperbound: float) -> None:
+        Eventhdlr.__init__(model)
+        self.upperbound = upperbound
+        self.ncalls = 0
+
+    def eventinit(self) -> None:
+        self.model.catchEvent(SCIP_EVENTTYPE.NODESOLVED, self)
+
+    def eventexit(self) -> None:
+        self.model.dropEvent(SCIP_EVENTTYPE.NODESOLVED, self)
+
+    def eventexec(self, event: Any) -> None:
+        # The global bound moves slowly; checking every 64th node keeps the
+        # Python callback overhead negligible on large trees.
+        self.ncalls += 1
+        if self.ncalls & 63:
+            return
+        if math.ceil(self.model.getDualbound()) >= self.upperbound:
+            self.model.interruptSolve()
+
+
 def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
     order_c: list[int], order_a: list[int], rem_cands: list[int],
     winners: set[int], order_q: dict[int, int], merge_map: dict[int, int],
@@ -211,6 +240,8 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
   
     """
 
+    t_start = time.perf_counter()
+
     R = len(order_c)
 
     cands = order_c + rem_cands
@@ -250,9 +281,20 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
     model.setParam("separating/closecuts/separelint", False)
     model.setParam("benders/default/cutstrengthenintpoint", 'i')
 
-    model.includeEventhdlr(TerminateAtIntegerSolution(model), 
+    # Keep handles: includeEventhdlr sets handler.model, so each handler
+    # forms a reference cycle with the model that has to be broken by hand
+    # once solving is done (see the finally block).
+    hdlrs = [TerminateAtIntegerSolution(model),
+             TerminateOnPruningBound(model, upperbound)]
+
+    model.includeEventhdlr(hdlrs[0],
         "terminate_at_integer_solution",
         "Event handler that terminates solving when ceil(primal) == ceil(dual)")
+
+    model.includeEventhdlr(hdlrs[1],
+        "terminate_on_pruning_bound",
+        "Event handler that terminates solving when ceil(dual) reaches the "
+        "caller's pruning threshold")
 
     if isleaf:
         model.setRealParam("limits/time", args.thard)
@@ -452,7 +494,16 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
         for r in range(min(LAST_ROUND+1, pos+1)):
             model.addCons(vcr[c,r] == tallies[c,r])  
                
-    model.addCons(sum_ps <= upperbound)
+    # The manipulation budget enters as an objective cutoff rather than a
+    # linear constraint: SCIP then terminates as soon as the global dual
+    # bound reaches the cutoff (instead of refuting every open node's LP to
+    # certify infeasibility), and the cutoff participates in reduced-cost
+    # fixing and cutoff propagation at every node. Status is "infeasible"
+    # when no manipulation cheaper than the bound exists -- solutions of cost
+    # exactly `upperbound` are excluded, which is sound for the search: an
+    # equal-cost outcome never improves the running upper bound, and the
+    # initial upper bound (WEUB) is attainable by construction.
+    model.setObjlimit(float(upperbound))
     model.addCons(sum_ps >= lowerbound)
 
     #model.includeEventhdlr(TimerHndlr(args.time), "TimelimitReached", \
@@ -466,21 +517,55 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
     model.optimize()
 
     try:
-        if model.getStatus() == "infeasible":
+        status = model.getStatus()
+
+        dual = max(0, int(math.ceil(model.getDualbound())))
+
+        # With an objective limit, SCIP reports the limit itself as the
+        # primal bound (and keeps rejected heuristic solutions in its store),
+        # so a genuine solution exists only when the primal bound is strictly
+        # below the cutoff.
+        primal_raw = model.getPrimalbound()
+        if primal_raw < upperbound - 1e-9:
+            primal = max(0, int(math.ceil(primal_raw)))
+        else:
+            primal = int(model.infinity())  # no usable solution found
+
+        # Sidecar per-solve log: one line per MINLP invocation, appended by
+        # whichever worker ran it, for profiling where solver time goes.
+        # Columns: status, scip_time, wall_time (incl. model build), nnodes,
+        # dual, primal, upperbound, lowerbound, isleaf, prefix_len,
+        # order_c, order_a.
+        #if getattr(args, "log", None):
+        #    try:
+        #        with open(args.log + ".solves.csv", "a") as sf:
+        #            print(f"{status},{model.getSolvingTime():.2f},"
+        #                  f"{time.perf_counter() - t_start:.2f},"
+        #                  f"{model.getNNodes()},{dual},{primal},"
+        #                  f"{upperbound},{lowerbound},{int(isleaf)},"
+        #                  f"{len(order_c)},"
+        #                   f"{'|'.join(map(str, order_c))},"
+        #                  f"{'|'.join(map(str, order_a))}", file=sf)
+        #    except OSError:
+        #        pass
+
+        if status in ("infeasible", "inforunbd"):
             return False, None, None
 
-        else:
-            # As we are usually going to stop solving when we get to an
-            # allowed gap, return lower bound on objective.
-            return True, max(0, int(math.ceil(model.getDualbound()))), \
-                max(0, int(math.ceil(model.getPrimalbound())))
+        # As we are usually going to stop solving when we get to an
+        # allowed gap, return lower bound on objective.
+        return True, dual, primal
     finally:
-        # Release SCIP's memory for this problem immediately: the model and
-        # its event handler form a reference cycle, so without this the C
-        # memory is only freed whenever the cyclic garbage collector runs.
-        # The collect() reclaims the SCIP environments of previous models
-        # whose cycles are still awaiting collection; without it, worker
-        # processes accumulate several MB per solve.
+        # Release SCIP's memory for this problem immediately. Each event
+        # handler holds a back-reference to the model, so the pair is a
+        # reference cycle that plain refcounting cannot reclaim; dropping
+        # that edge lets the model (and its SCIP environment) be freed as
+        # soon as the last name goes away. This used to be handled with a
+        # gc.collect() per solve, which cost roughly as much as building the
+        # model because a full collection has to walk every ballot on the
+        # heap.
         model.freeProb()
+        for h in hdlrs:
+            h.model = None
+        hdlrs.clear()
         del model
-        gc.collect()

@@ -21,7 +21,7 @@ import numpy as np
 import math
 import json
 
-from typing import Iterable, Optional, Protocol, TextIO
+from typing import Any, Iterable, Optional, Protocol, TextIO
 
 
 class CandidateLike(Protocol):
@@ -66,11 +66,28 @@ class Ballot:
         # Number of papers cast of this ballot type.
         self.papers = votes
 
-        # Indexes of each candidate
-        self.ranks: list[int] = [-1]*totcand
+        self._totcand = totcand
+        self._ranks: Optional[list[int]] = None
 
-        for i in range(len(prefs)):
-            self.ranks[prefs[i]] = i
+    @property
+    def ranks(self) -> list[int]:
+        """
+            Index of each candidate in this ballot's ranking, -1 where the
+            candidate is unranked.
+
+            Built on first access rather than in __init__: this is a
+            totcand-length list per ballot, so on a large senate election it
+            is the bulk of the process heap (and of the work every cyclic
+            garbage collection does), while only the displacement bound of
+            the non-quota-prefix model ever reads it.
+        """
+        ranks = self._ranks
+        if ranks is None:
+            ranks = [-1]*self._totcand
+            for i, p in enumerate(self.prefs):
+                ranks[p] = i
+            self._ranks = ranks
+        return ranks
 
     def __str__(self) -> str:
         """
@@ -792,22 +809,45 @@ def reduce_ballots(ncands: int, order_c: list[int], remainder: list[int], \
         candpos[c] = i
         i += 1
 
-    for b in ballots:
-        new_prefs = []
+    # 'remainder' is tested once per preference of every ballot, so a linear
+    # scan of it dominated this function on large instances (an 80 candidate
+    # senate election leaves ~60 candidates outside the prefix).
+    remainder_set = set(remainder)
 
-        np = merge_map[b.prefs[0]]
-        if np in remainder:
+    # merge_map is dense over candidate numbers for every caller (the identity
+    # map on the main search path), so index a list rather than hash a dict.
+    mmap: Any = merge_map
+    if len(merge_map) == ncands:
+        as_list = [0]*ncands
+        for c, mc in merge_map.items():
+            if not 0 <= c < ncands:
+                break
+            as_list[c] = mc
+        else:
+            mmap = as_list
+
+    for b in ballots:
+        prefs = b.prefs
+
+        np = mmap[prefs[0]]
+        if np in remainder_set:
             new_prefs = [np]
-        else:            
+        else:
             new_prefs = [np]
+            seen = {np}
             i = candpos[np]
 
-            for p in b.prefs[1:]:
-                np = merge_map[p]
-                if np in new_prefs:
+            # Iterate prefs[1:] without the slice: it allocated a fresh list
+            # for every ballot on every call.
+            rest = iter(prefs)
+            next(rest)
+
+            for p in rest:
+                np = mmap[p]
+                if np in seen:
                     continue
 
-                if np in remainder:
+                if np in remainder_set:
                     new_prefs.append(np)
                     break
 
@@ -817,8 +857,9 @@ def reduce_ballots(ncands: int, order_c: list[int], remainder: list[int], \
                     continue
 
                 i = j
+                seen.add(np)
                 new_prefs.append(np)
-            
+
         # Get corresponding ballots from rballots
         rcntr = classmap[tuple(new_prefs)]
         rbal = rballots[rcntr]

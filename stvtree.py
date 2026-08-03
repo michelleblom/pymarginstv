@@ -9,6 +9,7 @@ import math
 import numpy as np
 import time
 
+from array import array
 from bisect import bisect_left, bisect_right, insort
 from multiprocessing import Pool
 from typing import Any, Container, NamedTuple, Optional, Sequence, TextIO
@@ -52,9 +53,16 @@ ChildResult = tuple[bool, Optional[EqlbCtx], list[int], list[int], dict[int, QRa
     float, float, Optional[float], Optional[float], list[int], set[int], bool]
 
 
-# Frontier node data shipped to expand_node(): (order_c, order_a, order_q,
-# rem, winners, dist).
-FNodeData = [EqlbCtx, list[int], list[int], dict[int, QRange], list[int], \
+# Aggregates returned by build_disp_cache(): (present, above, curtally,
+# reassign, group_present, group_above). Shared by the two
+# disp_lb_*_from_cache consumers so the shape stays in step with the producer.
+DispCache = tuple[list[float], Any, list[float], list[list[float]], \
+    dict[Any, Any], dict[Any, Any]]
+
+
+# Frontier node data shipped to expand_node(): (eqlbctx, order_c, order_a,
+# order_q, rem, winners, dist).
+FNodeData = tuple[EqlbCtx, list[int], list[int], dict[int, QRange], list[int], \
     set[int], float]
 
 
@@ -152,8 +160,8 @@ class TreeNode:
             action = "e" if self.order_a[r] == 0 else "s"
             if len(quotas[r]) > 0:
               qlist = " ( "
-              for c in quotas[r]:
-                qlist += str(c) + " "
+              for qc in quotas[r]:
+                qlist += qc + " "
               qlist += ")"
               action += qlist
             summary += str(self.order_c[r]) + action + " "
@@ -344,6 +352,192 @@ def compute_last_round(order_c: list[int], order_a: list[int], seats: int, \
     return min(loc - 1, LAST_ROUND)
 
 
+# Largest number of prefix lengths held in a WalkCache. Each one costs
+# len(ballots) * 12 bytes, so a full trailing seating run on a big senate
+# instance is on the order of 20MB per checkpoint. Rounds dropped by this cap
+# simply fall back to walking the ballots.
+_WALK_CACHE_MAX_CKPTS = 6
+
+
+class WalkCache(NamedTuple):
+    """
+    MB: This is claude's comment, needs to be improved as it is not very clear.
+
+    Per-ballot results of the prefix walk (calc_tallies_q_prefix), computed
+    once for an expansion and shared by all of that node's children.
+
+    Every child walks the *parent's* prefix. The seating branch of
+    compute_elim_quota_lb_STV26_q_prefix computes its round tallies before
+    appending the new candidate to `gone`. Children
+    share the parent's transfer/winners/gone_pos, and differ in order_q
+    only by the single entry a seating child adds for the candidate it seats.
+
+    That one entry can perturb a ballot's value only through the quota-skip branch of
+    calc_tallies_q_prefix, which requires prefs[bidx] to be the newly seated
+    candidate r. Because r is still standing, no branch that advances bidx can
+    move past it -- r is not in `gone`, and the parent's order_q has no entry
+    for it -- so the parent's walk *stalls* on r, and move_r cannot change
+    once it does (both of its assignments require prefs[bidx] == gone[eidx]).
+    The parent's walk therefore differs from the child's exactly when it
+    stalled on r at bidx > 0 with move_r >= r's quota round. `stop_index`
+    records where the walks stalled, so that test costs a lookup, not a walk.
+
+    ckpts      : prefix lengths held, ascending; ckpts[-1] == len(gone).
+    values     : per checkpoint, each ballot's value after walking gone[:L].
+    move_rs    : per checkpoint, each ballot's move_r after walking gone[:L].
+    stop_index : candidate -> indices of the ballots whose full walk stalled
+                 on it. Ballots no added order_q entry can perturb are absent
+                 (exhausted, or stalled at bidx == 0, which the quota-skip
+                 branch's bidx > 0 guard excludes).
+    order_q    : the order_q the walk used, for consumers to establish which
+                 entry (if any) their child added.
+    """
+    ckpts: tuple[int, ...]
+    values: list[array]
+    move_rs: list[array]
+    stop_index: dict[int, list[int]]
+    order_q: dict[int, QRange]
+
+    def at(self, gone_len: int) -> Optional[tuple[array, array]]:
+        """
+        Cached (values, move_rs) for a walk over the first `gone_len` rounds
+        of the prefix, or None when that length was not checkpointed.
+        """
+        try:
+            k = self.ckpts.index(gone_len)
+        except ValueError:
+            return None
+        return self.values[k], self.move_rs[k]
+
+
+def build_walk_cache(ballots: list[Ballot], gone: list[int], \
+    transfer: dict[int, tuple[float,float]], winners: set[int], \
+    order_q: dict[int, QRange], gone_pos: dict[int, int], \
+    ckpts: tuple[int, ...]) -> WalkCache:
+    """
+    One instrumented ballot pass building a WalkCache over `gone`. The loop is
+    calc_tallies_q_prefix's, snapshotted each time eidx reaches a checkpointed
+    prefix length. `ckpts` must be ascending with ckpts[-1] == len(gone).
+    """
+    nb = len(ballots)
+    nck = len(ckpts)
+    values = [array('d', [0.0]) * nb for _ in range(nck)]
+    move_rs = [array('i', [0]) * nb for _ in range(nck)]
+    stop_index: dict[int, list[int]] = {}
+
+    ngone = ckpts[-1]
+    get_pos = gone_pos.get
+
+    for k in range(nb):
+        b = ballots[k]
+        prefs = b.prefs
+        nprefs = len(prefs)
+        b_value = b.votes
+
+        bidx = 0
+        eidx = 0
+        move_r = -1
+        ci = 0  # next checkpoint to fill
+
+        while bidx < nprefs and eidx < ngone:
+            bp = prefs[bidx]
+
+            pos = get_pos(bp, -1)
+            if 0 <= pos < eidx:
+                bidx += 1
+                continue
+
+            ep = gone[eidx]
+
+            if ep not in winners:
+                if bp == ep: move_r = eidx
+                eidx += 1
+            elif bidx > 0 and bp in order_q and order_q[bp][0] <= move_r:
+                bidx += 1
+                continue
+            elif bp == ep:
+                b_value *= transfer[bp][0]
+                move_r = eidx
+                eidx += 1
+                bidx += 1
+            else:
+                eidx += 1
+
+            # eidx just advanced: bank any prefix length it completed.
+            while ci < nck and ckpts[ci] == eidx:
+                values[ci][k] = b_value
+                move_rs[ci][k] = move_r
+                ci += 1
+
+        # Ran out of preferences before the last checkpoint: the state is
+        # final, so every remaining checkpoint takes it.
+        while ci < nck:
+            values[ci][k] = b_value
+            move_rs[ci][k] = move_r
+            ci += 1
+
+        if 0 < bidx < nprefs:
+            sc = prefs[bidx]
+            bucket = stop_index.get(sc)
+            if bucket is None:
+                stop_index[sc] = [k]
+            else:
+                bucket.append(k)
+
+    return WalkCache(ckpts, values, move_rs, stop_index, order_q)
+
+
+def extends_order_q(order_q: dict[int, QRange], base: dict[int, QRange], \
+    ce: int) -> bool:
+    """
+    True when `order_q` is `base` plus at most one entry, that entry being for
+    `ce`. This is the condition under which a WalkCache built with `base` can
+    be specialised to a child seating `ce` (see WalkCache).
+    """
+    if order_q is base:
+        return True
+
+    extra = len(order_q) - len(base)
+    if extra < 0 or extra > 1 or (extra == 1 and ce not in order_q):
+        return False
+
+    for c, qr in base.items():
+        if order_q.get(c) != qr:
+            return False
+
+    return True
+
+
+def seating_walk(walk_cache: WalkCache, walk: tuple[array, array], ce: int, \
+    order_q: dict[int, QRange], ballots: list[Ballot], gone: list[int], \
+    transfer: dict[int, tuple[float,float]], winners: set[int], \
+    gone_pos: dict[int, int]) -> tuple[array, array]:
+    """
+    Specialise the parent's cached walk to a child that seats `ce`.
+
+    `ce` is the only order_q entry the cache did not know about, so only
+    ballots whose walk stalled on `ce` with move_r at or past its quota round
+    can move (see WalkCache). Those few are rewalked into a copy.
+    """
+    cvals, cmrs = walk
+
+    if ce not in order_q:  # seated by default: order_q is unchanged
+        return cvals, cmrs
+
+    qr = order_q[ce][0]
+    hits = [k for k in walk_cache.stop_index.get(ce, ()) if cmrs[k] >= qr]
+    if not hits:
+        return cvals, cmrs
+
+    cvals = cvals[:]
+    cmrs = cmrs[:]
+    for k in hits:
+        cvals[k], cmrs[k] = calc_tallies_q_prefix(ballots[k], gone, transfer, \
+            winners, order_q, gone_pos)
+
+    return cvals, cmrs
+
+
 def compute_round_tallies(cands: Sequence[CandidateLike], ballots: list[Ballot], \
     gone: list[int], gone_set: set[int], transfer: Any, winners: set[int], \
     order_q: dict[int, QRange], gone_pos: dict[int, int], N: int) -> list[float]:
@@ -372,7 +566,8 @@ def compute_round_tallies(cands: Sequence[CandidateLike], ballots: list[Ballot],
 def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike], \
     ballots: list[Ballot], order_c: list[int], order_a: list[int], \
     quota: int, order_q: dict[int, QRange], \
-    precomputed_elim_tallies: Optional[list[float]] = None) -> EqlbCtx:
+    precomputed_elim_tallies: Optional[list[float]] = None, \
+    walk_cache: Optional[WalkCache] = None) -> EqlbCtx:
     """
     This function calculates the lower bound on the number of votes that need to be changed
     to alter the outcome of an election prefix. It does this by considering the elimination and quota
@@ -424,8 +619,9 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
             j = PXLEN - 2
             while j >= 0 and order_a[j] != 1:
                  j -= 1
-            while j >= 0 and order_a[j] == 1:     
-                 nqlb, nqs = backcompute_nq_bound(j, eqlbctx, cands, ballots, order_c, order_q, quota)
+            while j >= 0 and order_a[j] == 1:
+                 nqlb, nqs = backcompute_nq_bound(j, eqlbctx, cands, ballots, order_c, order_q, quota, \
+                                                  walk_cache)
                  no_quota_lb = max(no_quota_lb, nqlb)
                  nq_cons_added[j].update(nqs)
                  j -= 1
@@ -471,13 +667,29 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
                 min_tallies = precomputed_elim_tallies
                 max_tallies = precomputed_elim_tallies
             else:
-                min_tallies: list[float] = [0] * eqlbctx.N
-                max_tallies: list[float] = [0] * eqlbctx.N
+                min_tallies = [0.0] * eqlbctx.N
+                max_tallies = [0.0] * eqlbctx.N
 
-                for b in ballots:
-                    sv_add = None
+                # The expansion's walk cache already holds every ballot's walk
+                # over this prefix; `ce` is the one order_q entry it did not
+                # know about, and seating_walk patches in the few ballots it
+                # can perturb. Without a cache each ballot walks on demand,
+                # as before.
+                walk = None
+                if walk_cache is not None and i == start \
+                        and extends_order_q(order_q, walk_cache.order_q, ce):
+                    walk = walk_cache.at(len(gone))
+                    if walk is not None:
+                        walk = seating_walk(walk_cache, walk, ce, order_q, \
+                            ballots, gone, transfer, winners, gone_pos)
+
+                if walk is not None:
+                    walks: Any = zip(ballots, walk[0], walk[1])
+                else:
+                    walks = ((b, None, -1) for b in ballots)
+
+                for b, sv_add, move_r in walks:
                     move_through_lsb = False
-                    move_r = -1
                     for p in b.prefs:
                         if p in gone_set:
                             continue
@@ -545,31 +757,45 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
 
 
 def backcompute_nq_bound(i : int, ctx : EqlbCtx, cands: Sequence[CandidateLike], ballots: list[Ballot],\
-                         order_c : list[int], order_q: dict[int, QRange], quota : int):
+                         order_c : list[int], order_q: dict[int, QRange], quota : int, \
+                         walk_cache: Optional[WalkCache] = None):
 
     gone = order_c[:i+1]
     gone_set = set(gone)
     rem_qs = [c for c in order_q.keys() if c not in gone_set and order_q[c][0] > i  \
               and not(c in ctx.nq_cons_added[i])]
 
-    no_quota_lb = 0
-    nq_cons_added = set()
+    no_quota_lb: float = 0
+    nq_cons_added: set[int] = set()
 
     if rem_qs == []:
         return no_quota_lb, nq_cons_added
 
+    tallies: list[float]
     if i == 0:
-        tallies: list[float] = [cand.fp_votes for cand in cands]
+        tallies = [cand.fp_votes for cand in cands]
     else:
-        tallies: list[float] = [0] * ctx.N
+        tallies = [0.0] * ctx.N
 
-        for b in ballots:
-            sv_add = None
-            move_r = -1
+        # Only an eliminating child gets here -- the [1, 1, 0] tail test in
+        # compute_elim_quota_lb_STV26_q_prefix requires order_a[-1] == 0 -- and
+        # eliminating children pass the parent's order_q through untouched, so
+        # the cached walk over this prefix is exact. The identity test below
+        # is what establishes that; anything else walks the ballots.
+        walk = None
+        if walk_cache is not None and order_q is walk_cache.order_q:
+            walk = walk_cache.at(i + 1)
+
+        if walk is not None:
+            walks: Any = zip(ballots, walk[0], walk[1])
+        else:
+            walks = ((b, None, -1) for b in ballots)
+
+        for b, sv_add, move_r in walks:
             for p in b.prefs:
                 if p in gone_set:
                     continue
-    
+
                 if sv_add is None:
                     sv_add, move_r = calc_tallies_q_prefix(b, gone, \
                         ctx.transfer, ctx.winners, order_q, ctx.gone_pos)
@@ -750,7 +976,7 @@ def compute_elim_quota_lb_STV26(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike]
 
                 # cost to displace the candidate with largest tally that is also above quota 0nly active if
                 # no eliminations/seatings has happened
-                displacement_cost = 0
+                displacement_cost: float = 0
                 if not gone:  # no eliminations yet
                     fp_others_max = max([cands[c.num].fp_votes for c in cands \
                                          if c.num not in gone_set and c.num != ce])
@@ -881,10 +1107,11 @@ def compute_elim_quota_lb_BST19(eqlbctx : EqlbCtx, cands: Sequence[CandidateLike
             winners.add(ce)
 
             if ce in order_q:
+                cmax: float
                 if i == 0:
-                    cmax: float = cands[ce].fp_votes
-                else:    
-                    cmax: float = 0
+                    cmax = cands[ce].fp_votes
+                else:
+                    cmax = 0.0
                     for b in ballots:
                         prefs = []
                         for p in b.prefs:
@@ -983,7 +1210,8 @@ def compute_disp_lb_STV26_q_prefix(candidates: Sequence[CandidateLike], \
     #   max_ogl   = present[ogl]                (value on ballots where ogl remains)
     #   max_l[r]  = present[ogl] - above[r][ogl]
     # where above[x][y] is the total value of ballots on which both x and y
-    # remain and x is ranked above y. Derivation: max_l[r] counts value where
+    # remain and x is ranked above y, and present[ogl] represents total value of ballots
+    # where ogl is mentioned. Derivation: max_l[r] counts value where
     # ogl remains and (r absent, or ogl above r); that equals present[ogl]
     # minus the value where both remain and r is above ogl.
     present: list[float] = [0.0] * ncand
@@ -1051,21 +1279,11 @@ def compute_disp_lb_STV26_q_prefix(candidates: Sequence[CandidateLike], \
 def build_disp_cache(candidates: Sequence[CandidateLike], ballots: list[Ballot], \
     forder_c: list[int], forder_a: list[int], forder_q: dict[int, QRange], \
     frem: list[int], transfer: dict[int, tuple[float, float]], \
-    seat_groups: Optional[set[int]] = None) \
-    -> tuple[list[float], Any, list[float], list[list[float]], dict, dict]:
+    seat_groups: Optional[set[int]] = None) -> DispCache:
     """
     Amortise the displacement-LB ballot pass across the children of a parent
     prefix P = (forder_c, forder_a, forder_q) -- both eliminate children and
     (top quota-round) winner-seating children -- with one pass over the ballots.
-
-    Eliminating a candidate never rescales a ballot, so every eliminate child
-    sees the same per-ballot value as P (see disp_lb_eliminate_from_cache).
-    Seating a winner ce (top quota-round variant) rescales only ballots whose
-    first still-standing candidate is ce, by ce's transfer value; the seat
-    child's aggregates are then a rank-correction of the shared ones (see
-    disp_lb_seat_from_cache), needing per-group aggregates restricted to each
-    ce-group. `seat_groups` names the candidates (winners still standing) for
-    which those per-group aggregates are built.
 
     Returns (val(b) = value ballot b carries once P has been applied):
         present[x]      = sum of val(b) over ballots on which x still stands
@@ -1076,8 +1294,23 @@ def build_disp_cache(candidates: Sequence[CandidateLike], ballots: list[Ballot],
         reassign[g][x]  = sum of val(b) over ballots whose first still-standing
                           candidate is g and whose next still-standing is x
         group_present[g][x]   = present[x] restricted to ballots whose first
-                                still-standing candidate is g  (g in seat_groups)
-        group_above[g][x][y]  = above[x][y] restricted to the same ballots
+                                still-standing candidate is g 
+        group_above[g][x][y]  = above[x][y] restricted to ballots whose first
+                                still-standing candidate is g
+
+    All children share the parent prefix P, and expanding by one ground perturbs
+    the aggregates that we cache for P in a structured fashion. When we eliminate
+    a candidate as the next step, we compute new tallies for a candidate 'x' (min_r[x])
+    upon the elimination of 'r' by adding ballots that get reassigned to them.
+
+    When we seat a candidate as the next step, and order_q[ce][0] is the round in 
+    which they are being seated, the transfer value for the seated 
+    candidate is derived from curtally[ce] and relevant aggregates are rescaled when
+    computing the LB.
+
+    Non-cached disp LB computed when a candidate is seated as the next step and 
+    the round in which they first had a quota is not the round in which they 
+    were seated.  
     """
     ncand = len(candidates)
     rem_set = set(frem)
@@ -1155,7 +1388,7 @@ def build_disp_cache(candidates: Sequence[CandidateLike], ballots: list[Ballot],
             npairs = ii.shape[0]
             base = offsets[grp]
             gvals = vals_a[grp]
-            gslot = firsts_slot[grp] if nseat else None
+            gslot = firsts_slot[grp] if firsts_slot is not None else None
             step = max(1, MAXCELLS // npairs)
             cols = np.arange(L)
             for s in range(0, grp.shape[0], step):
@@ -1164,7 +1397,7 @@ def build_disp_cache(candidates: Sequence[CandidateLike], ballots: list[Ballot],
                 w = np.repeat(gvals[s:s + step], npairs)
                 above_flat += np.bincount(pxi.ravel(), weights=w, \
                     minlength=ncand * ncand)
-                if nseat:
+                if gslot is not None:
                     cs = gslot[s:s + step]
                     sel = cs >= 0
                     if sel.any():
@@ -1182,10 +1415,9 @@ def build_disp_cache(candidates: Sequence[CandidateLike], ballots: list[Ballot],
     return present, above, curtally, reassign, group_present, group_above
 
 
-def disp_lb_eliminate_from_cache(cache: tuple[list[float], list[list[float]], \
-    list[float], list[list[float]]], r: int, forder_c: list[int], \
-    forder_a: list[int], winner_set: set[int], frem: list[int], quota: int, \
-    seats: int) -> int:
+def disp_lb_eliminate_from_cache(cache: DispCache, r: int, \
+    forder_c: list[int], forder_a: list[int], winner_set: set[int], \
+    frem: list[int], quota: int, seats: int) -> int:
     """
     Displacement LB for the child that eliminates `r` from parent prefix
     P = (forder_c, forder_a), assembled from build_disp_cache aggregates with no
@@ -1256,9 +1488,9 @@ def disp_lb_eliminate_from_cache(cache: tuple[list[float], list[list[float]], \
     return math.ceil(lowerbound - 1e-4)
 
 
-def disp_lb_seat_from_cache(cache: tuple, ce: int, forder_c: list[int], \
-    forder_a: list[int], winner_set: set[int], frem: list[int], quota: int, \
-    seats: int) -> int:
+def disp_lb_seat_from_cache(cache: DispCache, ce: int, \
+    forder_c: list[int], forder_a: list[int], winner_set: set[int], \
+    frem: list[int], quota: int, seats: int) -> int:
     """
     Displacement LB for the child that seats winner `ce` (top quota-round
     variant) from parent prefix P = (forder_c, forder_a), assembled from
@@ -1439,9 +1671,9 @@ def compute_disp_lb_STV26(candidates: Sequence[CandidateLike], \
         displacement_cost = np.inf
         left_at_end_costs = []
 
-        max_l = [0]*ncand
+        max_l = [0.0]*ncand
 
-        max_ogl = 0
+        max_ogl = 0.0
         for ranks, elb, ub in filtered_ballots:
             posl = ranks[ogl]
             if posl != -1:
@@ -1692,7 +1924,7 @@ def treestv(ballots: list[Ballot], candidates: list[Candidate], \
             fnodes = frontier.pop(args.pc)
             nexps += 1
 
-            toexpand: list[tuple[FNodeData, float]] = [] # pyright: ignore[reportInvalidTypeForm]
+            toexpand: list[tuple[FNodeData, float]] = []
 
             # expand nodes until frontier is empty or we have converged
             for fn in fnodes:
@@ -1700,6 +1932,7 @@ def treestv(ballots: list[Ballot], candidates: list[Candidate], \
                     print("EXPANDING NODE {}".format(fn), file=log, flush=True)
 
                 assert fn.dist is not None
+                assert fn.eqlbctx is not None
                 toexpand.append(((fn.eqlbctx, fn.order_c, fn.order_a, fn.order_q, \
                     fn.rem, fn.winners, fn.dist), running_ub))
 
@@ -1934,7 +2167,13 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
 
     lb = max(disp_lowerbound, eqlb)
 
-    if lb >= running_ub:
+    # Initial-frontier nodes are internal -- they are always inserted into the
+    # frontier, never leaf-handled, and they are solved as non-leaves -- so
+    # like every other internal node they are only solved under -allminlps.
+    # This is eval_child's skipsolve with isleaf fixed to False.
+    skipsolve: bool = args.nominlps or not args.allminlps
+
+    if lb >= running_ub or skipsolve:
         return lb, disp_lowerbound, eqlb, TreeNode(node_order_c, \
            node_order_a, node_order_q, node_winners, rem, _eqlbctx, lb, lb), False
 
@@ -1953,7 +2192,8 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, node_order_c: list[int], \
                node_order_a: list[int], node_order_q: dict[int, QRange], \
                node_winners: set[int], rem: list[int], isleaf: bool, \
                running_ub: float, precomputed_disp: Optional[float] = None, \
-               precomputed_elim_tallies: Optional[list[float]] = None) \
+               precomputed_elim_tallies: Optional[list[float]] = None, \
+               walk_cache: Optional[WalkCache] = None) \
                -> ChildResult:
     assert _CTX is not None
     ballots, candidates, winner_set, ncands, args, quota, tot_ballots, \
@@ -1965,7 +2205,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, node_order_c: list[int], \
         if args.useqprefix:
             _eqlbctx = compute_elim_quota_lb_STV26_q_prefix(eqlbctx, candidates, \
                 ballots, node_order_c, node_order_a, quota, node_order_q, \
-                precomputed_elim_tallies)
+                precomputed_elim_tallies, walk_cache)
         else:
             _eqlbctx = compute_elim_quota_lb_STV26(eqlbctx, candidates, ballots, \
                 node_order_c, node_order_a, quota, node_order_q)
@@ -1997,7 +2237,11 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, node_order_c: list[int], \
 
     lowerbound = max(eqlb, max(disp_lowerbound, parent_dist))
 
-    if lowerbound >= running_ub or args.nominlps:
+    # Solve a leaf always, an internal node only under -allminlps, and nothing
+    # under -nominlps.
+    skipsolve: bool = args.nominlps or not (args.allminlps or isleaf)
+
+    if lowerbound >= running_ub or skipsolve:
         return (isleaf, _eqlbctx, node_order_c, node_order_a, node_order_q, lowerbound, \
                 disp_lowerbound, eqlb, lowerbound, lowerbound, rem, \
                 node_winners, False)
@@ -2030,7 +2274,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, node_order_c: list[int], \
         lowerbound, disp_lowerbound, eqlb, dist, dist_ub, rem, node_winners, True
 
 
-def generate_children(fnode_data: FNodeData, running_ub: float) -> list:  # pyright: ignore[reportInvalidTypeForm]
+def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
     """
     Build the list of eval_child argument tuples for one frontier node,
     including the per-expansion amortisation (build_disp_cache / round tallies).
@@ -2043,7 +2287,8 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:  # pyri
     eqlbctx, forder_c, forder_a, forder_q, frem, fwinners, fdist = fnode_data
 
     children: list[tuple[float, EqlbCtx, list[int], list[int], dict[int, QRange], \
-        set[int], list[int], bool, float, Optional[float], Optional[list[float]]]] = []
+        set[int], list[int], bool, float, Optional[float], Optional[list[float]], \
+        Optional[WalkCache]]] = []
 
     # Displacement-LB amortisation: one ballot pass here serves every eliminate
     # child (same per-ballot value) and every top quota-round winner-seating
@@ -2067,6 +2312,30 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:  # pyri
             elim_tallies = compute_round_tallies(candidates, ballots, \
                 eqlbctx.gone, eqlbctx.gone_set, eqlbctx.transfer, \
                 eqlbctx.winners, forder_q, eqlbctx.gone_pos, ncands)
+
+    # Walk amortisation: one instrumented ballot pass over the parent prefix
+    # replaces the per-ballot walk in every seating child's round tallies and
+    # in every backcompute_nq_bound round of every eliminating child (see
+    # WalkCache). Not built under --evalpara, where children are evaluated in
+    # other processes and the cache would be pickled once per child.
+    walk_cache = None
+    if args.eqlb and args.useqprefix and len(eqlbctx.gone) == len(forder_a) \
+            and eqlbctx.gone and not getattr(args, "evalpara", False):
+        LENF = len(forder_a)
+
+        # Seating children need round LENF. Eliminating children give the
+        # child prefix a [1, 1, 0] tail when forder_a ends in two seatings,
+        # and then backcompute a no-quota bound at every round of that
+        # trailing run -- round j walking the first j + 1 rounds.
+        lo = LENF
+        if LENF >= 2 and forder_a[-1] == 1 and forder_a[-2] == 1:
+            while lo > 1 and forder_a[lo-1] == 1:
+                lo -= 1
+            lo = max(lo + 1, LENF - _WALK_CACHE_MAX_CKPTS + 1, 1)
+
+        walk_cache = build_walk_cache(ballots, eqlbctx.gone, eqlbctx.transfer, \
+            eqlbctx.winners, forder_q, eqlbctx.gone_pos, \
+            tuple(range(lo, LENF + 1)))
 
     # Add a candidate to the end of the outcome prefix represented
     # by the selected node. That candidate can either be seated or
@@ -2122,7 +2391,7 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:  # pyri
                         forder_c, forder_a, winner_set, frem, quota, args.seats)
                 children.append((fdist, eqlbctx, node_order_c, node_order_a, \
                     forder_q, node_winners, new_rem, isleaf, running_ub, disp_val, \
-                    elim_tallies))
+                    elim_tallies, walk_cache))
             else:
                 if args.useqprefix:
                     # Quota-round variants for r: any round in the run of
@@ -2154,7 +2423,7 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:  # pyri
                         dv = sdisp if top else None
                         children.append((fdist, eqlbctx, node_order_c, node_order_a, \
                             node_order_q, node_winners, new_rem, isleaf, \
-                            running_ub, dv, et))
+                            running_ub, dv, et, walk_cache))
                 else:
                     LAST_ROUND = compute_last_round(node_order_c, \
                         node_order_a, args.seats, ncands)
@@ -2163,13 +2432,13 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:  # pyri
                         node_winners, order_c_index)
                     children.append((fdist, eqlbctx, node_order_c, node_order_a, \
                         node_order_q, node_winners, new_rem, isleaf, running_ub, \
-                        None, None))
+                        None, None, None))
 
 
     return children
 
 
-def expand_node(fnode_data: FNodeData, running_ub: float) -> list[ChildResult]:  # pyright: ignore[reportInvalidTypeForm]
+def expand_node(fnode_data: FNodeData, running_ub: float) -> list[ChildResult]:
     """Node-granularity expansion: generate this node's children and evaluate
     them (serially within this call). Used when parallelism is over nodes."""
     return [eval_child(*c) for c in generate_children(fnode_data, running_ub)]
