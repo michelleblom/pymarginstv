@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pyscipopt import Model, SCIP_PARAMEMPHASIS, Eventhdlr, SCIP_EVENTTYPE
+from pyscipopt import Model, Eventhdlr
+from pyscipopt.scip import PY_SCIP_PARAMEMPHASIS, PY_SCIP_EVENTTYPE
+
 
 from utils import Ballot, CandidateLike, gen_equivalence_classes, \
     reduce_ballots
@@ -114,10 +116,10 @@ class TerminateAtIntegerSolution(Eventhdlr):
         Eventhdlr.__init__(model)
 
     def eventinit(self) -> None:
-        self.model.catchEvent(SCIP_EVENTTYPE.BESTSOLFOUND, self)
+        self.model.catchEvent(PY_SCIP_EVENTTYPE.BESTSOLFOUND, self)
 
     def eventexit(self) -> None:
-        self.model.dropEvent(SCIP_EVENTTYPE.BESTSOLFOUND, self)
+        self.model.dropEvent(PY_SCIP_EVENTTYPE.BESTSOLFOUND, self)
 
     def eventexec(self, event: Any) -> None:
         primal_bound = self.model.getPrimalbound()
@@ -141,10 +143,10 @@ class TerminateOnPruningBound(Eventhdlr):
         self.ncalls = 0
 
     def eventinit(self) -> None:
-        self.model.catchEvent(SCIP_EVENTTYPE.NODESOLVED, self)
+        self.model.catchEvent(PY_SCIP_EVENTTYPE.NODESOLVED, self)
 
     def eventexit(self) -> None:
-        self.model.dropEvent(SCIP_EVENTTYPE.NODESOLVED, self)
+        self.model.dropEvent(PY_SCIP_EVENTTYPE.NODESOLVED, self)
 
     def eventexec(self, event: Any) -> None:
         # The global bound moves slowly; checking every 64th node keeps the
@@ -276,7 +278,7 @@ def stvdistance(candidates: Sequence[CandidateLike], ballots: list[Ballot],
     #    print(c, file=log)
 
     model = Model("STVDISTANCE")
-    model.setEmphasis(SCIP_PARAMEMPHASIS.OPTIMALITY)
+    model.setEmphasis(PY_SCIP_PARAMEMPHASIS.OPTIMALITY)
     model.hideOutput()
     model.setParam("separating/closecuts/separelint", False)
     model.setParam("benders/default/cutstrengthenintpoint", 'i')

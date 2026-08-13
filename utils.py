@@ -37,6 +37,17 @@ class CandidateLike(Protocol):
     def fp_votes(self) -> float: ...
 
 
+class BallotMetadata:
+    """
+    mentions[x] = Number of ballots on which x appears
+    above[x][y] = Number of ballots on which x and y both stand and x is ranked above y
+    reassign[x][y] = Number of ballots on which x is higest ranked and y next highest ranked
+    """
+    def __init__(self, ncand):
+        self.mentions : list[float] = [0]*ncand
+        self.above : list[list[float]] = [[0] * ncand for _ in range(ncand)] 
+        self.reassign : list[list[float]] = [[0.0] * ncand for _ in range(ncand)]
+
 class Ballot:
     """
         Data structure representing both a ballot type--a ranking over
@@ -124,6 +135,7 @@ class Candidate:
         # Ids of ballots whose first preference is this candidate.
         self.ballots: list[int] = []
         self.fp_votes: float = 0
+        self.mentions: float = 0
 
         # For simulation purposes
         self.sim_votes: float = 0
@@ -139,7 +151,7 @@ class Group:
 
 
 def read_ballots_blt(path: str) -> tuple[list[Candidate], list[Ballot], \
-    dict[int, Group], dict[int, int], int, int]:
+    dict[int, Group], dict[int, int], int, int, BallotMetadata]:
     ballots: list[Ballot] = []
     candidates: list[Candidate] = []
     cid2num: dict[int, int] = {}
@@ -165,10 +177,9 @@ def read_ballots_blt(path: str) -> tuple[list[Candidate], list[Ballot], \
             candidates.append(cand)
             cid2num[cand.id] = i
 
-
         bcntr = 0
-
         ncands = len(candidates)
+        metadata = BallotMetadata(ncands)
 
         for bline in ballot_strs:
             toks = [int(t) for t in bline.split()]
@@ -183,15 +194,24 @@ def read_ballots_blt(path: str) -> tuple[list[Candidate], list[Ballot], \
             fpcand.ballots.append(bcntr)
             fpcand.fp_votes += n
 
+            for i, x in enumerate(prefs):
+                metadata.mentions[x] += n
+                row = metadata.above[x]
+                for y in prefs[i + 1:]:
+                    row[y] += n
+
+            if len(prefs) > 1:
+                metadata.reassign[prefs[0]][prefs[1]] += n
+
             total_votes += n
 
             bcntr += 1
 
-    return candidates,ballots,{},cid2num,total_votes,seats
+    return candidates,ballots,{},cid2num,total_votes,seats,metadata
 
 
 def read_ballots_txt(path: str) -> tuple[list[Candidate], list[Ballot], \
-    dict[int, Group], dict[int, int], int]:
+    dict[int, Group], dict[int, int], int, BallotMetadata]:
     ballots: list[Ballot] = []
     candidates: list[Candidate] = []
     cid2num: dict[int, int] = {}
@@ -218,6 +238,8 @@ def read_ballots_txt(path: str) -> tuple[list[Candidate], list[Ballot], \
         bcntr = 0
         nextline = 2 if us_ver else 5
 
+        metadata = BallotMetadata(ncands)
+
         for i in range(nextline, len(lines)):
             line = lines[i].strip()
             toks = [t.strip() for t in line.split(':')]
@@ -243,14 +265,23 @@ def read_ballots_txt(path: str) -> tuple[list[Candidate], list[Ballot], \
             fpcand.ballots.append(bcntr)
             fpcand.fp_votes += votes
 
+            for i, x in enumerate(cprefs):
+                metadata.mentions[x] += votes
+                row = metadata.above[x]
+                for y in cprefs[i + 1:]:
+                    row[y] += votes
+
+            if len(cprefs) > 1:
+                metadata.reassign[cprefs[0]][cprefs[1]] += votes        
+
             total_votes += votes
 
             bcntr += 1
 
-    return candidates,ballots,{},cid2num,total_votes
+    return candidates,ballots,{},cid2num,total_votes,metadata
 
 def read_ballots_json(path: str) -> tuple[list[Candidate], list[Ballot], \
-    dict[int, Group], dict[int, int], int]:
+    dict[int, Group], dict[int, int], int, BallotMetadata]:
     ballots: list[Ballot] = []
     candidates: list[Candidate] = []
     id2group: dict[int, Group] = {}
@@ -305,6 +336,9 @@ def read_ballots_json(path: str) -> tuple[list[Candidate], list[Ballot], \
         except KeyError:
             print("No parties or bad data in party lists for candidates.")
 
+
+        metadata = BallotMetadata(ncands)
+
         # process atl ballots
         bcntr = 0
         try:
@@ -322,6 +356,15 @@ def read_ballots_json(path: str) -> tuple[list[Candidate], list[Ballot], \
                 fcand = candidates[prefs[0]]
                 fcand.ballots.append(bcntr)
                 fcand.fp_votes += n
+
+                for i, x in enumerate(prefs):
+                    metadata.mentions[x] += n
+                    row = metadata.above[x]
+                    for y in prefs[i + 1:]:
+                        row[y] += n
+
+                if len(prefs) > 1:
+                    metadata.reassign[prefs[0]][prefs[1]] += n        
 
                 fcand.num_atls += n
 
@@ -347,6 +390,15 @@ def read_ballots_json(path: str) -> tuple[list[Candidate], list[Ballot], \
                 fcand.ballots.append(bcntr)
                 fcand.fp_votes += n
 
+                for i, x in enumerate(prefs):
+                    metadata.mentions[x] += n
+                    row = metadata.above[x]
+                    for y in prefs[i + 1:]:
+                        row[y] += n
+
+                if len(prefs) > 1:
+                    metadata.reassign[prefs[0]][prefs[1]] += n            
+
                 fcand.num_btls += n
 
                 total_votes += n
@@ -356,7 +408,7 @@ def read_ballots_json(path: str) -> tuple[list[Candidate], list[Ballot], \
         except KeyError:
             print("No BTL votes or bad data listing BTL candidates.")
     
-    return candidates,ballots,id2group,cid2num,total_votes
+    return candidates,ballots,id2group,cid2num,total_votes,metadata
             
 
 def compute_simple_ub(candidates: list[Candidate], quota: int, \

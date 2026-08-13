@@ -60,14 +60,23 @@ if __name__ == "__main__":
     # Input: max solve time (s) for algorithm 
     parser.add_argument('-limit', type=int, default=10000)
 
-    # Input: whether to compute displacement lower bound 
+    # Input: whether to compute displacement lower bound (no caching)
     parser.add_argument('-dlb', action='store_true', default=False)
+
+    # Input: whether to compute displacement lower bound (with caching)
+    parser.add_argument('-dlbc', action='store_true', default=False)
 
     # Input: whether to use enhanced pruning strategy
     parser.add_argument('-lse', action='store_true', default=False)
 
-    # Input: whether to use new eqlb bounding mechanism
+    # Input: whether to use new eqlb bounding mechanism (without caching)
     parser.add_argument('-eqlb', action='store_true', default=False)
+
+    # Input: whether to use new eqlb bounding mechanism (with caching)
+    parser.add_argument('-eqlbc', action='store_true', default=False)
+
+    # Input: whether to precomputed tallies for use in elimination rounds 
+    parser.add_argument('-prec_et', action='store_true', default=False)
 
     # Input: whether to only use lower bounding heuristics during search
     parser.add_argument("-nominlps", action='store_true', default=False)
@@ -105,13 +114,13 @@ if __name__ == "__main__":
 
     # Read STV data file: check for given input data type
     if args.data.endswith(".blt"):
-        candidates, ballots = read_ballots_blt(args.data)[:2]
+        candidates, ballots, _, _, _, _, ballot_metadata = read_ballots_blt(args.data)
 
     elif args.data.endswith(".json"):
-        candidates, ballots = read_ballots_json(args.data)[:2]
+        candidates, ballots, _, _, _, ballot_metadata = read_ballots_json(args.data)
 
     else:
-        candidates, ballots = read_ballots_txt(args.data)[:2]
+        candidates, ballots, _, _, _, ballot_metadata = read_ballots_txt(args.data)
 
     # The ballot list lives for the whole run and is never collectable, but a
     # cyclic collection still has to traverse all of it. Move it to gc's
@@ -164,7 +173,7 @@ if __name__ == "__main__":
 
     # Start branch and bound.
     tstart = time.time()
-    lb, ub, nexps, nsolves, ignores, agg_prunes = treestv(ballots, candidates, \
+    lb, ub, nexps, nsolves, ignores, agg_prunes = treestv(ballots, ballot_metadata, candidates, \
         winners, order_c, order_a, upper_bound, args, quota, totvotes, log=log)
     tend = time.time()
 
