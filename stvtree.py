@@ -4,9 +4,12 @@ from stvdistance import stvdistance
 from utils import Ballot, BallotMetadata, Candidate, CandidateLike, merge_outcome, get_order_q
 
 import argparse
+import cProfile
 import importlib
 import math
+import multiprocessing
 import numpy as np
+import os
 import time
 
 from bisect import bisect_left, bisect_right, insort
@@ -424,14 +427,6 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
            the election prefix, and a map from each seated winner to their transfer value.
     """
 
-    last_seating_block: set[int] = set()
-    if order_a[-1] == 1:
-        for i in range(len(order_c)-1, -1, -1):
-            if order_a[i] == 1:
-                last_seating_block.add(order_c[i])
-            else:
-                break
-
     elim_lb = eqlbctx.elim_lb
     quota_lb = eqlbctx.quota_lb
     no_quota_lb = eqlbctx.no_quota_lb
@@ -444,20 +439,54 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
     start = eqlbctx.round
 
     PXLEN = len(order_c)
-    # Check: did we just come out of a sequence of at least two seatings and are now eliminating
-    # a candidate? If so, check whether we need to compute some additional no-quota bounds.
-    if PXLEN >= 3:
-        # Does the tail of order_a look like this: [1, 1, 0]
-        if order_a[-3:] == [1, 1, 0] or start < PXLEN - 1:
-            # jump to last election
-            j = PXLEN - 2
-            while j >= 0 and order_a[j] != 1:
-                 j -= 1
-            while j >= 0 and order_a[j] == 1:
-                 nqlb, nqs = backcompute_nq_bound(j, eqlbctx, cands, ballots, order_c, order_q, quota)
-                 no_quota_lb = max(no_quota_lb, nqlb)
-                 nq_cons_added[j].update(nqs)
-                 j -= 1
+
+    # Earliest round at which a candidate still standing at the end of the
+    # prefix could hold a quota. Two constraints bound it.
+    #
+    # It cannot be at or before the prefix's last elimination: nobody may hold
+    # a quota in a round where a candidate is eliminated.
+    #
+    # It cannot be earlier than the latest quota round in order_q. Seating
+    # order follows the round in which a quota was achieved, ties broken by
+    # tally, so a continuing candidate that had reached its quota before one of
+    # the prefix's seated candidates would have been seated ahead of it. A tie
+    # is consistent with not being seated, so the bound is not strict.
+    #
+    # A ballot that last moved before this round cannot have skipped a
+    # continuing candidate, so it is certain who holds it. When the prefix ends
+    # with an elimination -- a padded complete prefix included -- the first
+    # constraint puts this past every reachable move_r (at most PXLEN - 2), so
+    # no ballot is ever treated as uncertain.
+    lastelim = PXLEN - 1
+    while lastelim >= 0 and order_a[lastelim] == 1:
+        lastelim -= 1
+
+    # Note: qearliest is the earliest round in which a continuing candidate
+    # (not seated in the prefix) can have a quota.
+    qearliest = lastelim + 1
+    if order_q:
+        qearliest = max(qearliest, max(order_q[c][0] for c in order_q))
+
+    # Check: did we just come out of a seating block and are now eliminating?
+    # If so, check whether we need to compute some additional no-quota bounds.
+    # Two shapes qualify: a run of two or more seatings followed by an
+    # elimination (tail [1, 1, 0]), and a complete prefix whose tail is padded
+    # with eliminations. Both leave the prefix ending in an elimination, so the
+    # quota rounds in the block are no longer ambiguous. Note this is a test on
+    # the shape of order_a, not on how many rounds this call is covering: start
+    # is 0 whenever the context is not cached, which says nothing about the tail.
+    lastseat = PXLEN - 1
+    while lastseat >= 0 and order_a[lastseat] == 0:
+        lastseat -= 1
+
+    if 0 <= lastseat < PXLEN - 1 and (PXLEN == eqlbctx.N \
+        or (lastseat >= 1 and order_a[lastseat - 1] == 1)):
+        j = lastseat
+        while j >= 0 and order_a[j] == 1:
+            nqlb, nqs = backcompute_nq_bound(j, eqlbctx, cands, ballots, order_c, order_q, quota)
+            no_quota_lb = max(no_quota_lb, nqlb)
+            nq_cons_added[j].update(nqs)
+            j -= 1
 
     for i in range(start, PXLEN):
         ce = order_c[i]
@@ -481,16 +510,38 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
 
 
         else:  # candidate seated
+            # Can the ballot walk below be replaced by the round tallies
+            # prec_et already computed once for this expansion? It can when
+            # every candidate still standing that has a quota round recorded
+            # reaches it no earlier than this round. move_r indexes into gone,
+            # whose length is i, so move_r <= i - 1 < i, and then:
+            #
+            #   - the skip test never fires, so each ballot lands on its first
+            #     preference still standing, exactly as the round tallies do;
+            #   - qearliest is at least ce's quota round, so move_r < qearliest
+            #     for every ballot and every one of them is certain, putting
+            #     the same value into both tallies.
+            #
+            # So both tallies equal the round tallies elementwise and can alias
+            # that array -- nothing below writes to them. The array is shared
+            # with this node's sibling children, so it must stay read-only.
+            reuse_elim_tallies = i > 0 and i == start and elim_tallies is not None \
+                and ce in order_q and order_q[ce][0] == i \
+                and all(order_q[c][0] >= i for c in order_q if c not in gone_set)
+
             if i == 0:
                 min_tallies: list[float] = [cand.fp_votes for cand in cands]
                 max_tallies = min_tallies
+            elif reuse_elim_tallies:
+                assert elim_tallies is not None
+                min_tallies = elim_tallies
+                max_tallies = elim_tallies
             else:
                 min_tallies = [0.0] * eqlbctx.N
                 max_tallies = [0.0] * eqlbctx.N
 
                 for b in ballots:
                     sv_add = None
-                    move_through_lsb = False
                     move_r = -1
                     for p in b.prefs:
                         if p in gone_set:
@@ -500,24 +551,24 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
                             sv_add, move_r = calc_tallies_q_prefix(b, gone, \
                                 transfer, winners, order_q, gone_pos)
 
-                        if p in order_q:
-                            if order_q[p][0] > move_r:
-                                # p cannot have a quota yet in any scenario:
-                                # the ballot stays with p.
-                                min_tallies[p] += sv_add
-                                max_tallies[p] += sv_add
-                                break
-                            else:
-                                continue
+                        if p in order_q and order_q[p][0] <= move_r:
+                            continue # definitely skipped
 
-                        if p in last_seating_block:
-                            max_tallies[p] += sv_add
-                            move_through_lsb = True
-                            continue
-
-                        if not move_through_lsb:
+                        # p is either in order_q with a quota round later than
+                        # the ballot's last move, or outside it and unable to
+                        # hold a quota yet: either way the ballot stays with p.
+                        if p in order_q or move_r < qearliest:
                             min_tallies[p] += sv_add
 
+                        # Otherwise p may or may not still hold the ballot, and
+                        # we stop either way. Nothing later on this ballot can
+                        # be consumed: every order_q member has a quota round at
+                        # or before qearliest <= move_r, so all of them are
+                        # skipped by the test above, and the max tallies of
+                        # candidates outside order_q are never read. If those
+                        # ever do get consumed, this exit has to go and the walk
+                        # must continue, adding only to max_tallies, until the
+                        # preferences run out.
                         max_tallies[p] += sv_add
                         break
 
@@ -1604,6 +1655,70 @@ Ctx = tuple[list[Ballot], BallotMetadata, Sequence[CandLite], set[int], \
 _CTX: Optional[Ctx] = None
 
 
+# Worker-local profiler state: (profiler, output path, [last dump time]).
+_PROF: Optional[tuple[cProfile.Profile, str, list[float]]] = None
+
+
+def _start_worker_profile() -> None:
+    """Profile this pool worker, dumping stats periodically at task boundaries.
+
+    Opt-in via MSTV_PROFILE=<output dir>. Only pool workers are profiled:
+    _init_worker also runs in the parent (for pc == 1), and enabling a
+    profiler there before Pool() forks would leave every child with an
+    inherited, never-disabled profiler.
+
+    The search ends with pool.terminate(), so workers are SIGTERMed and never
+    unwind cleanly -- neither atexit nor a SIGTERM handler reliably produces a
+    complete dump. Instead each worker rewrites its own profile every
+    _PROF_INTERVAL seconds, so whatever is on disk when it is killed is a
+    valid profile of everything up to the last task boundary.
+    """
+    global _PROF
+
+    outdir = os.environ.get("MSTV_PROFILE")
+    if not outdir:
+        return
+    if multiprocessing.current_process().name == "MainProcess":
+        return
+
+    os.makedirs(outdir, exist_ok=True)
+
+    # Workers are recycled (maxtasksperchild), so a pid can recur; pick a
+    # free name once and keep rewriting it.
+    base = os.path.join(outdir, "worker_{}".format(os.getpid()))
+    path, n = base + ".prof", 0
+    while os.path.exists(path):
+        n += 1
+        path = "{}_{}.prof".format(base, n)
+
+    pr = cProfile.Profile()
+    _PROF = (pr, path, [time.time()])
+    pr.enable()
+
+
+_PROF_INTERVAL = 20.0
+
+
+def _profile_tick() -> None:
+    """Flush this worker's profile if the dump interval has elapsed."""
+    if _PROF is None:
+        return
+    pr, path, last = _PROF
+    now = time.time()
+    if now - last[0] < _PROF_INTERVAL:
+        return
+    last[0] = now
+    pr.disable()
+    try:
+        # Write via a temp file so a kill mid-dump cannot leave a truncated
+        # profile in place of the previous good one.
+        tmp = path + ".tmp"
+        pr.dump_stats(tmp)
+        os.replace(tmp, path)
+    finally:
+        pr.enable()
+
+
 def _init_worker(ballots: list[Ballot], ballot_metadata: BallotMetadata, \
                  candidates: Sequence[CandLite], \
                  winner_set: set[int], ncands: int, \
@@ -1612,6 +1727,7 @@ def _init_worker(ballots: list[Ballot], ballot_metadata: BallotMetadata, \
     global _CTX
     _CTX = (ballots, ballot_metadata, candidates, winner_set, ncands, args, quota, \
         tot_ballots, full_order_c, full_order_a)
+    _start_worker_profile()
 
 
 def collapse_order_q(order_q: dict[int, QRange]) -> dict[int, int]:
@@ -1920,4 +2036,6 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
 def expand_node(fnode_data: FNodeData, running_ub: float) -> list[ChildResult]:
     """Node-granularity expansion: generate this node's children and evaluate
     them (serially within this call). Used when parallelism is over nodes."""
-    return [eval_child(*c) for c in generate_children(fnode_data, running_ub)]
+    results = [eval_child(*c) for c in generate_children(fnode_data, running_ub)]
+    _profile_tick()
+    return results

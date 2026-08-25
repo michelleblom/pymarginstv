@@ -1131,7 +1131,7 @@ def run_audit():
     # 7 == new + Both + useqprefix
     # versions = [4, 5, 6, 0, 3, -1, -3]
     #versions = [4, 5, 6, 0, 3, -1]
-    versions=[8]
+    versions=[9]
     print(
         "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb, new_ub")
     for version in versions:
@@ -1147,8 +1147,8 @@ def run_audit():
             # if path.endswith(".blt"):
             #     candidates, ballots, _, cid2num, totvotes, seats = read_ballots_blt(path)
             # print(f"{displayname}, {len(candidates)}, {seats}, {counter}"); continue
-            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}_Post3AugOpt5PC_nominlps1.log", '-s', str(seats),
-                        '-pc', '5', '-g', '0.01', '-agap', '0', '-limit', '10800', '-displayname', displayname, '-m']
+            args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}.log", '-s', str(seats),
+                        '-pc', '5', '-g', '0.01', '-agap', '0', '-limit', '1000', '-displayname', displayname, '-m']
             if version >= 0 and displayname in ubs:  # new ub
                 args += ['-ub', str(ubs[displayname])]
             if abs(version) == 3:  # new
@@ -1163,6 +1163,10 @@ def run_audit():
                 args += ['-lse', '-eqlb', '-dlb', '-useqprefix']
             if version == 8:
                 args += ['-lse', '-eqlb', '-dlb', '-useqprefix', '-nominlps']
+            if version == 9:
+                args += ['-lse', '-eqlbc', '-dlbc', '-useqprefix', '-nominlps', '-prec_et']
+            if version == 10:
+                args += ['-lse', '-eqlbc', '-dlbc', '-useqprefix', '-prec_et']
 
 
 
