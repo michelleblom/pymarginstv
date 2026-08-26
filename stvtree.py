@@ -4,12 +4,9 @@ from stvdistance import stvdistance
 from utils import Ballot, BallotMetadata, Candidate, CandidateLike, merge_outcome, get_order_q
 
 import argparse
-import cProfile
 import importlib
 import math
-import multiprocessing
 import numpy as np
-import os
 import time
 
 from bisect import bisect_left, bisect_right, insort
@@ -404,8 +401,16 @@ def compute_round_tallies_q_prefix(ballots: list[Ballot], \
 
 def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike], \
     ballots: list[Ballot], order_c: list[int], order_a: list[int], \
-    quota: int, order_q: dict[int, QRange], elim_tallies: Optional[list[float]]) -> EqlbCtx:
+    quota: int, order_q: dict[int, QRange], elim_tallies: Optional[list[float]], \
+    transfers_only: bool = False) -> EqlbCtx:
     """
+    With transfers_only set, walk the prefix purely to maintain transfer values
+    (and gone/gone_set/gone_pos/winners), accumulating none of the bounds. The
+    displacement bound and prec_et both consume transfer values but neither
+    computes them, so they need this when the elimination/quota bound itself is
+    switched off and compute_elim_quota_lb_BST19 -- which does not track
+    transfers -- supplies the bound instead.
+
     This function calculates the lower bound on the number of votes that need to be changed
     to alter the outcome of an election prefix. It does this by considering the elimination and quota
     constraints of the election.
@@ -479,7 +484,7 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
     while lastseat >= 0 and order_a[lastseat] == 0:
         lastseat -= 1
 
-    if 0 <= lastseat < PXLEN - 1 and (PXLEN == eqlbctx.N \
+    if not transfers_only and 0 <= lastseat < PXLEN - 1 and (PXLEN == eqlbctx.N \
         or (lastseat >= 1 and order_a[lastseat - 1] == 1)):
         j = lastseat
         while j >= 0 and order_a[j] == 1:
@@ -492,6 +497,14 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
         ce = order_c[i]
 
         if order_a[i] == 0:  # candidate eliminated
+            # An elimination round sets no transfer value, so it has nothing to
+            # contribute when only those are wanted.
+            if transfers_only:
+                gone.append(ce)
+                gone_set.add(ce)
+                gone_pos[ce] = i
+                continue
+
             if i == 0:
                 tallies = [cand.fp_votes for cand in cands]
             elif i == start and elim_tallies != None:
@@ -572,10 +585,11 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
                         max_tallies[p] += sv_add
                         break
 
-            rem = [c.num for c in cands if c.num not in gone_set]
-            for c in rem:
-                if c in order_q and order_q[c][0] <= i:
-                    quota_lb = max(quota_lb, quota - max_tallies[c])
+            if not transfers_only:
+                rem = [c.num for c in cands if c.num not in gone_set]
+                for c in rem:
+                    if c in order_q and order_q[c][0] <= i:
+                        quota_lb = max(quota_lb, quota - max_tallies[c])
 
             if ce in order_q:  # candidate got a quota, else seated by default (last round)
                 winners.add(ce)
@@ -588,16 +602,17 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
                 tv = (value - quota)/value
                 transfer[ce] = (tv, tv)
 
-                # cost to displace the candidate with largest tally that is also above quota only active if
-                # no eliminations/seatings has happened
-                displacement_cost: float = 0
-                if not gone:  # no eliminations or seatings yet
-                    fp_others_max = max([cands[c.num].fp_votes for c in cands \
-                                         if c.num not in gone_set and c.num != ce])
-                    # if someone has reached quota, we need to surpass their votes
-                    displacement_cost = max(0, 0.5 * (fp_others_max - cmax))  
+                if not transfers_only:
+                    # cost to displace the candidate with largest tally that is also above quota only active if
+                    # no eliminations/seatings has happened
+                    displacement_cost: float = 0
+                    if not gone:  # no eliminations or seatings yet
+                        fp_others_max = max([cands[c.num].fp_votes for c in cands \
+                                             if c.num not in gone_set and c.num != ce])
+                        # if someone has reached quota, we need to surpass their votes
+                        displacement_cost = max(0, 0.5 * (fp_others_max - cmax))  
 
-                quota_lb = max(quota_lb, quota - cmax, displacement_cost)
+                    quota_lb = max(quota_lb, quota - cmax, displacement_cost)
 
         gone.append(ce)
         gone_set.add(ce)
@@ -725,9 +740,12 @@ def calc_tallies_q_prefix(b: Ballot, gone: list[int], transfer: dict[int, tuple[
 
 def compute_elim_quota_lb_STV26(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike], \
     ballots: list[Ballot], order_c: list[int], order_a: list[int], \
-    quota: int, order_q: dict[int, QRange]) \
+    quota: int, order_q: dict[int, QRange], transfers_only: bool = False) \
     -> EqlbCtx:
     """
+    With transfers_only set, walk the prefix purely to maintain transfer values,
+    accumulating none of the bounds. See the quota-prefix variant for why.
+
     This function calculates the lower bound on the number of votes that need to be changed
     to alter the outcome of an election prefix. It does this by considering the elimination and quota
     constraints of the election.
@@ -760,6 +778,12 @@ def compute_elim_quota_lb_STV26(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike]
         ce = order_c[i]
 
         if order_a[i] == 0:  # candidate eliminated
+            # An elimination round sets no transfer value.
+            if transfers_only:
+                gone.append(ce)
+                gone_set.add(ce)
+                continue
+
             # Compute min vote 'ce' could have at this point, needs to be
             # less than max vote of other (non-super) candidates at this point
             # max_ce = cands[ce].fp_votes
@@ -814,22 +838,24 @@ def compute_elim_quota_lb_STV26(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike]
                 ub_value = max(lb_value, ub_value)  # restrict ub_value to be at lest lb_value
                 transfer[ce] = ((lb_value - quota)/lb_value, (ub_value - quota)/ub_value)
 
-                # cost to displace the candidate with largest tally that is also above quota 0nly active if
-                # no eliminations/seatings has happened
-                displacement_cost: float = 0
-                if not gone:  # no eliminations yet
-                    fp_others_max = max([cands[c.num].fp_votes for c in cands \
-                                         if c.num not in gone_set and c.num != ce])
-                    # if someone has reached quota, we need to surpass their votes
-                    displacement_cost = max(0, 0.5 * (fp_others_max - cmax))  
+                if not transfers_only:
+                    # cost to displace the candidate with largest tally that is also above quota 0nly active if
+                    # no eliminations/seatings has happened
+                    displacement_cost: float = 0
+                    if not gone:  # no eliminations yet
+                        fp_others_max = max([cands[c.num].fp_votes for c in cands \
+                                             if c.num not in gone_set and c.num != ce])
+                        # if someone has reached quota, we need to surpass their votes
+                        displacement_cost = max(0, 0.5 * (fp_others_max - cmax))  
 
-                quota_lb = max(quota_lb, quota - cmax, displacement_cost)
+                    quota_lb = max(quota_lb, quota - cmax, displacement_cost)
 
         gone.append(ce)
         gone_set.add(ce)
 
-    return EqlbCtx(eqlbctx.N, transfer, elim_lb, quota_lb, 0, [], \
-                   winners, gone, gone_set, {}, PXLEN)
+    return EqlbCtx(eqlbctx.N, transfer, elim_lb, quota_lb, 0, \
+                   [set() for _ in range(eqlbctx.N)], winners, gone, gone_set, \
+                   {c: i for i, c in enumerate(gone)}, PXLEN)
 
 
 def calc_tallies(b: Ballot, gone: list[int], \
@@ -890,6 +916,17 @@ def calc_tallies(b: Ballot, gone: list[int], \
             eidx += 1
 
     return b_value_slb, b_value_elb, b_value_ub
+
+
+def _needs_transfers(args: argparse.Namespace) -> bool:
+    """Does anything in this configuration consume transfer values?
+
+    The displacement bound reads them via calc_tallies, and prec_et's round
+    tallies do too. Neither computes them: they come from the elimination/quota
+    bound as a side effect. So when that bound is switched off and BST19 stands
+    in for it, the prefix still has to be walked for transfers alone.
+    """
+    return bool(args.dlb or args.dlbc or (args.prec_et and args.useqprefix))
 
 
 def compute_elim_quota_lb_BST19(eqlbctx : EqlbCtx, cands: Sequence[CandidateLike], \
@@ -966,8 +1003,13 @@ def compute_elim_quota_lb_BST19(eqlbctx : EqlbCtx, cands: Sequence[CandidateLike
         gone.append(ce)
         gone_set.add(ce)
 
-    return EqlbCtx(eqlbctx.N, {}, elim_lb, quota_lb, 0, [], \
-                   winners, gone, gone_set, {}, PXLEN)
+    # No transfer values: this bound never needs them. Callers that do need them
+    # (the displacement bound, prec_et) obtain them from a transfers_only walk.
+    # nq_cons_added and gone_pos are still shaped correctly so the context is
+    # structurally valid wherever it is passed on.
+    return EqlbCtx(eqlbctx.N, {}, elim_lb, quota_lb, 0, \
+                   [set() for _ in range(eqlbctx.N)], winners, gone, gone_set, \
+                   {c: i for i, c in enumerate(gone)}, PXLEN)
 
 
 
@@ -1655,70 +1697,6 @@ Ctx = tuple[list[Ballot], BallotMetadata, Sequence[CandLite], set[int], \
 _CTX: Optional[Ctx] = None
 
 
-# Worker-local profiler state: (profiler, output path, [last dump time]).
-_PROF: Optional[tuple[cProfile.Profile, str, list[float]]] = None
-
-
-def _start_worker_profile() -> None:
-    """Profile this pool worker, dumping stats periodically at task boundaries.
-
-    Opt-in via MSTV_PROFILE=<output dir>. Only pool workers are profiled:
-    _init_worker also runs in the parent (for pc == 1), and enabling a
-    profiler there before Pool() forks would leave every child with an
-    inherited, never-disabled profiler.
-
-    The search ends with pool.terminate(), so workers are SIGTERMed and never
-    unwind cleanly -- neither atexit nor a SIGTERM handler reliably produces a
-    complete dump. Instead each worker rewrites its own profile every
-    _PROF_INTERVAL seconds, so whatever is on disk when it is killed is a
-    valid profile of everything up to the last task boundary.
-    """
-    global _PROF
-
-    outdir = os.environ.get("MSTV_PROFILE")
-    if not outdir:
-        return
-    if multiprocessing.current_process().name == "MainProcess":
-        return
-
-    os.makedirs(outdir, exist_ok=True)
-
-    # Workers are recycled (maxtasksperchild), so a pid can recur; pick a
-    # free name once and keep rewriting it.
-    base = os.path.join(outdir, "worker_{}".format(os.getpid()))
-    path, n = base + ".prof", 0
-    while os.path.exists(path):
-        n += 1
-        path = "{}_{}.prof".format(base, n)
-
-    pr = cProfile.Profile()
-    _PROF = (pr, path, [time.time()])
-    pr.enable()
-
-
-_PROF_INTERVAL = 20.0
-
-
-def _profile_tick() -> None:
-    """Flush this worker's profile if the dump interval has elapsed."""
-    if _PROF is None:
-        return
-    pr, path, last = _PROF
-    now = time.time()
-    if now - last[0] < _PROF_INTERVAL:
-        return
-    last[0] = now
-    pr.disable()
-    try:
-        # Write via a temp file so a kill mid-dump cannot leave a truncated
-        # profile in place of the previous good one.
-        tmp = path + ".tmp"
-        pr.dump_stats(tmp)
-        os.replace(tmp, path)
-    finally:
-        pr.enable()
-
-
 def _init_worker(ballots: list[Ballot], ballot_metadata: BallotMetadata, \
                  candidates: Sequence[CandLite], \
                  winner_set: set[int], ncands: int, \
@@ -1727,7 +1705,6 @@ def _init_worker(ballots: list[Ballot], ballot_metadata: BallotMetadata, \
     global _CTX
     _CTX = (ballots, ballot_metadata, candidates, winner_set, ncands, args, quota, \
         tot_ballots, full_order_c, full_order_a)
-    _start_worker_profile()
 
 
 def collapse_order_q(order_q: dict[int, QRange]) -> dict[int, int]:
@@ -1785,8 +1762,22 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
             _eqlbctx  = compute_elim_quota_lb_STV26(_eqlbctx, candidates, ballots, \
                 node_order_c, node_order_a, quota, node_order_q)
     else:
-        _eqlbctx = compute_elim_quota_lb_BST19(_eqlbctx, candidates, ballots, node_order_c, \
+        _base = _eqlbctx
+        _eqlbctx = compute_elim_quota_lb_BST19(_base, candidates, ballots, node_order_c, \
                                      node_order_a, quota, node_order_q)
+
+        if _needs_transfers(args):
+            if args.useqprefix:
+                _tctx = compute_elim_quota_lb_STV26_q_prefix(_base, candidates, ballots, \
+                    node_order_c, node_order_a, quota, node_order_q, None, \
+                    transfers_only=True)
+            else:
+                _tctx = compute_elim_quota_lb_STV26(_base, candidates, ballots, \
+                    node_order_c, node_order_a, quota, node_order_q, \
+                    transfers_only=True)
+            _eqlbctx = _eqlbctx._replace(transfer=_tctx.transfer, \
+                gone_pos=_tctx.gone_pos)
+
     eqlb = max(0, math.ceil(max(_eqlbctx.elim_lb, _eqlbctx.quota_lb, _eqlbctx.no_quota_lb)))
     transfer = _eqlbctx.transfer
 
@@ -1863,7 +1854,19 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
     else:
         _eqlbctx  = compute_elim_quota_lb_BST19(eqlbctx, candidates, ballots, node_order_c, \
                 node_order_a, quota, node_order_q)
-        
+
+        if _needs_transfers(args):
+            if args.useqprefix:
+                _tctx = compute_elim_quota_lb_STV26_q_prefix(eqlbctx, candidates, \
+                    ballots, node_order_c, node_order_a, quota, node_order_q, \
+                    precomputed_elim_tallies, transfers_only=True)
+            else:
+                _tctx = compute_elim_quota_lb_STV26(eqlbctx, candidates, ballots, \
+                    node_order_c, node_order_a, quota, node_order_q, \
+                    transfers_only=True)
+            _eqlbctx = _eqlbctx._replace(transfer=_tctx.transfer, \
+                gone_pos=_tctx.gone_pos)
+
     eqlb = max(0, math.ceil(max(_eqlbctx.elim_lb, _eqlbctx.quota_lb, _eqlbctx.no_quota_lb)))
     transfer = _eqlbctx.transfer
 
@@ -2036,6 +2039,4 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
 def expand_node(fnode_data: FNodeData, running_ub: float) -> list[ChildResult]:
     """Node-granularity expansion: generate this node's children and evaluate
     them (serially within this call). Used when parallelism is over nodes."""
-    results = [eval_child(*c) for c in generate_children(fnode_data, running_ub)]
-    _profile_tick()
-    return results
+    return [eval_child(*c) for c in generate_children(fnode_data, running_ub)]
