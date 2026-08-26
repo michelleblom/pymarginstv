@@ -472,27 +472,6 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
     if order_q:
         qearliest = max(qearliest, max(order_q[c][0] for c in order_q))
 
-    # Check: did we just come out of a seating block and are now eliminating?
-    # If so, check whether we need to compute some additional no-quota bounds.
-    # Two shapes qualify: a run of two or more seatings followed by an
-    # elimination (tail [1, 1, 0]), and a complete prefix whose tail is padded
-    # with eliminations. Both leave the prefix ending in an elimination, so the
-    # quota rounds in the block are no longer ambiguous. Note this is a test on
-    # the shape of order_a, not on how many rounds this call is covering: start
-    # is 0 whenever the context is not cached, which says nothing about the tail.
-    lastseat = PXLEN - 1
-    while lastseat >= 0 and order_a[lastseat] == 0:
-        lastseat -= 1
-
-    if not transfers_only and 0 <= lastseat < PXLEN - 1 and (PXLEN == eqlbctx.N \
-        or (lastseat >= 1 and order_a[lastseat - 1] == 1)):
-        j = lastseat
-        while j >= 0 and order_a[j] == 1:
-            nqlb, nqs = backcompute_nq_bound(j, eqlbctx, cands, ballots, order_c, order_q, quota)
-            no_quota_lb = max(no_quota_lb, nqlb)
-            nq_cons_added[j].update(nqs)
-            j -= 1
-
     for i in range(start, PXLEN):
         ce = order_c[i]
 
@@ -513,8 +492,12 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
                 tallies = compute_round_tallies_q_prefix(ballots, gone, gone_set, \
                     transfer, winners, order_q, gone_pos, eqlbctx.N)
 
-            # No one should have a quota
-            no_quota_lb = max(0, tallies[ce] - quota)
+            # No one should have a quota. Accumulate, as elim_lb and quota_lb
+            # do: each round's no-quota cost is independently a valid lower
+            # bound, so the largest across the prefix is the one to keep.
+            # Assigning here discarded both the value inherited from a cached
+            # context and every earlier round's value in a multi-round call.
+            no_quota_lb = max(no_quota_lb, max(0, tallies[ce] - quota))
             others = [c.num for c in cands if c.num not in gone_set and c.num != ce]
             for c in others:
                 elim_lb = max(elim_lb, max(0, 0.5 * (tallies[ce] - tallies[c])))
@@ -542,16 +525,26 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
                 and ce in order_q and order_q[ce][0] == i \
                 and all(order_q[c][0] >= i for c in order_q if c not in gone_set)
 
+            # Only max_tallies feeds the bounds. min_tallies exists purely to
+            # cross-check that ce's two tallies agree, which they must: the
+            # ballot walk credits both together for any candidate in order_q,
+            # and ce always is. That check has caught a real error before -- it
+            # is what flagged the certainty threshold being set below qearliest
+            # -- so it is kept, but gated on __debug__ so both it and the work
+            # feeding it vanish under python -O.
             if i == 0:
-                min_tallies: list[float] = [cand.fp_votes for cand in cands]
-                max_tallies = min_tallies
+                max_tallies = [cand.fp_votes for cand in cands]
+                if __debug__:
+                    min_tallies: list[float] = max_tallies
             elif reuse_elim_tallies:
                 assert elim_tallies is not None
-                min_tallies = elim_tallies
                 max_tallies = elim_tallies
+                if __debug__:
+                    min_tallies = elim_tallies
             else:
-                min_tallies = [0.0] * eqlbctx.N
                 max_tallies = [0.0] * eqlbctx.N
+                if __debug__:
+                    min_tallies = [0.0] * eqlbctx.N
 
                 for b in ballots:
                     sv_add = None
@@ -570,8 +563,9 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
                         # p is either in order_q with a quota round later than
                         # the ballot's last move, or outside it and unable to
                         # hold a quota yet: either way the ballot stays with p.
-                        if p in order_q or move_r < qearliest:
-                            min_tallies[p] += sv_add
+                        if __debug__:
+                            if p in order_q or move_r < qearliest:
+                                min_tallies[p] += sv_add
 
                         # Otherwise p may or may not still hold the ballot, and
                         # we stop either way. Nothing later on this ballot can
@@ -594,10 +588,11 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
             if ce in order_q:  # candidate got a quota, else seated by default (last round)
                 winners.add(ce)
 
-                # Min/max tally should be the same
-                mint,maxt = min_tallies[ce],max_tallies[ce]
-                assert(abs(maxt-mint)<= epsilon)
-                cmax = maxt
+                # Min/max tally should be the same -- see above.
+                if __debug__:
+                    assert abs(max_tallies[ce] - min_tallies[ce]) <= epsilon
+
+                cmax = max_tallies[ce]
                 value = max(cmax, quota)  # restrict value to be at lest quota
                 tv = (value - quota)/value
                 transfer[ce] = (tv, tv)
@@ -617,6 +612,41 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
         gone.append(ce)
         gone_set.add(ce)
         gone_pos[ce] = i
+
+    # Did we come out of a seating block into eliminations? If so, work back
+    # over the block computing additional no-quota bounds. Two shapes qualify:
+    # a run of two or more seatings followed by an elimination (tail [1, 1, 0]
+    # -- and equally [1, 1, 0, 0, ...]), and a complete prefix whose tail is
+    # padded with eliminations. Both leave the prefix ending in an elimination,
+    # so the quota rounds in the block are no longer ambiguous. This is a test
+    # on the shape of order_a, not on how many rounds this call covered: start
+    # is 0 whenever the context is not cached, which says nothing about the tail.
+    #
+    # This runs after the round loop, not before it. backcompute_nq_bound reads
+    # transfer, winners and gone_pos to value ballots at round j, and only the
+    # completed walk has those for every round of the prefix. Run beforehand it
+    # was handed the incoming context, which covers rounds below eqlbctx.round
+    # only -- empty in the uncached path, and short by the newly seated round
+    # for a padded leaf. Seated candidates then looked eliminated and carried no
+    # surplus reduction, inflating the round tallies and so the bound, which is
+    # the unsound direction for a lower bound.
+    lastseat = PXLEN - 1
+    while lastseat >= 0 and order_a[lastseat] == 0:
+        lastseat -= 1
+
+    if not transfers_only and 0 <= lastseat < PXLEN - 1 and (PXLEN == eqlbctx.N \
+        or (lastseat >= 1 and order_a[lastseat - 1] == 1)):
+        # Context reflecting the whole prefix this call has now walked.
+        walked = eqlbctx._replace(transfer=transfer, winners=winners, \
+            gone=gone, gone_set=gone_set, gone_pos=gone_pos, \
+            nq_cons_added=nq_cons_added, round=PXLEN)
+
+        j = lastseat
+        while j >= 0 and order_a[j] == 1:
+            nqlb, nqs = backcompute_nq_bound(j, walked, cands, ballots, order_c, order_q, quota)
+            no_quota_lb = max(no_quota_lb, nqlb)
+            nq_cons_added[j].update(nqs)
+            j -= 1
 
     return EqlbCtx(eqlbctx.N, transfer, elim_lb, quota_lb, no_quota_lb, nq_cons_added, \
                    winners, gone, gone_set, gone_pos, PXLEN)
@@ -1753,7 +1783,7 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
     orig_prefix = node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == full_order_a[:l]
 
     transfer = None
-    _eqlbctx = EqlbCtx(ncands, {}, 0, 0, 0, [set()]*ncands, set(), [], set(), {}, 0)
+    _eqlbctx = EqlbCtx(ncands, {}, 0, 0, 0, [set() for _ in range(ncands)], set(), [], set(), {}, 0)
     if args.eqlb or args.eqlbc:
         if args.useqprefix:
             _eqlbctx = compute_elim_quota_lb_STV26_q_prefix(_eqlbctx, candidates, \
@@ -1839,7 +1869,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
     _disp_cache = None
 
     if not args.eqlbc:
-        eqlbctx = EqlbCtx(ncands, {}, 0, 0, 0, [set()]*ncands, set(), [], set(), {}, 0)
+        eqlbctx = EqlbCtx(ncands, {}, 0, 0, 0, [set() for _ in range(ncands)], set(), [], set(), {}, 0)
 
     if not args.dlbc:
         disp_cache = DispCache(ncands, False, {}, set(), None, None, None, None, 0, 0)
