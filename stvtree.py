@@ -1253,6 +1253,91 @@ def compute_disp_lb_STV26_q_prefix(disp_cache: DispCache, ballot_metadata : Ball
     return DispCache(ncand, new_winner, gone_pos, winners, above, present, min_r, reassign, norder, lowerbound)
 
 
+def build_disp_arrays(ballots: list[Ballot], node_order_c: list[int], \
+    rem: list[int], winners: set[int], transfer: dict[int, tuple[float, float]], \
+    N: int) -> tuple[list[float], list[float], list[list[float]], list[list[float]]]:
+    """
+        One pass over the ballots giving the four summaries the displacement
+        bound works from, evaluated at the outcome prefix node_order_c. This
+        is the non-quota-prefix counterpart of the pass inside
+        update_disp_cache_q_prefix.
+
+        With val(b) written for the value ballot b carries once the prefix has
+        been applied, and "standing" meaning not present in the prefix:
+
+          curtally[x]    = sum of val(b) over ballots whose first standing
+                           candidate is x -- a lower bound on x's tally
+          present[x]     = sum of val(b) over ballots that rank x
+          above[x][y]    = sum of val(b) over ballots ranking both x and y,
+                           with x above y
+          reassign[x][y] = sum of val(b) over ballots whose first standing
+                           candidate is x and whose next standing candidate is
+                           y: how much of x's pile would land on y were x the
+                           next candidate eliminated
+
+        Without exact quota rounds a ballot does not have a single value but a
+        range, and the two ends serve different purposes here. curtally and
+        reassign feed a lower bound on a tally and so take the elimination
+        bound elb; present and above feed upper bounds and take ub.
+    """
+    curtally: list[float] = [0.0] * N
+    present: list[float] = [0.0] * N
+    above: list[list[float]] = [[0.0] * N for _ in range(N)]
+    reassign: list[list[float]] = [[0.0] * N for _ in range(N)]
+
+    rem_set = set(rem)
+    for b in ballots:
+        pres = [p for p in b.prefs if p in rem_set]
+        if not pres:
+            continue
+
+        _, elb, ub = calc_tallies(b, node_order_c, transfer, winners)
+
+        c = pres[0]
+        curtally[c] += elb
+        if len(pres) > 1:
+            reassign[c][pres[1]] += elb
+
+        for i, x in enumerate(pres):
+            present[x] += ub
+            row = above[x]
+            for y in pres[i + 1:]:
+                row[y] += ub
+
+    return curtally, present, above, reassign
+
+
+def update_disp_cache(disp_cache: DispCache, ballots: list[Ballot], \
+    node_order_c: list[int], node_order_a: list[int], rem: list[int], \
+    transfer: dict[int, tuple[float, float]]) -> DispCache:
+    """
+        Non-quota-prefix counterpart of update_disp_cache_q_prefix. Rebuild
+        the displacement bound's ballot summaries at the prefix held by the
+        node about to be expanded, so that all of its children share the one
+        pass over the ballots rather than each paying for its own.
+
+        A reassign of None is how compute_disp_lb_STV26 records that it took
+        the incremental path: it can carry curtally, present and above forward
+        over an elimination but not the transfer table, so that has to be
+        rebuilt before the next expansion. When reassign is present the cache
+        is already complete and this does nothing.
+    """
+    if disp_cache.reassign is not None:
+        return disp_cache
+
+    # The set of prefix winners is compiled the same way compute_disp_lb_STV26
+    # compiles it, so that the ballot values cached here are the ones the bound
+    # would have computed for itself.
+    winners = {c for i, c in enumerate(node_order_c) if node_order_a[i] == 1}
+
+    curtally, present, above, reassign = build_disp_arrays(ballots, \
+        node_order_c, rem, winners, transfer, disp_cache.N)
+
+    # _replace returns a new tuple -- it does not mutate in place.
+    return disp_cache._replace(curtally=curtally, present=present, \
+        above=above, reassign=reassign)
+
+
 def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateLike], \
     ballots: list[Ballot], node_order_c: list[int], node_order_a: list[int], \
     winner_set: set[int], rem: list[int], quota: int, seats: int, \
@@ -1296,21 +1381,31 @@ def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateL
 
     """
     # Determine if we need an original loser to get seated sometime
-    # in the future (past the current outcome prefix)
-    new_winner = False
-    for i in range(len(node_order_c)):
-        if node_order_a[i] == 1:
-            if node_order_c[i] not in winner_set:
+    # in the future (past the current outcome prefix). new_winner is monotone
+    # down the tree -- once the prefix has changed who won, every extension of
+    # it has too -- so once set it is carried in the cache and the rounds
+    # already scanned are not scanned again. Without -dlbc the cache handed in
+    # is blank (new_winner False, start 0) and this is the full scan it always
+    # was.
+    new_winner: bool = disp_cache.new_winner
+    norder: int = len(node_order_c)
+    if not new_winner:
+        for i in range(disp_cache.start, norder):
+            if node_order_a[i] == 1:
+                if node_order_c[i] not in winner_set:
+                    new_winner = True
+                    break
+            elif node_order_c[i] in winner_set:
                 new_winner = True
                 break
-        elif node_order_c[i] in winner_set:
-            new_winner = True
-            break
 
     # The displacement argument only applies while the prefix still leaves the
     # original outcome intact. Persist the flag so descendants short circuit
-    # here without rescanning. Note we deliberately do not advance start: it is
-    # paired with gone_pos, which this path does not extend.
+    # here without rescanning. Note we deliberately do not advance start: this
+    # path leaves the cached arrays describing an earlier prefix, and a
+    # descendant must not go on to extend them. It never does -- new_winner is
+    # sticky, so every descendant returns here too -- but leaving start behind
+    # keeps that from depending on the caller.
     if new_winner:
         return disp_cache._replace(new_winner=True, lowerbound=0)    
 
@@ -1336,56 +1431,62 @@ def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateL
     winners = {c for i, c in enumerate(node_order_c) if node_order_a[i] == 1}
 
     ncand = len(candidates)
-    rem_set = set(rem)
     og_winners_set = set(og_winners)
 
-    # One pass over the ballots giving, for every candidate still standing:
-    #
-    #   min_r[x]    = lower bound on x's tally -- the elimination-bound value
-    #                 of the ballots whose first still standing candidate is x
-    #   present[x]  = upper-bound value of every ballot that ranks x
-    #   above[x][y] = upper-bound value of the ballots ranking both x and y,
-    #                 with x above y
-    #
-    # Everything the bound below needs about an original loser ogl follows
-    # from those without touching the ballots again:
+    # The bound reads four summaries of the ballots, evaluated at this prefix
+    # (see build_disp_arrays for what each holds). Everything it needs about an
+    # original loser ogl follows from present and above without touching the
+    # ballots again:
     #
     #   max_ogl  = present[ogl]                  (every ballot that could reach ogl)
     #   max_l[r] = present[ogl] - above[r][ogl]  (of those, the ones on which ogl
     #                                             outlasts r: r is either absent
     #                                             or ranked below ogl)
     #
-    # This replaces a full scan of the ballots for every original loser still
-    # standing, which is where nearly all of this function's time used to go.
-    # It is the same formulation compute_disp_lb_STV26_q_prefix uses, and it
-    # carries over unchanged because the identity is about rankings alone --
-    # knowing the exact round in which each winner reached a quota does not
-    # enter into it. The two ballot values do have to be kept apart: min_r is
-    # a lower bound and so accumulates the elimination bound elb, while
-    # present and above are upper bounds and accumulate ub.
+    # When this prefix extends the cached one by a single elimination, all four
+    # summaries can be carried forward instead of recomputed. Appending an
+    # eliminated candidate ce to the prefix leaves every ballot's value alone:
+    # calc_tallies gains one loop iteration that only records ce as eliminated,
+    # and the sole quantity that changes is the seating lower bound b_value_slb,
+    # via final_block, which this bound never reads. So:
     #
-    # These arrays are rebuilt on every call. They are what the q-prefix
-    # variant caches across nodes and reuses incrementally when a prefix is
-    # extended by an elimination; that is a separate change and is not done
-    # here.
-    min_r: list[float] = [0.0] * ncand
-    present: list[float] = [0.0] * ncand
-    above: list[list[float]] = [[0.0] * ncand for _ in range(ncand)]
+    #   - present and above are unchanged. Their entries are indexed by pairs of
+    #     standing candidates, and dropping ce from the standing set does not
+    #     alter whether any other pair stands, nor the value on the ballot. The
+    #     entries for ce itself are simply never read again.
+    #   - the ballots that sat with ce move to their next standing candidate,
+    #     which is exactly what reassign[ce] records, so
+    #     min_r = curtally + reassign[ce].
+    #
+    # This holds without knowing the round in which each prefix winner reached
+    # a quota, so it carries over from the quota-prefix variant unchanged. What
+    # cannot be carried forward is reassign itself: a ballot's *next* standing
+    # candidate after ce is gone is not recoverable from the old table. Leaving
+    # it as None tells update_disp_cache to rebuild all four, once, before this
+    # node's children are evaluated.
+    #
+    # Reaching here means the prefix is the cached one plus exactly one round.
+    # The other shapes -- a leaf padded out with the remaining eliminations, and
+    # a node whose remaining seats equal its remaining candidates -- have rem
+    # empty or sleft == nleft and returned above, and leaves are never expanded.
+    cached_curtally = disp_cache.curtally
+    cached_reassign = disp_cache.reassign
+    cached_present = disp_cache.present
+    cached_above = disp_cache.above
 
-    for b in ballots:
-        pres = [p for p in b.prefs if p in rem_set]
-        if not pres:
-            continue
-
-        _, elb, ub = calc_tallies(b, node_order_c, transfer, winners)
-
-        min_r[pres[0]] += elb
-
-        for i, x in enumerate(pres):
-            present[x] += ub
-            row = above[x]
-            for y in pres[i + 1:]:
-                row[y] += ub
+    reassign: Optional[list[list[float]]]
+    if node_order_a[-1] == 0 and cached_curtally is not None \
+        and cached_reassign is not None and cached_present is not None \
+        and cached_above is not None:
+        ce = node_order_c[-1]
+        ce_row = cached_reassign[ce]
+        min_r = [cached_curtally[c] + ce_row[c] for c in range(ncand)]
+        reassign = None
+        present = cached_present
+        above = cached_above
+    else:
+        min_r, present, above, reassign = build_disp_arrays(ballots, \
+            node_order_c, rem, winners, transfer, ncand)
 
     # calculate how much it costs to seat ogl
     lowerbound = np.inf
@@ -1416,7 +1517,14 @@ def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateL
     # Snap away floating-point noise before rounding up (see the q-prefix
     # variant): a bound that is mathematically an integer can land just above
     # it and spuriously inflate this lower bound past its true value.
-    return disp_cache._replace(lowerbound=math.ceil(lowerbound - 1e-4))
+    lowerbound = math.ceil(lowerbound - 1e-4)
+
+    # gone_pos is carried through untouched: the quota-prefix variant needs it
+    # to value ballots, this one does not -- calc_tallies takes no such
+    # argument. start is therefore paired only with the new_winner scan here,
+    # and is advanced to cover the rounds just scanned.
+    return DispCache(ncand, new_winner, disp_cache.gone_pos, winners, above, \
+        present, min_r, reassign, norder, lowerbound)
 
 
 def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates: list[Candidate], \
@@ -2059,6 +2167,13 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
             elim_tallies = compute_round_tallies_q_prefix(ballots, \
                 eqlbctx.gone, eqlbctx.gone_set, eqlbctx.transfer, \
                 eqlbctx.winners, forder_q, eqlbctx.gone_pos, ncands)
+
+    elif args.dlbc:
+        # Same amortisation for the variant that does not pin quota rounds:
+        # rebuild the displacement bound's ballot summaries at this node once,
+        # for all of its children to share, rather than once per child.
+        disp_cache = update_disp_cache(disp_cache, ballots, forder_c, forder_a, \
+            frem, eqlbctx.transfer)
    
                 
     # Add a candidate to the end of the outcome prefix represented
