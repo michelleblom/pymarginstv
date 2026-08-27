@@ -771,13 +771,102 @@ def calc_tallies_q_prefix(b: Ballot, gone: list[int], transfer: dict[int, tuple[
     return b_value, move_r
 
 
+class RoundTallies(NamedTuple):
+    """
+        Per-candidate summaries of the ballots at the start of one round of an
+        outcome prefix, computed once for the node being expanded and read by
+        all of its children.
+
+        Without exact quota rounds a ballot does not have a single value but a
+        range, and the elimination-quota bound reads three different points of
+        that range, so the sums are kept apart:
+
+        ub_first[x]   : upper-bound value of the ballots whose first still
+                        standing candidate is x
+        ub_present[x] : upper-bound value of every ballot on which x still
+                        stands. This is what x's tally could be when the round
+                        before was a seating, where it is not settled which
+                        pile a ballot sits in
+        elb_gain[x]   : elimination-bound value of the ballots that have
+                        reached x from an earlier preference -- whose first
+                        still standing candidate is x, but whose first
+                        preference was not
+        slb_first[x]  : seating lower-bound value of the ballots whose first
+                        still standing candidate is x
+    """
+    ub_first: list[float]
+    ub_present: list[float]
+    elb_gain: list[float]
+    slb_first: list[float]
+
+
+def compute_round_tallies(ballots: list[Ballot], gone: list[int], \
+    gone_set: set[int], transfer: dict[int, tuple[float, float]], \
+    winners: set[int], N: int) -> RoundTallies:
+    """
+        One pass over the ballots giving, for every candidate at once,
+        everything the elimination-quota bound needs to know about the round
+        that follows the prefix `gone`.
+
+        This is the counterpart of compute_round_tallies_q_prefix, and it
+        covers more of the work than that one does. calc_tallies never consults
+        order_q, so a ballot's value here depends only on gone, transfer and
+        winners, all three fixed by the prefix of the node being expanded.
+        Every child of that node therefore sees exactly the same ballot values,
+        whether the child eliminates a candidate or seats one, and this single
+        pass serves all of them. The quota-prefix variant has to work out
+        whether a child's quota rounds allow its tallies to be reused
+        (reuse_elim_tallies); there is no analogue of that test here.
+
+        final_block, which decides the seating lower bound inside calc_tallies,
+        is read off the trailing seatings of `gone`, so it too is the same for
+        every child.
+    """
+    ub_first = [0.0] * N
+    ub_present = [0.0] * N
+    elb_gain = [0.0] * N
+    slb_first = [0.0] * N
+
+    for b in ballots:
+        prefs = [p for p in b.prefs if p not in gone_set]
+
+        if not prefs:  # ballot is exhausted
+            continue
+
+        slb_add, elb_add, ub_add = calc_tallies(b, gone, transfer, winners)
+
+        first = prefs[0]
+        ub_first[first] += ub_add
+        slb_first[first] += slb_add
+
+        # The bound credits a candidate being eliminated only with the ballots
+        # that reached them from an earlier preference; their first preferences
+        # are already counted in fp_votes.
+        if b.prefs[0] != first:
+            elb_gain[first] += elb_add
+
+        for p in prefs:
+            ub_present[p] += ub_add
+
+    return RoundTallies(ub_first, ub_present, elb_gain, slb_first)
+
+
 def compute_elim_quota_lb_STV26(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike], \
     ballots: list[Ballot], order_c: list[int], order_a: list[int], \
-    quota: int, order_q: dict[int, QRange], transfers_only: bool = False) \
-    -> EqlbCtx:
+    quota: int, order_q: dict[int, QRange], \
+    precomputed: Optional[RoundTallies] = None, \
+    transfers_only: bool = False) -> EqlbCtx:
     """
     With transfers_only set, walk the prefix purely to maintain transfer values,
     accumulating none of the bounds. See the quota-prefix variant for why.
+
+    precomputed holds the round tallies that generate_children computed once for
+    the node being expanded (-prec_et). They describe the round at the start of
+    the walk, so they apply when i == eqlbctx.round, and every child of the node
+    can use them: see compute_round_tallies. Round 0 has its own first
+    preference shortcut and needs none of this, which is why they are only worth
+    computing alongside -eqlbc, the setting under which the walk starts
+    somewhere past round 0.
 
     This function calculates the lower bound on the number of votes that need to be changed
     to alter the outcome of an election prefix. It does this by considering the elimination and quota
@@ -825,6 +914,15 @@ def compute_elim_quota_lb_STV26(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike]
             # dict of remaining candidates (eliminated or seated after ce)
             if i == 0:
                 max_others : dict[int,float] = {c.num: cands[c.num].fp_votes for c in cands if c.num != ce}
+            elif i == start and precomputed is not None:
+                # Both quantities the branch below walks the ballots for are
+                # per-candidate sums the shared pass has already taken: what
+                # each other candidate holds, and what has reached ce from an
+                # earlier preference.
+                ub_first = precomputed.ub_first
+                max_others = {c.num: ub_first[c.num] for c in cands \
+                    if c.num not in gone_set and c.num != ce}
+                min_ce += precomputed.elb_gain[ce]
             else:
                 max_others = {c.num: 0 for c in cands if c.num not in gone_set and c.num != ce}
 
@@ -849,6 +947,18 @@ def compute_elim_quota_lb_STV26(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike]
                 if i == 0:
                     lb_value = cands[ce].fp_votes
                     ub_value = lb_value
+                elif i == start and precomputed is not None:
+                    lb_value = precomputed.slb_first[ce]
+                    # Whether the round before this one was a seating is a
+                    # property of the prefix the children share, so this picks
+                    # the same sum for every one of them. After a seating it is
+                    # not settled which pile a ballot sits in, and ce's tally
+                    # could be as high as the value on every ballot that still
+                    # ranks them; otherwise it is the ballots that sit with ce.
+                    if order_a[i-1] == 1:
+                        ub_value = precomputed.ub_present[ce]
+                    else:
+                        ub_value = precomputed.ub_first[ce]
                 else:
                     lb_value = 0  # lb on value of ballots
                     ub_value = 0  # ub on value of ballots (quota <= lb_value <= ub_value <= len(ballots))
@@ -955,11 +1065,12 @@ def _needs_transfers(args: argparse.Namespace) -> bool:
     """Does anything in this configuration consume transfer values?
 
     The displacement bound reads them via calc_tallies, and prec_et's round
-    tallies do too. Neither computes them: they come from the elimination/quota
-    bound as a side effect. So when that bound is switched off and BST19 stands
-    in for it, the prefix still has to be walked for transfers alone.
+    tallies do too, in both prefix variants. Neither computes them: they come
+    from the elimination/quota bound as a side effect. So when that bound is
+    switched off and BST19 stands in for it, the prefix still has to be walked
+    for transfers alone.
     """
-    return bool(args.dlb or args.dlbc or (args.prec_et and args.useqprefix))
+    return bool(args.dlb or args.dlbc or args.prec_et)
 
 
 def compute_elim_quota_lb_BST19(eqlbctx : EqlbCtx, cands: Sequence[CandidateLike], \
@@ -2040,7 +2151,12 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
 def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node_order_c: list[int], \
                node_order_a: list[int], node_order_q: dict[int, QRange], \
                node_winners: set[int], rem: list[int], isleaf: bool, \
-               running_ub: float, precomputed_elim_tallies: Optional[list[float]] = None) -> ChildResult:
+               running_ub: float, precomputed_elim_tallies: Optional[Any] = None) -> ChildResult:
+    # precomputed_elim_tallies is whatever generate_children computed once for
+    # this node under -prec_et, and the two prefix variants carry different
+    # payloads: a single list of round tallies for the quota-in-prefix bound, a
+    # RoundTallies of four sums for the other. Only one variant is ever active,
+    # and each narrows the value in its own signature.
     assert _CTX is not None
     ballots, ballot_metadata, candidates, winner_set, ncands, args, quota, tot_ballots, \
         _, _ = _CTX
@@ -2062,7 +2178,8 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
                 ballots, node_order_c, node_order_a, quota, node_order_q, precomputed_elim_tallies)
         else:
             _eqlbctx = compute_elim_quota_lb_STV26(eqlbctx, candidates, ballots, \
-                node_order_c, node_order_a, quota, node_order_q)
+                node_order_c, node_order_a, quota, node_order_q, \
+                precomputed_elim_tallies)
     else:
         _eqlbctx  = compute_elim_quota_lb_BST19(eqlbctx, candidates, ballots, node_order_c, \
                 node_order_a, quota, node_order_q)
@@ -2076,7 +2193,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
             else:
                 _tctx = compute_elim_quota_lb_STV26(eqlbctx, candidates, ballots, \
                     node_order_c, node_order_a, quota, node_order_q, \
-                    transfers_only=True)
+                    precomputed_elim_tallies, transfers_only=True)
             _eqlbctx = _eqlbctx._replace(transfer=_tctx.transfer, \
                 gone_pos=_tctx.gone_pos)
 
@@ -2154,8 +2271,14 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
     eqlbctx, disp_cache, forder_c, forder_a, forder_q, frem, fwinners, fdist = fnode_data
 
     children: list[tuple[float, EqlbCtx, DispCache, list[int], list[int], \
-        dict[int, QRange], set[int], list[int], bool, float, Optional[list[float]]]] = []
+        dict[int, QRange], set[int], list[int], bool, float, Optional[Any]]] = []
 
+    # Work done once here, for all of this node's children to share. The round
+    # tallies are only read at round eqlbctx.round, and without -eqlbc
+    # eval_child hands the bound a blank context, so its walk starts at round 0
+    # -- which has its own first preference shortcut and reads nothing. Pairing
+    # the test with args.eqlbc keeps that from being a ballot pass whose result
+    # no child looks at.
     elim_tallies = None
     if args.useqprefix:
         if args.dlbc:
@@ -2163,17 +2286,28 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
             disp_cache = update_disp_cache_q_prefix(disp_cache, ballots, forder_c, \
                 forder_q, frem, eqlbctx.transfer) 
 
-        if args.prec_et:
+        if args.prec_et and args.eqlbc:
             elim_tallies = compute_round_tallies_q_prefix(ballots, \
                 eqlbctx.gone, eqlbctx.gone_set, eqlbctx.transfer, \
                 eqlbctx.winners, forder_q, eqlbctx.gone_pos, ncands)
 
-    elif args.dlbc:
-        # Same amortisation for the variant that does not pin quota rounds:
-        # rebuild the displacement bound's ballot summaries at this node once,
-        # for all of its children to share, rather than once per child.
-        disp_cache = update_disp_cache(disp_cache, ballots, forder_c, forder_a, \
-            frem, eqlbctx.transfer)
+    else:
+        if args.dlbc:
+            # Same amortisation for the variant that does not pin quota rounds:
+            # rebuild the displacement bound's ballot summaries at this node
+            # once, for all of its children to share, rather than once per
+            # child.
+            disp_cache = update_disp_cache(disp_cache, ballots, forder_c, forder_a, \
+                frem, eqlbctx.transfer)
+
+        if args.prec_et and args.eqlbc:
+            # One pass covering every child, the ones that seat a candidate
+            # included: see compute_round_tallies. The winners set and transfer
+            # values are taken from the same context eval_child will resume the
+            # walk from, so the ballot values here are the ones the bound would
+            # have computed for itself.
+            elim_tallies = compute_round_tallies(ballots, eqlbctx.gone, \
+                eqlbctx.gone_set, eqlbctx.transfer, eqlbctx.winners, ncands)
    
                 
     # Add a candidate to the end of the outcome prefix represented
