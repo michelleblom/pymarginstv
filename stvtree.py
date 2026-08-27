@@ -379,7 +379,7 @@ def compute_round_tallies_q_prefix(ballots: list[Ballot], \
     order_q: dict[int, QRange], gone_pos: dict[int, int], N: int) -> list[float]:
     """
     One ballot pass giving each still-standing candidate's tally at the start of
-    the round following prefix `gone`. This method only give the correct tallies
+    the round following prefix `gone`. This method only gives the correct tallies
     in the context where a candidate is to be eliminated this round (no ballots
     will skip any candidates, and we can safely give each ballot to its first
     ranked remaining candidate).
@@ -495,8 +495,6 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
             # No one should have a quota. Accumulate, as elim_lb and quota_lb
             # do: each round's no-quota cost is independently a valid lower
             # bound, so the largest across the prefix is the one to keep.
-            # Assigning here discarded both the value inherited from a cached
-            # context and every earlier round's value in a multi-round call.
             no_quota_lb = max(no_quota_lb, max(0, tallies[ce] - quota))
             others = [c.num for c in cands if c.num not in gone_set and c.num != ce]
             for c in others:
@@ -506,6 +504,11 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
 
 
         else:  # candidate seated
+            # Note: the only tallies we care about in this else branch are
+            # the maximum tally of the candidate seated in this round, and 
+            # the maximum tallies of any continuing candidate that is 
+            # recorded to have a quota at the start of this round.
+             
             # Can the ballot walk below be replaced by the round tallies
             # prec_et already computed once for this expansion? It can when
             # every candidate still standing that has a quota round recorded
@@ -1053,6 +1056,10 @@ def build_disp_cache_initial_q_prefix(N: int, candidates: Sequence[CandidateLike
 def update_disp_cache_q_prefix(disp_cache: DispCache, ballots: list[Ballot], node_order_c: list[int], \
     node_order_q: dict[int, QRange], rem: list[int], transfer: dict[int, tuple[float,float]]) -> DispCache:
 
+    # reassign[g][x] is the transfer table: the total ballot value sitting on ballots whose first 
+    # still-standing candidate is g and whose next still-standing candidate is x. In other words, 
+    # if g were the next one eliminated, reassign[g][x] is how much of g's pile would land on x.
+    # It exists purely to make the displacement bound incremental. 
     if disp_cache.reassign == None:
         N = disp_cache.N
         min_r : list[float] =  [0]*N
@@ -1066,7 +1073,7 @@ def update_disp_cache_q_prefix(disp_cache: DispCache, ballots: list[Ballot], nod
             if not pres:
                 continue
             c = pres[0]
-            # This block changed in this quota-specific version of margin-stv
+           
             value, move_r = calc_tallies_q_prefix(b, node_order_c, transfer, disp_cache.winners, \
                 node_order_q, disp_cache.gone_pos)
 
@@ -1466,9 +1473,12 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
         # for every expansion). Workers are recycled periodically to bound
         # any memory retained by the MINLP solver across solves.
         pool = Pool(processes=args.pc, initializer=_init_worker, \
-            initargs=initargs, maxtasksperchild=50)
+            initargs=initargs, maxtasksperchild=50) # TODO: query maxtasksperchild
 
     try:
+        # Each element in this list will contain: order_c, order_a, order_q,
+        # winners so far, and continuining candidate list for the cihld node, 
+        # and current running_ub.
         children: list[tuple[list[int], list[int], dict[int, QRange], \
             set[int], list[int], float]] = []
 
@@ -1600,6 +1610,12 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                 expanded = [expand_node(*t) for t in toexpand]
 
             for child_results in expanded:
+                # Result format: boolean indicating whether the child is a complete outcome; context cache for 
+                # computation of the EQLB; context cache for computation of the DLB; order_c, order_a, and order_q
+                # for the node; overall heuristic LB assigned to child along with DLB and EQLB; MINLP distance computed
+                # for the node alongside upper bound (they will differ if the MINLP did not get to solve to optimality),
+                # note when MINLP not solved, the dist will be the heuristic LB; new set of continuing candidates; winners 
+                # so far in the child; a boolean indicating whether the MINLP was solved for the child.  
                 for isleaf, eqlbctx, disp_cache, node_order_c, node_order_a, node_order_q, lb, dlb, eqlb, dist, \
                         dist_ub, new_rem, node_winners, solved in child_results:
 
@@ -1641,6 +1657,7 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
 
                         frontier.prune(running_ub, log=log)
                     else:
+                        # Context caches are stored with each node so they can be used by its children
                         newn = TreeNode(node_order_c, node_order_a, node_order_q, \
                                         node_winners, new_rem, eqlbctx, disp_cache, dist, dist_ub)
 
@@ -1689,6 +1706,9 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                 print("Time elapsed {}s".format(tnow - tstart), file=log, flush=True)
 
             if tlimit != None and tnow - tstart > tlimit:
+                # return current LB, UB on the LB, number of expansions, number of 
+                # MINLP solves, number of nodes we could ignore via subsumption rules,
+                # and number of pruned nodes (as their LB was >= running UB on margin LB). 
                 return running_lb, running_ub, nexps, nsolves, frontier.ignore_cntr,\
                     frontier.agg_prune_cntr
 
@@ -1726,7 +1746,10 @@ Ctx = tuple[list[Ballot], BallotMetadata, Sequence[CandLite], set[int], \
 
 _CTX: Optional[Ctx] = None
 
-
+# This is here to intialise some context that doesn't change over the course
+# of the algorithm, but that all workers who are expanding nodes will use.
+# This allows the workers to have access to this information without having 
+# to repeatedly pass it to them via pickling.
 def _init_worker(ballots: list[Ballot], ballot_metadata: BallotMetadata, \
                  candidates: Sequence[CandLite], \
                  winner_set: set[int], ncands: int, \
@@ -1737,6 +1760,9 @@ def _init_worker(ballots: list[Ballot], ballot_metadata: BallotMetadata, \
         tot_ballots, full_order_c, full_order_a)
 
 
+# Rather than use two different types for order_q depending on whether we 
+# are using the q_prefix variant or not, just use the same type. For the 
+# q_prefix variant, the two values in the QRange will be the same.
 def collapse_order_q(order_q: dict[int, QRange]) -> dict[int, int]:
     """
         Collapse quota-round ranges to the single exact round expected by
@@ -1770,10 +1796,15 @@ def solve_stvdistance(candidates: Sequence[CandidateLike], \
         upperbound, last_round, lowerbound, isleaf)
 
 
+# We have two separate "evaluation" functions for nodes depending on whether they
+# are the "initial" nodes we are adding to the frontier at the start of the 
+# algorithm or whether they are children that have been generated through expansion.
 def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
                        node_order_q: dict[int, QRange], node_winners: set[int], \
                        rem: list[int], running_ub: float) \
                        -> tuple[float, float, float, TreeNode, bool]:
+    # Get the context that was initialised through init_worker. Note that full_order_c
+    # and full_order_a represents the reported complete outcome.
     assert _CTX is not None
     ballots, ballot_metadata, candidates, winner_set, ncands, args, quota, tot_ballots, \
         full_order_c, full_order_a = _CTX
@@ -1796,6 +1827,10 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
         _eqlbctx = compute_elim_quota_lb_BST19(_base, candidates, ballots, node_order_c, \
                                      node_order_a, quota, node_order_q)
 
+        # This segment of code is here because if we are using only dlb(c) and not eqlb(c),
+        # then we can't make use of the transfer value data structure that gets populated 
+        # when computing the EQLB. Instead, we have to compute it so that subsequent calls
+        # to the DLB computation will have the transfer values of prior seated candidates.
         if _needs_transfers(args):
             if args.useqprefix:
                 _tctx = compute_elim_quota_lb_STV26_q_prefix(_base, candidates, ballots, \
@@ -1817,6 +1852,9 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
     _disp_cache = DispCache(ncands, False, {}, set(), ballot_metadata.above, \
                     ballot_metadata.mentions, [c.fp_votes for c in candidates], \
                     ballot_metadata.reassign, 0, 0)
+
+    # Short circuit if we have already established that the LB for the node is 
+    # going to be equal to or greater than our running UB on the margin LB. 
     if eqlb >= running_ub:
         return eqlb, 0, eqlb, TreeNode(node_order_c, node_order_a, node_order_q, \
             node_winners, rem, _eqlbctx, _disp_cache, eqlb, eqlb), False
@@ -1845,6 +1883,8 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
         return lb, disp_lowerbound, eqlb, TreeNode(node_order_c, node_order_a, node_order_q, \
             node_winners, rem, _eqlbctx, _disp_cache, lb, lb), False
 
+    # Note: MINLP is only tractable to solve when sequences of eliminated candidates, minus
+    # the last eliminated candidate in the sequence, are merged into a "super candidate". 
     merge_map = {c.num: c.num for c in candidates}
 
     # Evaluate distance for our new tree node.
@@ -1855,7 +1895,7 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
     return lb, disp_lowerbound, eqlb, TreeNode(node_order_c, \
           node_order_a, node_order_q, node_winners, rem, _eqlbctx, _disp_cache, dist, dist_ub), True
 
-
+# Only called to evaluate children that have been generated as a result of an expansion.
 def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node_order_c: list[int], \
                node_order_a: list[int], node_order_q: dict[int, QRange], \
                node_winners: set[int], rem: list[int], isleaf: bool, \
@@ -1868,6 +1908,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
     _eqlbctx  = None
     _disp_cache = None
 
+    # If we are not utilising context caching, pass in "blank" contexts to our LB computation functions.
     if not args.eqlbc:
         eqlbctx = EqlbCtx(ncands, {}, 0, 0, 0, [set() for _ in range(ncands)], set(), [], set(), {}, 0)
 
@@ -1885,6 +1926,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
         _eqlbctx  = compute_elim_quota_lb_BST19(eqlbctx, candidates, ballots, node_order_c, \
                 node_order_a, quota, node_order_q)
 
+        # See description for this code segment in eval_child_initial.
         if _needs_transfers(args):
             if args.useqprefix:
                 _tctx = compute_elim_quota_lb_STV26_q_prefix(eqlbctx, candidates, \
@@ -1905,10 +1947,8 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
         return (isleaf, _eqlbctx, disp_cache, node_order_c, node_order_a, node_order_q, eqlb, \
                 0, eqlb, eqlb, eqlb, rem, node_winners, False)
     
-    # An empty transfer is legitimate -- no prefix winner has a transfer value
-    # yet -- so test for None, not truthiness, matching eval_child_initial.
+    # An empty transfer is legitimate if no prefix winner has a transfer value yet
     if (args.dlb or args.dlbc) and transfer is not None:
-        # Note, if we don't compute eqlb prior transfer will not be up to date.
         if args.useqprefix:
             _disp_cache = compute_disp_lb_STV26_q_prefix(disp_cache, ballot_metadata, \
                 ballots, node_order_c, node_order_a, node_order_q, \
@@ -1980,7 +2020,7 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
         if args.dlbc:
             # Recompute reassign, above, present
             disp_cache = update_disp_cache_q_prefix(disp_cache, ballots, forder_c, \
-                forder_q, frem, eqlbctx.transfer) # Need to fix for case where we don't have eqlb on
+                forder_q, frem, eqlbctx.transfer) 
 
         if args.prec_et:
             elim_tallies = compute_round_tallies_q_prefix(ballots, \
@@ -2045,6 +2085,10 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
                     # end would break immediately and generate no child at
                     # all, silently dropping every leaf outcome that ends
                     # with a seating.
+
+                    # Here, we are creating a child for each round in which
+                    # r could have first had their quota at the start of the
+                    # round.
                     LENF = len(forder_a)
                     minqr = LENF
                     if forder_a[-1] == 1:
