@@ -1335,18 +1335,57 @@ def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateL
 
     winners = {c for i, c in enumerate(node_order_c) if node_order_a[i] == 1}
 
-    min_r : dict[int,float] = {c.num: 0 for c in candidates if c.num in rem}
-    filtered_ballots = []
-    for b in ballots:
-        prefs = [p for p in b.prefs if p in rem]
-        if not prefs:
-            continue
-        _, elb, ub = calc_tallies(b, node_order_c, transfer, winners)
-        filtered_ballots.append((b.ranks, elb, ub))
-        min_r[prefs[0]] += elb
-
-
     ncand = len(candidates)
+    rem_set = set(rem)
+    og_winners_set = set(og_winners)
+
+    # One pass over the ballots giving, for every candidate still standing:
+    #
+    #   min_r[x]    = lower bound on x's tally -- the elimination-bound value
+    #                 of the ballots whose first still standing candidate is x
+    #   present[x]  = upper-bound value of every ballot that ranks x
+    #   above[x][y] = upper-bound value of the ballots ranking both x and y,
+    #                 with x above y
+    #
+    # Everything the bound below needs about an original loser ogl follows
+    # from those without touching the ballots again:
+    #
+    #   max_ogl  = present[ogl]                  (every ballot that could reach ogl)
+    #   max_l[r] = present[ogl] - above[r][ogl]  (of those, the ones on which ogl
+    #                                             outlasts r: r is either absent
+    #                                             or ranked below ogl)
+    #
+    # This replaces a full scan of the ballots for every original loser still
+    # standing, which is where nearly all of this function's time used to go.
+    # It is the same formulation compute_disp_lb_STV26_q_prefix uses, and it
+    # carries over unchanged because the identity is about rankings alone --
+    # knowing the exact round in which each winner reached a quota does not
+    # enter into it. The two ballot values do have to be kept apart: min_r is
+    # a lower bound and so accumulates the elimination bound elb, while
+    # present and above are upper bounds and accumulate ub.
+    #
+    # These arrays are rebuilt on every call. They are what the q-prefix
+    # variant caches across nodes and reuses incrementally when a prefix is
+    # extended by an elimination; that is a separate change and is not done
+    # here.
+    min_r: list[float] = [0.0] * ncand
+    present: list[float] = [0.0] * ncand
+    above: list[list[float]] = [[0.0] * ncand for _ in range(ncand)]
+
+    for b in ballots:
+        pres = [p for p in b.prefs if p in rem_set]
+        if not pres:
+            continue
+
+        _, elb, ub = calc_tallies(b, node_order_c, transfer, winners)
+
+        min_r[pres[0]] += elb
+
+        for i, x in enumerate(pres):
+            present[x] += ub
+            row = above[x]
+            for y in pres[i + 1:]:
+                row[y] += ub
 
     # calculate how much it costs to seat ogl
     lowerbound = np.inf
@@ -1354,31 +1393,16 @@ def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateL
         displacement_cost = np.inf
         left_at_end_costs = []
 
-        max_l = [0.0]*ncand
+        max_ogl = present[ogl]
 
-        max_ogl = 0.0
-        for ranks, elb, ub in filtered_ballots:
-            posl = ranks[ogl]
-            if posl != -1:
-                max_ogl += ub
-
-            # calculate how much it costs to displace r with ogl
-            for r in rem:
-                if r == ogl:
-                    continue
-                
-                posw = ranks[r]
-                if posl != -1 and (posw == -1 or posl < posw):  # ogl ranked above ogw
-                      max_l[r] += ub
-
-        
         for r in rem:
             if r == ogl:
-                continue;
+                continue
 
-            dp = max(0.0, 0.5 * (min_r[r] - max_l[r]))
+            max_l_r = max_ogl - above[r][ogl]  # value on ballots where ogl outlasts r
+            dp = max(0.0, 0.5 * (min_r[r] - max_l_r))
             left_at_end_costs.append(dp)
-            if r in og_winners:
+            if r in og_winners_set:
                 displacement_cost = min(displacement_cost, dp)
 
         quota_cost = max(0, quota - max_ogl)
@@ -1392,7 +1416,7 @@ def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateL
     # Snap away floating-point noise before rounding up (see the q-prefix
     # variant): a bound that is mathematically an integer can land just above
     # it and spuriously inflate this lower bound past its true value.
-    return disp_cache._replace(lowerbound=math.ceil(lowerbound - 1e-6))
+    return disp_cache._replace(lowerbound=math.ceil(lowerbound - 1e-4))
 
 
 def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates: list[Candidate], \
@@ -1469,11 +1493,20 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
 
     pool = None
     if args.pc > 1:
+        # maxtasksperchild=50 tells each worker process to exit and be replaced by a 
+        # fresh one after it has completed 50 tasks.
+        # By default a multiprocessing.Pool worker lives for the whole life of the pool, 
+        # so anything it accumulates in memory — caches, leaked allocations, memory the 
+        # C-level MINLP solver holds onto after a solve — stays there until the pool is 
+        # closed. Recycling every 50 tasks bounds that: the child dies, its address space 
+        # is released back to the OS, and a new child is forked/spawned and re-run 
+        # through _init_worker(*initargs).
+        
         # One pool for the whole search (previously a fresh pool was spawned
         # for every expansion). Workers are recycled periodically to bound
         # any memory retained by the MINLP solver across solves.
         pool = Pool(processes=args.pc, initializer=_init_worker, \
-            initargs=initargs, maxtasksperchild=50) # TODO: query maxtasksperchild
+            initargs=initargs, maxtasksperchild=50) 
 
     try:
         # Each element in this list will contain: order_c, order_a, order_q,
