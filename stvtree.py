@@ -1073,6 +1073,7 @@ def _needs_transfers(args: argparse.Namespace) -> bool:
     return bool(args.dlb or args.dlbc or args.prec_et)
 
 
+# TODO: Determine if non-q-prefix variant EQLB can made use of any precomputed tallies.
 def compute_elim_quota_lb_BST19(eqlbctx : EqlbCtx, cands: Sequence[CandidateLike], \
     ballots: list[Ballot], order_c: list[int], order_a: list[int], \
     quota: int, order_q: dict[int, QRange]) -> EqlbCtx:
@@ -1121,7 +1122,7 @@ def compute_elim_quota_lb_BST19(eqlbctx : EqlbCtx, cands: Sequence[CandidateLike
                         # according to the given outcome.
                         min_ce += b.votes
 
-            for c, v in max_others.items():
+            for _, v in max_others.items():
                 elim_lb = max(elim_lb, max(0, 0.5 * (min_ce - v)))
 
         else:
@@ -1513,10 +1514,7 @@ def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateL
     # The displacement argument only applies while the prefix still leaves the
     # original outcome intact. Persist the flag so descendants short circuit
     # here without rescanning. Note we deliberately do not advance start: this
-    # path leaves the cached arrays describing an earlier prefix, and a
-    # descendant must not go on to extend them. It never does -- new_winner is
-    # sticky, so every descendant returns here too -- but leaving start behind
-    # keeps that from depending on the caller.
+    # path leaves the cached arrays describing an earlier prefix.
     if new_winner:
         return disp_cache._replace(new_winner=True, lowerbound=0)    
 
