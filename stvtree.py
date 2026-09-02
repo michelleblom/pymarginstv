@@ -660,7 +660,20 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
 def backcompute_nq_bound(i : int, ctx : EqlbCtx, cands: Sequence[CandidateLike], ballots: list[Ballot],\
                          order_c : list[int], order_q: dict[int, QRange], quota : int):
 
-    gone = order_c[:i+1]
+    # The no-quota constraint being checked here is the one that holds *at*
+    # round i: a continuing candidate whose quota round is later than i must
+    # not already hold a quota when order_c[i] is seated. So the tallies below
+    # have to be the round i state, which is the one reached after the rounds
+    # before i -- order_c[:i] -- have been processed. Slicing to i+1 instead
+    # values the ballots at the start of round i+1, and then a candidate whose
+    # quota round is exactly i+1 gets charged for a quota it is entitled to
+    # hold, inflating a lower bound (the unsound direction). The i == 0 branch
+    # below, which uses first preferences, is the same convention, as is the
+    # round loop in compute_elim_quota_lb_STV26_q_prefix.
+    #
+    # order_c[i] itself never needs excluding by gone_set: a candidate seated
+    # at round i has a quota round at or before i, so the filter below drops it.
+    gone = order_c[:i]
     gone_set = set(gone)
     rem_qs = [c for c in order_q.keys() if c not in gone_set and order_q[c][0] > i  \
               and not(c in ctx.nq_cons_added[i])]
