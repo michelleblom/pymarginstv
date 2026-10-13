@@ -57,6 +57,10 @@ if __name__ == "__main__":
     # Input: Number of children to evaluate in parallel, default 1
     parser.add_argument('-pc', type=int, default=1)
 
+    # Input: do not let -pc be reduced when the machine's free memory
+    # cannot hold that many worker processes (see cap_worker_count).
+    parser.add_argument('-nopccap', action='store_true', default=False)
+
     # Input: max solve time (s) for algorithm 
     parser.add_argument('-limit', type=int, default=10000)
 
@@ -184,7 +188,7 @@ if __name__ == "__main__":
 
     # datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, time(s)
     print(f"{args.displayname}, {len(candidates)}, {args.seats}, {quota}, {original_upper_bound}, {lb}, {ub}, {nexps}, {nsolves}, "
-          f"{tend-tstart}, {t0_end-t0_start}, {args.lse}, {args.dlb}, {args.eqlb}, {external_upper_bound}")
+          f"{tend-tstart}, {t0_end-t0_start}, {args.lse}, {args.dlb}, {args.eqlb}, {args.dlbc}, {args.eqlbc}, {args.prec_et}, {args.useqprefix}, {args.nominlps}, {external_upper_bound}")
 
     log.close()
 

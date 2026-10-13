@@ -1,17 +1,30 @@
 from __future__ import annotations
 
 from stvdistance import stvdistance
-from utils import Ballot, BallotMetadata, Candidate, CandidateLike, merge_outcome, get_order_q
+from utils import Ballot, BallotMetadata, Candidate, CandidateLike, PrefSeq, \
+    merge_outcome, get_order_q, pack_prefs
 
 import argparse
+import gc
 import importlib
 import math
 import numpy as np
+import os
+import subprocess
+import sys
 import time
 
+from array import array
 from bisect import bisect_left, bisect_right, insort
+from hashlib import blake2b
 from multiprocessing import Pool
-from typing import Any, Container, NamedTuple, Optional, Sequence, TextIO
+from struct import pack
+# These aliases are evaluated at import time, unlike annotations (which
+# 'from __future__ import annotations' defers), so they use the typing
+# generics rather than the builtin ones for compatibility with Python
+# versions before 3.9.
+from typing import Any, Container, Dict, List, NamedTuple, Optional, \
+    Sequence, Set, TextIO, Tuple
 
 # Quota-in-prefix variant of the MINLP model, in which order_q records a
 # single exact quota round per candidate. The hyphenated filename cannot be
@@ -26,10 +39,11 @@ epsilon = 0.9
 # at whose start the candidate holds a quota (0 = on first preferences);
 # otherwise entries follow get_order_q's convention, giving the round of
 # transfers that could first produce the quota (-1 = on first preferences).
-QRange = tuple[int, int]
+QRange = Tuple[int, int]
 
-# Canonical outcome-prefix signature: see outcome_signature().
-Signature = tuple[tuple[Any, ...], frozenset[tuple[int, QRange]]]
+# Canonical outcome-prefix signature: a 16 byte digest, see
+# outcome_signature().
+Signature = bytes
 
 class EqlbCtx(NamedTuple):
     N: int                       # number of candidates
@@ -37,12 +51,24 @@ class EqlbCtx(NamedTuple):
     elim_lb: float               # elim_lb accumulated over prefix rounds
     quota_lb: float              # quota_lb accumulated over prefix rounds
     no_quota_lb: float           # noquota_lb accumulated over prefix rounds
-    nq_cons_added: list[set[int]] # For each prior round, candidates for whom 
-                                  # no quota constraints were added
+    nq_cons_added: list[int]     # For each prior round, the candidates for
+                                 # whom no-quota constraints were added, as a
+                                 # bitmask over candidate numbers (bit c set
+                                 # means candidate c). One mask per round is a
+                                 # few dozen bytes where a set of ~N candidate
+                                 # numbers was several kilobytes, and every
+                                 # node in the frontier carries one list of
+                                 # them; masks are also immutable, so a child
+                                 # inherits its parent's without copying.
     winners: set[int]
-    gone: list[int]
-    gone_set: set[int]
-    gone_pos: dict[int, int]
+
+    # Absent (None) on a context held by a frontier node: all three are
+    # functions of the node's outcome prefix, and restore_derived rebuilds
+    # them when the node is expanded. Reading one without restoring it first
+    # fails loudly rather than quietly behaving like an empty prefix.
+    gone: Optional[list[int]]
+    gone_set: Optional[set[int]]
+    gone_pos: Optional[dict[int, int]]
 
     round: int                   # last round in which context was updated.
 
@@ -59,30 +85,97 @@ class DispCache(NamedTuple):
     """
     N: int
     new_winner: bool
-    gone_pos: dict[int,int]
+    gone_pos: Optional[dict[int,int]]   # see EqlbCtx.gone_pos
     winners: set[int]
 
-    above: Optional[list[list[float]]]
-    present: Optional[list[float]]
-    curtally: Optional[list[float]]
-    reassign: Optional[list[list[float]]]
+    above: Optional[np.ndarray]
+    present: Optional[np.ndarray]
+    curtally: Optional[np.ndarray]
+    reassign: Optional[np.ndarray]
 
     start: int
     lowerbound: int
 
 
+def as_disp_array(values: Any) -> np.ndarray:
+    """
+        Store a displacement summary as a float64 numpy array.
+
+        These are by far the largest thing a TreeNode carries: 'above'
+        and 'reassign' are N x N, and as a list of lists of Python floats
+        an 82 candidate senate contest pays about 220 KB for each against
+        about 54 KB for the array -- with N^2 separate float objects for
+        the cyclic collector to walk and for every forked worker to copy.
+
+        The build loops still fill Python lists, because scalar numpy
+        item assignment is markedly slower than list indexing and those
+        loops run over every ballot; only the finished summary is
+        converted. Passing an array through is a no-op.
+    """
+    return np.asarray(values, dtype=np.float64)
+
+
 
 # Result of evaluating a child node in eval_child(): (isleaf, order_c,
 # order_a, order_q, lb, dlb, eqlb, dist, dist_ub, rem, winners, solved).
-ChildResult = tuple[bool, EqlbCtx, DispCache, list[int], \
-    list[int], dict[int, QRange], float, float, float, Optional[float], \
-    Optional[float], list[int], set[int], bool]
+ChildResult = Tuple[bool, EqlbCtx, DispCache, List[int], \
+    List[int], Dict[int, QRange], float, float, float, Optional[float], \
+    Optional[float], List[int], Set[int], bool]
 
 
 # Frontier node data shipped to expand_node(): (eqlbctx, order_c, order_a,
 # order_q, rem, winners, dist).
-FNodeData = tuple[EqlbCtx, DispCache, list[int], list[int], dict[int, QRange], list[int], \
-    set[int], float]
+FNodeData = Tuple[EqlbCtx, DispCache, List[int], List[int], \
+    Dict[int, QRange], List[int], Set[int], float]
+
+
+# Width of the outcome-prefix digest. Signatures are retained for every
+# node the search has ever inserted, so their size, not their speed, is
+# what matters. At 16 bytes the chance of any collision over a run of
+# 10^8 nodes is around 10^-23; a collision would wrongly subsume one
+# node under another.
+SIG_DIGEST_SIZE = 16
+
+
+def _canonical_outcome(order_c: list[int], order_a: list[int], \
+    order_q: dict[int, QRange]) -> bytes:
+    """
+        Byte encoding of an outcome prefix that is equal for exactly the
+        structurally equivalent prefixes described by outcome_signature.
+
+        Eliminated blocks and quota rounds are sorted, so that sets
+        compare equal regardless of order, and every variable-length run
+        is length-prefixed, so that no two distinct prefixes can encode
+        to the same bytes. Values are packed as fixed-width signed
+        little-endian integers; order_q rounds may be -1.
+    """
+    out: list[bytes] = []
+    block: list[int] = []
+
+    def emit(values: list[int]) -> None:
+        out.append(pack('<i', len(values)))
+        if values:
+            out.append(pack('<%di' % len(values), *values))
+
+    for i in range(len(order_c)):
+        if order_a[i] == 1:
+            block.sort()
+            emit(block)                     # eliminated since last seating
+            emit([order_c[i]])              # the candidate seated here
+            block = []
+        else:
+            block.append(order_c[i])
+
+    block.sort()
+    emit(block)                             # trailing eliminations
+
+    quotas: list[int] = []
+    for c in sorted(order_q):
+        lo, hi = order_q[c]
+        quotas += [c, lo, hi]
+    emit(quotas)
+
+    return b''.join(out)
 
 
 def outcome_signature(order_c: list[int], order_a: list[int], \
@@ -94,18 +187,99 @@ def outcome_signature(order_c: list[int], order_a: list[int], \
         seated candidate at each seating position, equal *sets* of
         eliminated candidates between consecutive seatings, and the same
         quota-round range for each candidate achieving a quota.
-    """
-    parts: list[Any] = []
-    block: list[int] = []
-    for i in range(len(order_c)):
-        if order_a[i] == 1:
-            parts.append((frozenset(block), order_c[i]))
-            block = []
-        else:
-            block.append(order_c[i])
-    parts.append(frozenset(block))
 
-    return tuple(parts), frozenset(order_q.items())
+        Returned as a digest rather than as the nested tuple/frozenset
+        structure it summarises. Frontier.sig_dists keeps a signature for
+        every node ever inserted, including expanded ones, so at senate
+        prefix depths the structural form cost several KB per node and
+        dominated memory over a long search; the digest is 49 bytes flat.
+        blake2b is used rather than hash() because it does not vary with
+        PYTHONHASHSEED and so stays stable across worker processes.
+    """
+    return blake2b(_canonical_outcome(order_c, order_a, order_q), \
+        digest_size=SIG_DIGEST_SIZE).digest()
+
+
+def pack_order_q(order_q: dict[int, QRange]) -> "array[int]":
+    """
+        Pack a node's quota rounds for storage on a TreeNode. A dict of
+        n entries with tuple values costs several hundred bytes; this is
+        64 + 6n. Insertion order is preserved so that the dict rebuilt by
+        unpack_order_q iterates exactly as the original did, keeping log
+        output and MINLP constraint order unchanged. Node equivalence
+        does not depend on it either way: outcome_signature sorts
+        independently.
+    """
+    flat: list[int] = []
+
+    for c, (lo, hi) in order_q.items():
+        flat += [c, lo, hi]
+
+    return array('h', flat)
+
+
+def unpack_order_q(packed: "array[int]") -> dict[int, QRange]:
+    """
+        Rebuild the quota-round dict from its packed form. Done once per
+        node expansion, against a node that survived in the frontier.
+    """
+    return {packed[i]: (packed[i + 1], packed[i + 2]) \
+        for i in range(0, len(packed), 3)}
+
+
+def derive_rem(order_c: Sequence[int], candidates: Sequence[CandidateLike]) \
+    -> list[int]:
+    """
+        Candidates still standing after an outcome prefix: everything not
+        already placed in order_c, in candidate-list order.
+
+        Derived rather than stored. It is a list of up to ncands entries
+        on every node in a frontier that can reach hundreds of thousands
+        of nodes, and it is needed only when a node is expanded.
+    """
+    placed = set(order_c)
+
+    return [c.num for c in candidates if c.num not in placed]
+
+
+def derive_winners(order_c: Sequence[int], order_a: Sequence[int]) -> set[int]:
+    """
+        Candidates seated within an outcome prefix. Derived rather than
+        stored, for the same reason as derive_rem.
+    """
+    return {c for i, c in enumerate(order_c) if order_a[i] == 1}
+
+
+def restore_derived(eqlbctx: EqlbCtx, disp_cache: DispCache, \
+    order_c: Sequence[int]) -> tuple[EqlbCtx, DispCache]:
+    """
+        Rebuild the context state that a TreeNode does not store, given the
+        node's outcome prefix. Called once for a node about to be expanded,
+        for all of its children to share.
+
+        Each of the three is a function of the prefix alone. The walk in
+        compute_elim_quota_lb_* appends each round's candidate to the incoming
+        gone, so a context that has covered rounds 0..round-1 holds exactly
+        order_c[:round], with gone_set and gone_pos the set and the
+        position map over it. The displacement cache's gone_pos is the same
+        map over the rounds its own walk has covered, order_c[:start].
+
+        Storing them cost a list, a set and two dicts of up to ncands entries
+        on every node in a frontier that reaches hundreds of thousands of
+        nodes -- around 7 KB per node at senate prefix depths, several times
+        what the rest of a node's context comes to. Rebuilding is O(depth),
+        paid once per expanded node against once per stored node, which is the
+        same trade derive_rem and derive_winners already make.
+    """
+    gone = list(order_c[:eqlbctx.round])
+
+    eqlbctx = eqlbctx._replace(gone=gone, gone_set=set(gone), \
+        gone_pos={c: i for i, c in enumerate(gone)})
+
+    disp_cache = disp_cache._replace(gone_pos={c: i for i, c in \
+        enumerate(order_c[:disp_cache.start])})
+
+    return eqlbctx, disp_cache
 
 
 class TreeNode:
@@ -121,8 +295,6 @@ class TreeNode:
                    they could first achieve a quota (see QRange for the
                    per-mode value convention).
 
-        winners  : Winners thus far in prefix
-
         distance : How many votes have to change (lower bound) to realise the
                    given outcome prefix.
 
@@ -131,62 +303,85 @@ class TreeNode:
 
     """
 
-    __slots__ = ('id', 'order_c', 'order_a', 'order_q', 'rem', \
-        'dist', 'dist_ub', 'winners', 'eqlbctx', 'disp_cache', 'sig')
+    # A node's still-standing candidates and its set of seated candidates
+    # are not stored: both are functions of order_c and order_a (see
+    # derive_rem/derive_winners) and are needed only when the node is
+    # expanded, whereas a frontier can hold hundreds of thousands of nodes
+    # at once. For the same reason the three order structures are held
+    # packed and rebuilt on access.
+    __slots__ = ('id', '_order_c', '_order_a', '_order_q', \
+        'dist', 'dist_ub', 'eqlbctx', 'disp_cache', 'sig')
 
     id: Optional[int]
-    order_c: list[int]
-    order_a: list[int]
-    order_q: dict[int, QRange]
-    rem: list[int]
+    _order_c: PrefSeq
+    _order_a: PrefSeq
+    _order_q: "array[int]"
     dist: Optional[float]
     dist_ub: Optional[float]
-    winners: set[int]
     eqlbctx: EqlbCtx
     disp_cache: DispCache
     sig: Signature
 
     def __init__(self, order_c: list[int], order_a: list[int], \
-        order_q: dict[int, QRange], winners: set[int], rem: list[int], \
+        order_q: dict[int, QRange], \
         eqlbctx: EqlbCtx, disp_cache: DispCache, \
         distance: Optional[float], dist_ub: Optional[float]) -> None:
 
         self.id = None
 
-        self.order_c = order_c
-        self.order_a = order_a
-        self.order_q = order_q
-
         self.sig = outcome_signature(order_c, order_a, order_q)
 
-        self.rem = rem
+        self._order_c = pack_prefs(order_c)
+        self._order_a = pack_prefs(order_a)
+        self._order_q = pack_order_q(order_q)
 
         self.dist = distance  # lower bound from MINLP solve
         self.dist_ub = dist_ub  # upper bound from MINLP solve
-        self.winners = winners
-        self.eqlbctx = eqlbctx
-        self.disp_cache = disp_cache
+
+        # The prefix walks' own record of the prefix is not kept: see
+        # restore_derived, which rebuilds it at expansion time.
+        self.eqlbctx = eqlbctx._replace(gone=None, gone_set=None, \
+            gone_pos=None)
+        self.disp_cache = disp_cache._replace(gone_pos=None)
+
+    @property
+    def order_c(self) -> list[int]:
+        """Outcome prefix, unpacked. Rebuilt on each access."""
+        return list(self._order_c)
+
+    @property
+    def order_a(self) -> list[int]:
+        """Seat/eliminate flags, unpacked. Rebuilt on each access."""
+        return list(self._order_a)
+
+    @property
+    def order_q(self) -> dict[int, QRange]:
+        """Quota rounds, unpacked. Rebuilt on each access."""
+        return unpack_order_q(self._order_q)
 
     def __str__(self) -> str:
         """
             Return string representation of this tree node.
         """
 
-        quotas: list[list[str]] = [[] for r in self.order_c]
+        order_c = self._order_c
+        order_a = self._order_a
+
+        quotas: list[list[str]] = [[] for r in order_c]
         for c,(_,hi) in self.order_q.items():
             quotas[max(hi,0)].append(str(c))
 
         summary = ""
 
-        for r in range(len(self.order_c)):
-            action = "e" if self.order_a[r] == 0 else "s"
+        for r in range(len(order_c)):
+            action = "e" if order_a[r] == 0 else "s"
             if len(quotas[r]) > 0:
               qlist = " ( "
               for qc in quotas[r]:
                 qlist += qc + " "
               qlist += ")"
               action += qlist
-            summary += str(self.order_c[r]) + action + " "
+            summary += str(order_c[r]) + action + " "
 
         summary += "with distance {}/{}".format(self.dist, self.dist_ub)
 
@@ -435,7 +630,7 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
     elim_lb = eqlbctx.elim_lb
     quota_lb = eqlbctx.quota_lb
     no_quota_lb = eqlbctx.no_quota_lb
-    nq_cons_added = [{*eqlbctx.nq_cons_added[i]} for i in range(eqlbctx.N)]
+    nq_cons_added = list(eqlbctx.nq_cons_added)
     transfer = {**eqlbctx.transfer}    
     gone = [*eqlbctx.gone]
     gone_set = {*eqlbctx.gone_set}
@@ -497,10 +692,12 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
             # bound, so the largest across the prefix is the one to keep.
             no_quota_lb = max(no_quota_lb, max(0, tallies[ce] - quota))
             others = [c.num for c in cands if c.num not in gone_set and c.num != ce]
+            nqmask = nq_cons_added[i]
             for c in others:
                 elim_lb = max(elim_lb, max(0, 0.5 * (tallies[ce] - tallies[c])))
                 no_quota_lb = max(no_quota_lb, max(0, tallies[c] - quota))
-                nq_cons_added[i].add(c)
+                nqmask |= 1 << c
+            nq_cons_added[i] = nqmask
 
 
         else:  # candidate seated
@@ -648,7 +845,7 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
         while j >= 0 and order_a[j] == 1:
             nqlb, nqs = backcompute_nq_bound(j, walked, cands, ballots, order_c, order_q, quota)
             no_quota_lb = max(no_quota_lb, nqlb)
-            nq_cons_added[j].update(nqs)
+            nq_cons_added[j] |= nqs
             j -= 1
 
     return EqlbCtx(eqlbctx.N, transfer, elim_lb, quota_lb, no_quota_lb, nq_cons_added, \
@@ -675,11 +872,12 @@ def backcompute_nq_bound(i : int, ctx : EqlbCtx, cands: Sequence[CandidateLike],
     # at round i has a quota round at or before i, so the filter below drops it.
     gone = order_c[:i]
     gone_set = set(gone)
+    already = ctx.nq_cons_added[i]
     rem_qs = [c for c in order_q.keys() if c not in gone_set and order_q[c][0] > i  \
-              and not(c in ctx.nq_cons_added[i])]
+              and not((already >> c) & 1)]
 
     no_quota_lb: float = 0
-    nq_cons_added: set[int] = set()
+    nq_cons_added: int = 0
 
     if rem_qs == []:
         return no_quota_lb, nq_cons_added
@@ -713,7 +911,7 @@ def backcompute_nq_bound(i : int, ctx : EqlbCtx, cands: Sequence[CandidateLike],
 
     for c in rem_qs:
         no_quota_lb = max(no_quota_lb, tallies[c] - quota)
-        nq_cons_added.add(c)
+        nq_cons_added |= 1 << c
 
     return no_quota_lb, nq_cons_added
 
@@ -1010,7 +1208,7 @@ def compute_elim_quota_lb_STV26(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike]
         gone_set.add(ce)
 
     return EqlbCtx(eqlbctx.N, transfer, elim_lb, quota_lb, 0, \
-                   [set() for _ in range(eqlbctx.N)], winners, gone, gone_set, \
+                   [0] * eqlbctx.N, winners, gone, gone_set, \
                    {c: i for i, c in enumerate(gone)}, PXLEN)
 
 
@@ -1166,7 +1364,7 @@ def compute_elim_quota_lb_BST19(eqlbctx : EqlbCtx, cands: Sequence[CandidateLike
     # nq_cons_added and gone_pos are still shaped correctly so the context is
     # structurally valid wherever it is passed on.
     return EqlbCtx(eqlbctx.N, {}, elim_lb, quota_lb, 0, \
-                   [set() for _ in range(eqlbctx.N)], winners, gone, gone_set, \
+                   [0] * eqlbctx.N, winners, gone, gone_set, \
                    {c: i for i, c in enumerate(gone)}, PXLEN)
 
 
@@ -1174,18 +1372,29 @@ def compute_elim_quota_lb_BST19(eqlbctx : EqlbCtx, cands: Sequence[CandidateLike
 
 def build_disp_cache_initial_q_prefix(N: int, candidates: Sequence[CandidateLike], \
     ballot_metadata : BallotMetadata) -> DispCache:
-    return DispCache(N, False, {}, set(), ballot_metadata.above, \
-                    ballot_metadata.mentions, [c.fp_votes for c in candidates], \
-                    ballot_metadata.reassign, 0, 0)
+    return DispCache(N, False, {}, set(), \
+                    as_disp_array(ballot_metadata.above), \
+                    as_disp_array(ballot_metadata.mentions), \
+                    as_disp_array([c.fp_votes for c in candidates]), \
+                    as_disp_array(ballot_metadata.reassign), 0, 0)
 
 def update_disp_cache_q_prefix(disp_cache: DispCache, ballots: list[Ballot], node_order_c: list[int], \
     node_order_q: dict[int, QRange], rem: list[int], transfer: dict[int, tuple[float,float]]) -> DispCache:
+
+    # Once the prefix has changed who won, the displacement argument no longer
+    # applies and compute_disp_lb_STV26_q_prefix returns before reading any of
+    # these summaries -- for this node and for every node below it, new_winner
+    # being monotone down the tree. Rebuilding them here would be a pass over
+    # the ballots per expansion whose result no child looks at (and, since this
+    # path does not extend gone_pos, would not even describe this prefix).
+    if disp_cache.new_winner:
+        return disp_cache
 
     # reassign[g][x] is the transfer table: the total ballot value sitting on ballots whose first 
     # still-standing candidate is g and whose next still-standing candidate is x. In other words, 
     # if g were the next one eliminated, reassign[g][x] is how much of g's pile would land on x.
     # It exists purely to make the displacement bound incremental. 
-    if disp_cache.reassign == None:
+    if disp_cache.reassign is None:
         N = disp_cache.N
         min_r : list[float] =  [0]*N
         reassign  = [[0.0] * N for _ in range(N)]
@@ -1218,8 +1427,10 @@ def update_disp_cache_q_prefix(disp_cache: DispCache, ballots: list[Ballot], nod
 
         # _replace returns a new tuple -- it does not mutate in place, so the
         # result has to be kept and returned.
-        disp_cache = disp_cache._replace(curtally=min_r, present=present, \
-                                        above=above, reassign=reassign)
+        disp_cache = disp_cache._replace(curtally=as_disp_array(min_r), \
+                                        present=as_disp_array(present), \
+                                        above=as_disp_array(above), \
+                                        reassign=as_disp_array(reassign))
 
     return disp_cache
 
@@ -1279,8 +1490,15 @@ def compute_disp_lb_STV26_q_prefix(disp_cache: DispCache, ballot_metadata : Ball
     # original outcome intact. Persist the flag so descendants short circuit
     # here without rescanning. Note we deliberately do not advance start: it is
     # paired with gone_pos, which this path does not extend.
+    #
+    # The four ballot summaries are dropped rather than carried on: neither this
+    # node nor any node below it reads them again (new_winner is monotone down
+    # the tree), and every node the search has reached this way sits in the
+    # frontier holding two N x N arrays -- around 180 KB per node at senate
+    # scale, which is what exhausted memory on the larger contests.
     if new_winner:
-        return disp_cache._replace(new_winner=True, lowerbound=0)
+        return disp_cache._replace(new_winner=True, lowerbound=0, \
+            above=None, present=None, curtally=None, reassign=None)
 
     # Compile set of original losers, and winners, that remain standing after
     # the outcome prefix node_order_c/node_order_a.
@@ -1295,8 +1513,15 @@ def compute_disp_lb_STV26_q_prefix(disp_cache: DispCache, ballot_metadata : Ball
     sleft = seats - sum(node_order_a)
     nleft = len(rem)
 
+    # As on the new_winner exit, the summaries are not carried on. sleft ==
+    # nleft makes this node a leaf, which is never expanded; the other two
+    # shapes are as monotone as new_winner is (an original loser cannot
+    # reappear among the standing candidates, and eliminating or seating an
+    # original winner sets new_winner in the child), so no descendant reads
+    # them either.
     if sleft == nleft or og_losers == [] or og_winners == []:
-        return disp_cache._replace(lowerbound=0)
+        return disp_cache._replace(lowerbound=0, above=None, present=None, \
+            curtally=None, reassign=None)
 
     winners = {c for i, c in enumerate(node_order_c) if node_order_a[i] == 1}
 
@@ -1309,9 +1534,13 @@ def compute_disp_lb_STV26_q_prefix(disp_cache: DispCache, ballot_metadata : Ball
     og_winners_set = set(og_winners)
 
     ca = node_order_a[-1]
-    if ca == 0 and disp_cache.curtally and disp_cache.reassign and disp_cache.present and disp_cache.above:
+    # 'is not None' rather than a truth test: these are numpy arrays, whose
+    # truth value is ambiguous and raises.
+    if ca == 0 and disp_cache.curtally is not None \
+        and disp_cache.reassign is not None \
+        and disp_cache.present is not None and disp_cache.above is not None:
         ce = node_order_c[-1]
-        min_r = [disp_cache.curtally[c] + disp_cache.reassign[ce][c] for c in range(disp_cache.N)]
+        min_r = disp_cache.curtally + disp_cache.reassign[ce]
         reassign = None
         present = disp_cache.present
         above = disp_cache.above
@@ -1375,12 +1604,34 @@ def compute_disp_lb_STV26_q_prefix(disp_cache: DispCache, ballot_metadata : Ball
     # given us a lowerbound with a very tiny fractional component and we 
     # round up to nearest integer. 
     lowerbound = math.ceil(lowerbound - 1e-4)
-    return DispCache(ncand, new_winner, gone_pos, winners, above, present, min_r, reassign, norder, lowerbound)
+
+    # A reassign of None says this node took the incremental path, and then the
+    # other three summaries are not stored either. update_disp_cache_q_prefix
+    # rebuilds all four from the ballots at this prefix before the node is
+    # expanded -- that is what a reassign of None asks it to do -- so the copy
+    # kept here would only ever be overwritten. And it is a copy, not a shared
+    # reference: child results come back from the worker processes pickled, so
+    # each child on this path held its own N x N above (about 90 KB per node at
+    # senate scale) for as long as it sat in the frontier.
+    #
+    # A complete set is kept. Those nodes are the ones whose children read the
+    # summaries incrementally, and update_disp_cache_q_prefix returns them
+    # untouched, so dropping them would buy memory at the price of a ballot
+    # pass per expansion. They are also confined to the part of the tree where
+    # the prefix still leaves the original outcome intact: past that the bound
+    # short circuits and the exit above drops the summaries anyway.
+    if reassign is None:
+        return DispCache(ncand, new_winner, gone_pos, winners, None, None, \
+            None, None, norder, lowerbound)
+
+    return DispCache(ncand, new_winner, gone_pos, winners, \
+        as_disp_array(above), as_disp_array(present), as_disp_array(min_r), \
+        as_disp_array(reassign), norder, lowerbound)
 
 
 def build_disp_arrays(ballots: list[Ballot], node_order_c: list[int], \
     rem: list[int], winners: set[int], transfer: dict[int, tuple[float, float]], \
-    N: int) -> tuple[list[float], list[float], list[list[float]], list[list[float]]]:
+    N: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
         One pass over the ballots giving the four summaries the displacement
         bound works from, evaluated at the outcome prefix node_order_c. This
@@ -1429,7 +1680,8 @@ def build_disp_arrays(ballots: list[Ballot], node_order_c: list[int], \
             for y in pres[i + 1:]:
                 row[y] += ub
 
-    return curtally, present, above, reassign
+    return as_disp_array(curtally), as_disp_array(present), \
+        as_disp_array(above), as_disp_array(reassign)
 
 
 def update_disp_cache(disp_cache: DispCache, ballots: list[Ballot], \
@@ -1446,7 +1698,14 @@ def update_disp_cache(disp_cache: DispCache, ballots: list[Ballot], \
         over an elimination but not the transfer table, so that has to be
         rebuilt before the next expansion. When reassign is present the cache
         is already complete and this does nothing.
+
+        A new_winner cache is skipped for the same reason as in the
+        quota-prefix variant: the bound short circuits on it, so nothing below
+        reads the summaries.
     """
+    if disp_cache.new_winner:
+        return disp_cache
+
     if disp_cache.reassign is not None:
         return disp_cache
 
@@ -1529,7 +1788,8 @@ def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateL
     # here without rescanning. Note we deliberately do not advance start: this
     # path leaves the cached arrays describing an earlier prefix.
     if new_winner:
-        return disp_cache._replace(new_winner=True, lowerbound=0)    
+        return disp_cache._replace(new_winner=True, lowerbound=0, \
+            above=None, present=None, curtally=None, reassign=None)
 
     # Compile set of original losers, and winners, that remain standing after
     # the outcome prefix node_order_c/node_order_a. The sets will remain
@@ -1547,8 +1807,11 @@ def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateL
     sleft = seats - sum(node_order_a)
     nleft = len(rem)
 
+    # See the quota-prefix variant: no descendant reads the summaries past
+    # any of these exits, so they are dropped rather than carried on.
     if sleft == nleft or og_losers == [] or og_winners == []:
-        return disp_cache._replace(lowerbound=0)
+        return disp_cache._replace(lowerbound=0, above=None, present=None, \
+            curtally=None, reassign=None)
 
     winners = {c for i, c in enumerate(node_order_c) if node_order_a[i] == 1}
 
@@ -1596,13 +1859,12 @@ def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateL
     cached_present = disp_cache.present
     cached_above = disp_cache.above
 
-    reassign: Optional[list[list[float]]]
+    reassign: Optional[np.ndarray]
     if node_order_a[-1] == 0 and cached_curtally is not None \
         and cached_reassign is not None and cached_present is not None \
         and cached_above is not None:
         ce = node_order_c[-1]
-        ce_row = cached_reassign[ce]
-        min_r = [cached_curtally[c] + ce_row[c] for c in range(ncand)]
+        min_r = cached_curtally + cached_reassign[ce]
         reassign = None
         present = cached_present
         above = cached_above
@@ -1645,8 +1907,125 @@ def compute_disp_lb_STV26(disp_cache: DispCache, candidates: Sequence[CandidateL
     # to value ballots, this one does not -- calc_tallies takes no such
     # argument. start is therefore paired only with the new_winner scan here,
     # and is advanced to cover the rounds just scanned.
-    return DispCache(ncand, new_winner, disp_cache.gone_pos, winners, above, \
-        present, min_r, reassign, norder, lowerbound)
+    #
+    # See the quota-prefix variant: on the incremental path (reassign None)
+    # none of the four summaries are stored, because update_disp_cache rebuilds
+    # all four before this node is expanded and each child would otherwise hold
+    # its own unpickled copy of an N x N above. A complete set is kept, for the
+    # children that read it incrementally.
+    if reassign is None:
+        return DispCache(ncand, new_winner, disp_cache.gone_pos, winners, \
+            None, None, None, None, norder, lowerbound)
+
+    return DispCache(ncand, new_winner, disp_cache.gone_pos, winners, \
+        as_disp_array(above), as_disp_array(present), as_disp_array(min_r), \
+        as_disp_array(reassign), norder, lowerbound)
+
+
+# Fraction of currently-available memory the worker pool is allowed to
+# commit to. The remainder is headroom for the frontier, which grows for
+# as long as the search runs.
+WORKER_MEMORY_BUDGET = 0.75
+
+
+def _available_memory_bytes() -> Optional[int]:
+    """
+        Memory the OS can still hand out, or None if it cannot be
+        determined on this platform.
+    """
+    try:
+        with open('/proc/meminfo') as meminfo:      # Linux
+            for line in meminfo:
+                if line.startswith('MemAvailable:'):
+                    return int(line.split()[1]) * 1024
+    except (OSError, IndexError, ValueError):
+        pass
+
+    try:
+        return os.sysconf('SC_AVPHYS_PAGES') * os.sysconf('SC_PAGE_SIZE')
+    except (AttributeError, OSError, ValueError):
+        pass
+
+    # macOS has no SC_AVPHYS_PAGES; vm_stat reports the page classes that
+    # can be handed out without swapping.
+    try:
+        out = subprocess.check_output(['vm_stat'], stderr=subprocess.DEVNULL)
+        pagesize = os.sysconf('SC_PAGE_SIZE')
+        free = 0
+        wanted = ('Pages free:', 'Pages inactive:', 'Pages speculative:', \
+            'Pages purgeable:')
+        for line in out.decode().splitlines():
+            if line.startswith(wanted):
+                free += int(line.rsplit(':', 1)[1].strip().rstrip('.'))
+        if free:
+            return free * pagesize
+    except (AttributeError, OSError, ValueError, \
+        subprocess.SubprocessError):
+        pass
+
+    return None
+
+
+def _process_rss_bytes() -> Optional[int]:
+    """
+        Resident set size of this process, or None if it cannot be
+        determined on this platform.
+    """
+    try:
+        with open('/proc/self/statm') as statm:      # Linux
+            return int(statm.read().split()[1]) * os.sysconf('SC_PAGE_SIZE')
+    except (OSError, IndexError, ValueError):
+        pass
+
+    try:
+        out = subprocess.check_output(['ps', '-o', 'rss=', '-p', \
+            str(os.getpid())], stderr=subprocess.DEVNULL)
+        return int(out.strip()) * 1024
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def cap_worker_count(requested: int, log: Optional[TextIO] = None) -> int:
+    """
+        Reduce the requested worker count to one this machine can hold.
+
+        Every worker reads every ballot on every task, and CPython writes
+        to an object's header when it merely reads it, so a forked worker
+        stops sharing the parent's ballot pages almost immediately: each
+        one ends up resident for roughly what the parent is holding now.
+        Requesting -pc workers therefore asks for about -pc times the
+        current footprint, which is how a long run reaches the OOM killer
+        on a machine that comfortably fits a single process.
+
+        Returns 'requested' unchanged when the platform will not report
+        memory, so this can only ever lower the worker count, never raise
+        it. -nopccap skips the check entirely.
+    """
+    if requested <= 1:
+        return requested
+
+    rss = _process_rss_bytes()
+    avail = _available_memory_bytes()
+
+    if not rss or not avail:
+        return requested
+
+    allowed = max(1, int((WORKER_MEMORY_BUDGET * avail) // rss))
+
+    if allowed >= requested:
+        return requested
+
+    msg = ("WARNING: reducing -pc from {} to {}: this process holds "
+           "{:.1f} GB and only {:.1f} GB is available, so {} workers "
+           "would likely exhaust memory. Pass -nopccap to override.").format(
+               requested, allowed, rss / 1e9, avail / 1e9, requested)
+
+    print(msg, file=sys.stderr, flush=True)
+
+    if log is not None:
+        print(msg, file=log, flush=True)
+
+    return allowed
 
 
 def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates: list[Candidate], \
@@ -1711,6 +2090,13 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
     # reads .num and .fp_votes, so we avoid shipping the ballot/simulation
     # bookkeeping stored on Candidate objects to every worker process.
     lite_cands = [CandLite(c.num, c.fp_votes) for c in candidates]
+
+    # Cap the worker count at what this machine's free memory can hold.
+    # Done before initargs is built so that args.pc -- which also decides
+    # how many frontier nodes are popped per expansion, and which is
+    # shipped to the workers -- stays consistent with the pool size.
+    if args.pc > 1 and not getattr(args, 'nopccap', False):
+        args.pc = cap_worker_count(args.pc, log)
 
     # Election invariants used by eval_child/eval_child_initial/expand_node.
     # These are sent to each worker process once (via the pool initializer)
@@ -1855,8 +2241,17 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                     print("EXPANDING NODE {}".format(fn), file=log, flush=True)
 
                 assert(fn.dist is not None)
-                toexpand.append(((fn.eqlbctx, fn.disp_cache, fn.order_c, fn.order_a, fn.order_q, \
-                    fn.rem, fn.winners, fn.dist), running_ub))
+                # Rebuilt here rather than carried on the node: see
+                # TreeNode. One O(ncands) pass per expanded node, against
+                # a per-node cost every frontier node would pay.
+                fn_order_c = fn.order_c
+                fn_order_a = fn.order_a
+
+                toexpand.append(((fn.eqlbctx, fn.disp_cache, fn_order_c, \
+                    fn_order_a, fn.order_q, \
+                    derive_rem(fn_order_c, candidates), \
+                    derive_winners(fn_order_c, fn_order_a), fn.dist), \
+                    running_ub))
 
             if pool is not None and getattr(args, "evalpara", False):
                 # Child-granularity parallelism: generate every popped node's
@@ -1922,7 +2317,7 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                     else:
                         # Context caches are stored with each node so they can be used by its children
                         newn = TreeNode(node_order_c, node_order_a, node_order_q, \
-                                        node_winners, new_rem, eqlbctx, disp_cache, dist, dist_ub)
+                                        eqlbctx, disp_cache, dist, dist_ub)
 
                         idx = frontier.insert(newn, lse=args.lse, log=log)
 
@@ -2004,8 +2399,8 @@ class CandLite(NamedTuple):
 # Per-process evaluation context (election invariants), set once per worker
 # by the pool initializer -- and in the main process for args.pc == 1 --
 # instead of pickling these into every task.
-Ctx = tuple[list[Ballot], BallotMetadata, Sequence[CandLite], set[int], \
-    int, argparse.Namespace, int, float, list[int], list[int]]
+Ctx = Tuple[List[Ballot], BallotMetadata, Sequence[CandLite], Set[int], \
+    int, argparse.Namespace, int, float, List[int], List[int]]
 
 _CTX: Optional[Ctx] = None
 
@@ -2021,6 +2416,18 @@ def _init_worker(ballots: list[Ballot], ballot_metadata: BallotMetadata, \
     global _CTX
     _CTX = (ballots, ballot_metadata, candidates, winner_set, ncands, args, quota, \
         tot_ballots, full_order_c, full_order_a)
+
+    # Everything reachable now -- the ballots above all else -- lives for
+    # the whole search and can never become garbage. Move it into the
+    # permanent generation so the cyclic collector stops walking it.
+    #
+    # This matters most in a forked worker, where it runs immediately
+    # after the fork. A collection there would write a GC header word to
+    # every inherited object, which copy-on-write turns into a private
+    # copy of the parent's heap in each of the -pc workers. Freezing
+    # keeps the pages the worker does not otherwise write genuinely
+    # shared. In the main process it just saves collection time.
+    gc.freeze()
 
 
 # Rather than use two different types for order_q depending on whether we 
@@ -2077,7 +2484,7 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
     orig_prefix = node_order_c[:l] == full_order_c[:l] and node_order_a[:l] == full_order_a[:l]
 
     transfer = None
-    _eqlbctx = EqlbCtx(ncands, {}, 0, 0, 0, [set() for _ in range(ncands)], set(), [], set(), {}, 0)
+    _eqlbctx = EqlbCtx(ncands, {}, 0, 0, 0, [0] * ncands, set(), [], set(), {}, 0)
     if args.eqlb or args.eqlbc:
         if args.useqprefix:
             _eqlbctx = compute_elim_quota_lb_STV26_q_prefix(_eqlbctx, candidates, \
@@ -2120,7 +2527,7 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
     # going to be equal to or greater than our running UB on the margin LB. 
     if eqlb >= running_ub:
         return eqlb, 0, eqlb, TreeNode(node_order_c, node_order_a, node_order_q, \
-            node_winners, rem, _eqlbctx, _disp_cache, eqlb, eqlb), False
+            _eqlbctx, _disp_cache, eqlb, eqlb), False
 
     if (args.dlb or args.dlbc) and transfer is not None:
         if args.useqprefix:
@@ -2144,7 +2551,7 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
 
     if lb >= running_ub or skipsolve:
         return lb, disp_lowerbound, eqlb, TreeNode(node_order_c, node_order_a, node_order_q, \
-            node_winners, rem, _eqlbctx, _disp_cache, lb, lb), False
+            _eqlbctx, _disp_cache, lb, lb), False
 
     # Note: MINLP is only tractable to solve when sequences of eliminated candidates, minus
     # the last eliminated candidate in the sequence, are merged into a "super candidate". 
@@ -2156,7 +2563,7 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
                                    tot_ballots, args, quota, running_ub, 0, lb)
 
     return lb, disp_lowerbound, eqlb, TreeNode(node_order_c, \
-          node_order_a, node_order_q, node_winners, rem, _eqlbctx, _disp_cache, dist, dist_ub), True
+          node_order_a, node_order_q, _eqlbctx, _disp_cache, dist, dist_ub), True
 
 # Only called to evaluate children that have been generated as a result of an expansion.
 def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node_order_c: list[int], \
@@ -2178,7 +2585,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
 
     # If we are not utilising context caching, pass in "blank" contexts to our LB computation functions.
     if not args.eqlbc:
-        eqlbctx = EqlbCtx(ncands, {}, 0, 0, 0, [set() for _ in range(ncands)], set(), [], set(), {}, 0)
+        eqlbctx = EqlbCtx(ncands, {}, 0, 0, 0, [0] * ncands, set(), [], set(), {}, 0)
 
     if not args.dlbc:
         disp_cache = DispCache(ncands, False, {}, set(), None, None, None, None, 0, 0)
@@ -2280,6 +2687,10 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
     ballots, _, candidates, winner_set, ncands, args, _, _, _, _ = _CTX
 
     eqlbctx, disp_cache, forder_c, forder_a, forder_q, frem, fwinners, fdist = fnode_data
+
+    # Put back what TreeNode did not store, before anything reads it: the
+    # children resume both walks from this context.
+    eqlbctx, disp_cache = restore_derived(eqlbctx, disp_cache, forder_c)
 
     children: list[tuple[float, EqlbCtx, DispCache, list[int], list[int], \
         dict[int, QRange], set[int], list[int], bool, float, Optional[Any]]] = []

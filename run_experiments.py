@@ -468,7 +468,22 @@ displaynames = {
 }
 
 data_aus_big = [
-("FedAus19/FederalSenate2019VIC.json", 6)
+#("FedAus19/FederalSenate2019NSW.json", 6),
+#("FedAus19/FederalSenate2019VIC.json", 6),
+#("FedAus19/FederalSenate2019ACT.json", 2),
+#("FedAus19/FederalSenate2019NT.json", 2),
+("FedAus19/FederalSenate2019TAS.json", 6),
+("FedAus19/FederalSenate2019WA.json", 6),
+("FedAus19/FederalSenate2019QLD.json", 6),
+("FedAus22/2022ACT.json", 2),
+("FedAus22/2022NT.json", 2),
+("FedAus22/FederalSenate2022QLD.json", 6),
+("FedAus22/FederalSenate2022SA.json", 6),
+("FedAus22/FederalSenate2022WA.json", 6),
+("FedAus22/FederalSenate2022TAS.json", 6),
+("FedAus22/FederalSenate2022VIC.json", 6),
+("FedAus25/2025ACT.json", 2),
+("FedAus25/2025NT.json", 2),
 ]
 
 data_rem = [
@@ -529,29 +544,29 @@ datafiles = [
     # IRELAND 2002
     ("Ireland/DublinNorth2002_ballots.txt", 4), ("Ireland/DublinWest2002_ballots.txt", 3),
     #("Ireland/Meath2002_ballots.txt", 5),
-    ("FedAus25/2025ACT.json", 2),
-    ("FedAus25/2025NT.json", 2),
-    ("FedAus13/2013ACT.json", 2),
+    #("FedAus25/2025ACT.json", 2),
+    #("FedAus25/2025NT.json", 2),
+    #("FedAus13/2013ACT.json", 2),
  #  ("FedAus13/2013NT.json", 2)
     # AUSTRALIA 2-seat, 2016, 2019, 2022
-    ("FedAus16/FederalSenate2016ACT.json", 2),
-    ("FedAus16/FederalSenate2016NT.json", 2),
+    #("FedAus16/FederalSenate2016ACT.json", 2),
+    #("FedAus16/FederalSenate2016NT.json", 2),
     # ("FedAus16/FederalSenate2016NSW.json", 12),
     # ("FedAus16/FederalSenate2016QLD.json", 12),
     # ("FedAus16/FederalSenate2016SA.json", 12),
     # ("FedAus16/FederalSenate2016TAS.json", 12),
     # ("FedAus16/FederalSenate2016VIC.json", 12),
     # ("FedAus16/FederalSenate2016WA.json", 12),
-    ("FedAus19/FederalSenate2019ACT.json", 2),
-    ("FedAus19/FederalSenate2019NT.json", 2),
+    #("FedAus19/FederalSenate2019ACT.json", 2),
+    #("FedAus19/FederalSenate2019NT.json", 2),
     # ("FedAus19/FederalSenate2019NSW.json", 6),
     # ("FedAus19/FederalSenate2019QLD.json", 6),
     # ("FedAus19/FederalSenate2019SA.json", 6),
     # ("FedAus19/FederalSenate2019TAS.json", 6),
     # ("FedAus19/FederalSenate2019VIC.json", 6),
     # ("FedAus19/FederalSenate2019WA.json", 6),
-    ("FedAus22/2022ACT.json", 2),
-    ("FedAus22/2022NT.json", 2),
+    #("FedAus22/2022ACT.json", 2),
+    #("FedAus22/2022NT.json", 2),
     # ("FedAus22/FederalSenate2022NSW.json", 6),
     # ("FedAus22/FederalSenate2022QLD.json", 6),
     # ("FedAus22/FederalSenate2022SA.json", 6),
@@ -1131,15 +1146,15 @@ def run_audit():
     # 7 == new + Both + useqprefix
     # versions = [4, 5, 6, 0, 3, -1, -3]
     #versions = [4, 5, 6, 0, 3, -1]
-    versions=[9]
+    versions=[3,4,5,6,7,8,9,10,11,12,13,14,15]
     print(
-        "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb, new_ub")
+        "datafile, candidates, seats, quota, init_ub, found_lb, found_ub, nodes_exp, minlps_solved, solve(s), time(s), lse, dlb, eqlb, dlbc, eqlbc, prec_et, useqprefix, nominlps, new_ub")
     for version in versions:
-        for (datafile, seats) in data_aus_big:
+        for (datafile, seats) in datafiles:
             if "example" in datafile:
                 path = "./data/" + datafile
             else:
-                path = "../stv-rla/data/" + datafile
+                path = "../data/" + datafile
             displayname = displaynames[datafile]
 
             # candidates = [0]
@@ -1148,7 +1163,7 @@ def run_audit():
             #     candidates, ballots, _, cid2num, totvotes, seats = read_ballots_blt(path)
             # print(f"{displayname}, {len(candidates)}, {seats}, {counter}"); continue
             args = ['-d', path, '-log', f"log_{datafile.replace('/', '')}_{version}_15PC.log", '-s', str(seats),
-                        '-pc', '15', '-g', '0.01', '-agap', '0', '-limit', '36000', '-displayname', displayname, '-m']
+                        '-pc', '15', '-g', '0.01', '-agap', '0', '-limit', '10000', '-displayname', displayname, '-m']
             if version >= 0 and displayname in ubs:  # new ub
                 args += ['-ub', str(ubs[displayname])]
             if abs(version) == 3:  # new
@@ -1160,13 +1175,23 @@ def run_audit():
             if version == 6:
                 args += ['-eqlb']
             if version == 7:
-                args += ['-lse', '-eqlb', '-dlb', '-useqprefix']
-            if version == 8:
-                args += ['-lse', '-eqlb', '-dlb', '-useqprefix', '-nominlps']
+                args += ['-dlb']
+            if version == 8:  # new
+                args += ['-lse', '-eqlbc', '-dlbc', '-prec_et']
             if version == 9:
-                args += ['-lse', '-eqlbc', '-dlbc', '-useqprefix', '-nominlps', '-prec_et']
+                args += ['-dlbc', '-eqlbc', '-prec_et']
             if version == 10:
+                args += ['-eqlbc', '-lse', '-prec_et']
+            if version == 11:
+                args += ['-eqlbc', '-prec_et']
+            if version == 12:
+                args += ['-dlbc', '-prec_et']
+            if version == 13:
                 args += ['-lse', '-eqlbc', '-dlbc', '-useqprefix', '-prec_et']
+            if version == 14:
+                args += ['-lse', '-eqlbc', '-dlbc', '-useqprefix', '-prec_et', '-nominlps']
+            if version == 15:
+                args += ['-lse', '-useqprefix']
 
 
 

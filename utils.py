@@ -21,7 +21,36 @@ import numpy as np
 import math
 import json
 
-from typing import Any, Iterable, Optional, Protocol, TextIO
+from array import array
+
+from typing import Any, Iterable, Optional, Protocol, Sequence, TextIO, Union
+
+
+# Compact ballot ranking: 'bytes' for contests with at most 256 candidates,
+# otherwise a two byte per preference array. See pack_prefs.
+PrefSeq = Union[bytes, 'array[int]']
+
+
+def pack_prefs(prefs: Sequence[int]) -> PrefSeq:
+    """
+        Pack a ballot ranking into a compact, read-only buffer.
+
+        A list of preferences costs 56 bytes of list header plus 8 bytes
+        per entry; 'bytes' costs one byte per entry. A large contest has
+        millions of ballot types, and every worker process in a parallel
+        search reads every ballot, so this difference is paid once per
+        process. Contests with more than 256 candidates fall back to a
+        two byte per entry encoding. Both support iteration, indexing,
+        slicing, len() and 'in', which is all the ballot consumers use.
+    """
+    if isinstance(prefs, (bytes, array)):
+        return prefs
+
+    try:
+        return bytes(prefs)
+    except ValueError:
+        # A candidate number does not fit in a byte.
+        return array('H', prefs)
 
 
 class CandidateLike(Protocol):
@@ -61,7 +90,15 @@ class Ballot:
         Note: sometimes this data structure is used to represent a single
         ballot, or a collection of ballots cast with the same ranking.
     """
-    def __init__(self, num: int, votes: float, prefs: list[int], \
+
+    # Ballots dominate memory on large contests, and each worker process in
+    # a parallel search ends up with its own copy of every ballot it reads,
+    # so the per-ballot footprint is multiplied by the number of processes.
+    # Hence __slots__ (no per-instance __dict__) and the packed 'prefs'.
+    __slots__ = ('num', 'votes', 'prefs', 'atl', 'papers', '_totcand', \
+        '_ranks')
+
+    def __init__(self, num: int, votes: float, prefs: Sequence[int], \
         totcand: int, atl: bool = False) -> None:
         self.num = num # Numeric identifier for ballot
 
@@ -69,7 +106,7 @@ class Ballot:
         self.votes = votes
 
         # Ranking over candidates
-        self.prefs = prefs
+        self.prefs = pack_prefs(prefs)
 
         # Is this an above the line ballot/below the line
         self.atl = atl
@@ -841,7 +878,7 @@ def gen_equivalence_classes(order_c: list[int], remainder: list[int], \
         cmap[(r,)] = cntr
         cntr += 1
         for f in first:
-            newc = f.prefs + [r]
+            newc = list(f.prefs) + [r]
             second.append(Ballot(cntr, 0, newc, totcand))
             cmap[tuple(newc)] = cntr
             cntr += 1

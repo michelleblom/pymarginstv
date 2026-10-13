@@ -24,7 +24,7 @@ def step(ballots, candidates, quota, candidate, action, test=False):
     if action == 0:  # elim
         for b in ballots:
             tallies[b.prefs[0]] += b.votes
-            prefs = deepcopy(b.prefs)
+            prefs = list(b.prefs)  # b.prefs is a packed, read-only buffer
             if candidate in prefs:
                 prefs.remove(candidate)
             if not prefs:
@@ -58,7 +58,7 @@ def step(ballots, candidates, quota, candidate, action, test=False):
             # tval = min(1, (tallies[candidate]-quota)/tallies_cards[candidate])
             # print(tallies[candidate], quota, tallies[candidate]-quota, tallies_cards[candidate], tval)
         for b in ballots:
-            prefs = deepcopy(b.prefs)
+            prefs = list(b.prefs)  # b.prefs is a packed, read-only buffer
             if candidate in prefs:
                 prefs.remove(candidate)
             if not prefs:
