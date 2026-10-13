@@ -1,0 +1,11 @@
+Checks: >
+  bugprone-*,
+  modernize-*,
+  performance-*,
+  readability-const-return-type,
+  cppcoreguidelines-explicit-virtual-functions,
+  google-explicit-constructor,
+  -modernize-use-trailing-return-type,
+  -bugprone-easily-swappable-parameters
+WarningsAsErrors: ''
+HeaderFilterRegex: 'include/marginstv/.*'

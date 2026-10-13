@@ -1,0 +1,17 @@
+/* Build configuration of the SCIP library pyscipopt runs (written by CMake
+ * from the version pyscipopt reports; the flags are those of the pyscipopt
+ * wheels: thread-safe, no parallel interface, zlib). */
+#ifndef __CONFIG_H__
+#define __CONFIG_H__
+
+#define SCIP_BUILD_TYPE "Release"
+#define SCIP_VERSION_MAJOR @SCIP_VERSION_MAJOR@
+#define SCIP_VERSION_MINOR @SCIP_VERSION_MINOR@
+#define SCIP_VERSION_PATCH @SCIP_VERSION_PATCH@
+#define SCIP_VERSION_API @SCIP_VERSION_API@
+#define TPI_NONE
+#define SCIP_THREADSAFE
+#define SCIP_WITH_ZLIB
+#define SCIP_ROUNDING_FE
+
+#endif
