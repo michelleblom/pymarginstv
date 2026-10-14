@@ -629,8 +629,10 @@ void distribute_qprefix(ModelState& ms, const DistanceProblem& p, const std::vec
                     continue;
                 }
                 if (p.winners->test(*with)) {
+                    // order_q gives the first round with a quota at its
+                    // start, so a quota round of r already skips this ballot.
                     const auto* q = find_q(*p.order_q, *with);
-                    if (q != nullptr && q->hi < r) {
+                    if (q != nullptr && q->hi <= r) {
                         ++withindex;
                         continue;
                     }
