@@ -93,8 +93,11 @@ def distribute_ballots_t(R: int, bw: int, cp_bw: int, wi: int, bvalue: Any,
 
                     if ballotwith in winners and ballotwith in order_q:
                         # Does the new candidate already have a quota?
-                        # If so, they are skipped.
-                        if order_q[ballotwith] < r:
+                        # If so, they are skipped. order_q gives the first
+                        # round with a quota at its start, so a candidate
+                        # with order_q == r already holds one while this
+                        # ballot moves in round r.
+                        if order_q[ballotwith] <= r:
                             # we skip this candidate; they will already
                             # have a quota. 
                             withindex += 1
