@@ -132,11 +132,11 @@ struct PrefixRef {
 
 EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,
                                    const RoundTallies* elim_tallies, bool transfers_only,
-                                   bool sumq = false);
+                                   bool sumq = false, bool multielim = false);
 
 EqlbCtx compute_eqlb_stv26(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,
                            const RoundTallies* precomputed, bool transfers_only,
-                           bool sumq = false);
+                           bool sumq = false, bool multielim = false);
 
 EqlbCtx compute_eqlb_bst19(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p);
 

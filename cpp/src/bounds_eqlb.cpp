@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <functional>
 #include <stdexcept>
 
 namespace marginstv {
@@ -100,6 +101,24 @@ struct Gone {
 };
 
 double py_max0(double v) { return v > 0 ? v : 0.0; }
+
+// Lower bound from eliminating e while it stands above several continuing
+// candidates at once (multi_elim_lb in stvtree.py). 'gaps' holds L(e) - U(c)
+// per continuing c. Returns the best (sum of the m largest positive gaps +
+// deficit_sum) / (m + 1) over m >= 1.
+double multi_elim_lb(std::vector<double> gaps, double deficit_sum) {
+    std::erase_if(gaps, [](double g) { return !(g > 0); });
+    std::sort(gaps.begin(), gaps.end(), std::greater<>());
+    double best = 0;
+    double total = 0;
+    double m = 0;
+    for (const auto g : gaps) {
+        m += 1;
+        total += g;
+        best = std::max(best, (total + deficit_sum) / (m + 1));
+    }
+    return best;
+}
 
 // Per-thread scratch for calc_tallies' set of skipped seated candidates.
 struct SeenStamps {
@@ -370,7 +389,7 @@ RoundTallies compute_round_tallies_q_prefix(const EqlbCtx& ctx, const BoundInput
 
 EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,
                                    const RoundTallies* elim_tallies, bool transfers_only,
-                                   bool sumq) {
+                                   bool sumq, bool multielim) {
     EqlbCtx out = in;
     const auto start = in.round;
     Gone gone(p.order_c, start, bi.ncands);
@@ -403,6 +422,7 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
             const auto& t = *tallies;
             out.no_quota_lb = std::max(out.no_quota_lb, py_max0(t[cei] - quota));
             CandSet mask = out.nq_cons_added.get(i);
+            std::vector<double> gaps;
             for (int c = 0; c < n; ++c) {
                 if (gone.set.test(c) || c == ce) {
                     continue;
@@ -411,8 +431,15 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
                 out.elim_lb = std::max(out.elim_lb, py_max0(0.5 * (t[cei] - t[ci])));
                 out.no_quota_lb = std::max(out.no_quota_lb, py_max0(t[ci] - quota));
                 mask.set(c);
+                if (multielim) {
+                    gaps.push_back(t[cei] - t[ci]);
+                }
             }
             out.nq_cons_added.merge(i, mask);
+
+            if (multielim) {
+                out.elim_lb = std::max(out.elim_lb, multi_elim_lb(std::move(gaps), out.deficit_sum));
+            }
         } else {
             // The precomputed round tallies stand in for the ballot walk when
             // every standing candidate with a quota round reaches it no
@@ -563,7 +590,8 @@ RoundTallies compute_round_tallies(const EqlbCtx& ctx, const BoundInputs& bi,
 }
 
 EqlbCtx compute_eqlb_stv26(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,
-                           const RoundTallies* precomputed, bool transfers_only, bool sumq) {
+                           const RoundTallies* precomputed, bool transfers_only, bool sumq,
+                           bool multielim) {
     EqlbCtx out = in;
     const auto start = in.round;
     Gone gone(p.order_c, start, bi.ncands);
@@ -639,11 +667,18 @@ EqlbCtx compute_eqlb_stv26(const EqlbCtx& in, const BoundInputs& bi, const Prefi
                         }
                     });
             }
+            std::vector<double> gaps;
             for (int c = 0; c < n; ++c) {
                 if (in_others[static_cast<std::size_t>(c)] != 0) {
-                    out.elim_lb = std::max(
-                        out.elim_lb, py_max0(0.5 * (min_ce - max_others[static_cast<std::size_t>(c)])));
+                    const auto gap = min_ce - max_others[static_cast<std::size_t>(c)];
+                    out.elim_lb = std::max(out.elim_lb, py_max0(0.5 * gap));
+                    if (multielim) {
+                        gaps.push_back(gap);
+                    }
                 }
+            }
+            if (multielim) {
+                out.elim_lb = std::max(out.elim_lb, multi_elim_lb(std::move(gaps), out.deficit_sum));
             }
         } else if (find_q(q, ce) != nullptr) {
             double lb_value = 0;

@@ -110,6 +110,11 @@ if __name__ == "__main__":
     # required to hold a quota, in a prefix (needs -eqlb or -eqlbc).
     parser.add_argument("-sumq", action='store_true', default=False)
 
+    # Input: whether to compare an eliminated candidate against several
+    # continuing candidates at once in the elimination bound (needs -eqlb or
+    # -eqlbc).
+    parser.add_argument("-multielim", action='store_true', default=False)
+
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
 

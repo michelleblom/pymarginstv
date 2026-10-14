@@ -598,10 +598,32 @@ def compute_round_tallies_q_prefix(ballots: list[Ballot], \
     return tallies
 
 
+def multi_elim_lb(gaps: list[float], deficit_sum: float) -> float:
+    """
+    Lower bound from eliminating e while it stands above several continuing
+    candidates at once (-multielim).
+
+    gaps holds L(e) - U(c) for each continuing candidate c. A changed ballot
+    can lower e against every c at once but raise only one c, so it closes
+    at most m + 1 units of the m largest positive gaps plus the quota
+    shortfall deficit_sum. The bound is the best of (sum of the m largest
+    positive gaps + deficit_sum) / (m + 1) over m >= 1.
+    """
+    best: float = 0
+    total: float = 0
+    m = 0
+    for g in sorted((g for g in gaps if g > 0), reverse=True):
+        m += 1
+        total += g
+        best = max(best, (total + deficit_sum)/(m + 1))
+    return best
+
+
 def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike], \
     ballots: list[Ballot], order_c: list[int], order_a: list[int], \
     quota: int, order_q: dict[int, QRange], elim_tallies: Optional[list[float]], \
-    transfers_only: bool = False, sumq: bool = False) -> EqlbCtx:
+    transfers_only: bool = False, sumq: bool = False, \
+    multielim: bool = False) -> EqlbCtx:
     """
     With transfers_only set, walk the prefix purely to maintain transfer values
     (and gone/gone_set/gone_pos/winners), accumulating none of the bounds. The
@@ -703,6 +725,10 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
                 no_quota_lb = max(no_quota_lb, max(0, tallies[c] - quota))
                 nqmask |= 1 << c
             nq_cons_added[i] = nqmask
+
+            if multielim:
+                elim_lb = max(elim_lb, multi_elim_lb([tallies[ce] - tallies[c] \
+                    for c in others], deficit_sum))
 
 
         else:  # candidate seated
@@ -1081,7 +1107,8 @@ def compute_elim_quota_lb_STV26(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike]
     ballots: list[Ballot], order_c: list[int], order_a: list[int], \
     quota: int, order_q: dict[int, QRange], \
     precomputed: Optional[RoundTallies] = None, \
-    transfers_only: bool = False, sumq: bool = False) -> EqlbCtx:
+    transfers_only: bool = False, sumq: bool = False, \
+    multielim: bool = False) -> EqlbCtx:
     """
     With transfers_only set, walk the prefix purely to maintain transfer values,
     accumulating none of the bounds. See the quota-prefix variant for why.
@@ -1168,6 +1195,10 @@ def compute_elim_quota_lb_STV26(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike]
 
             for _, v in max_others.items():
                 elim_lb = max(elim_lb, max(0, 0.5 * (min_ce - v)))
+
+            if multielim:
+                elim_lb = max(elim_lb, multi_elim_lb([min_ce - v \
+                    for v in max_others.values()], deficit_sum))
 
         else:  # candidate seated
             if ce in order_q:  # candidate got a quota, else seated by default (last round)
@@ -2510,10 +2541,11 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
         if args.useqprefix:
             _eqlbctx = compute_elim_quota_lb_STV26_q_prefix(_eqlbctx, candidates, \
                 ballots, node_order_c, node_order_a, quota, node_order_q, None, \
-                sumq=args.sumq)
+                sumq=args.sumq, multielim=args.multielim)
         else:
             _eqlbctx  = compute_elim_quota_lb_STV26(_eqlbctx, candidates, ballots, \
-                node_order_c, node_order_a, quota, node_order_q, sumq=args.sumq)
+                node_order_c, node_order_a, quota, node_order_q, sumq=args.sumq, \
+                multielim=args.multielim)
     else:
         _base = _eqlbctx
         _eqlbctx = compute_elim_quota_lb_BST19(_base, candidates, ballots, node_order_c, \
@@ -2616,11 +2648,11 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
         if args.useqprefix:
             _eqlbctx = compute_elim_quota_lb_STV26_q_prefix(eqlbctx, candidates, \
                 ballots, node_order_c, node_order_a, quota, node_order_q, precomputed_elim_tallies, \
-                sumq=args.sumq)
+                sumq=args.sumq, multielim=args.multielim)
         else:
             _eqlbctx = compute_elim_quota_lb_STV26(eqlbctx, candidates, ballots, \
                 node_order_c, node_order_a, quota, node_order_q, \
-                precomputed_elim_tallies, sumq=args.sumq)
+                precomputed_elim_tallies, sumq=args.sumq, multielim=args.multielim)
     else:
         _eqlbctx  = compute_elim_quota_lb_BST19(eqlbctx, candidates, ballots, node_order_c, \
                 node_order_a, quota, node_order_q)
