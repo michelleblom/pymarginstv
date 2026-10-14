@@ -13,7 +13,7 @@ Options parse_options(const std::vector<std::string>& argv) {
         {"-dlbc", &o.dlbc},        {"-lse", &o.lse},             {"-eqlb", &o.eqlb},
         {"-eqlbc", &o.eqlbc},      {"-prec_et", &o.prec_et},     {"-nominlps", &o.nominlps},
         {"-allminlps", &o.allminlps}, {"-just_sim", &o.just_sim}, {"-useqprefix", &o.useqprefix},
-        {"-evalpara", &o.evalpara}, {"--evalpara", &o.evalpara},
+        {"-evalpara", &o.evalpara}, {"--evalpara", &o.evalpara}, {"-sumq", &o.sumq},
     };
     const std::map<std::string, std::function<void(const std::string&)>> values = {
         {"-d", [&](const std::string& v) { o.data = v; }},

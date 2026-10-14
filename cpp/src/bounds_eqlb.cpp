@@ -369,7 +369,8 @@ RoundTallies compute_round_tallies_q_prefix(const EqlbCtx& ctx, const BoundInput
 }
 
 EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,
-                                   const RoundTallies* elim_tallies, bool transfers_only) {
+                                   const RoundTallies* elim_tallies, bool transfers_only,
+                                   bool sumq) {
     EqlbCtx out = in;
     const auto start = in.round;
     Gone gone(p.order_c, start, bi.ncands);
@@ -441,15 +442,23 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
             const auto& mt = *max_tallies;
 
             if (!transfers_only) {
+                double shortfall = 0;
                 for (int c = 0; c < n; ++c) {
                     if (gone.set.test(c)) {
                         continue;
                     }
                     const auto* cq = find_q(q, c);
                     if (cq != nullptr && cq->lo <= i) {
-                        out.quota_lb =
-                            std::max(out.quota_lb, quota - mt[static_cast<std::size_t>(c)]);
+                        const auto need = quota - mt[static_cast<std::size_t>(c)];
+                        out.quota_lb = std::max(out.quota_lb, need);
+                        shortfall += py_max0(need);
                     }
+                }
+
+                // -sumq: votes changed to lift a short candidate to the quota
+                // are used up there, so shortfalls of different candidates add.
+                if (sumq) {
+                    out.quota_lb = std::max(out.quota_lb, out.deficit_sum + shortfall);
                 }
             }
 
@@ -459,6 +468,10 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
                 const auto value = quota > cmax ? quota : cmax;
                 const auto tv = (value - quota) / value;
                 out.transfer.set(ce, tv, tv);
+
+                if (sumq && !transfers_only) {
+                    out.deficit_sum += py_max0(quota - cmax);
+                }
 
                 if (!transfers_only) {
                     double displacement_cost = 0;
@@ -550,7 +563,7 @@ RoundTallies compute_round_tallies(const EqlbCtx& ctx, const BoundInputs& bi,
 }
 
 EqlbCtx compute_eqlb_stv26(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,
-                           const RoundTallies* precomputed, bool transfers_only) {
+                           const RoundTallies* precomputed, bool transfers_only, bool sumq) {
     EqlbCtx out = in;
     const auto start = in.round;
     Gone gone(p.order_c, start, bi.ncands);
@@ -712,6 +725,12 @@ EqlbCtx compute_eqlb_stv26(const EqlbCtx& in, const BoundInputs& bi, const Prefi
                 }
                 out.quota_lb = std::max({out.quota_lb, quota - cmax, displacement_cost});
             }
+
+            // -sumq: shortfalls of winners seated by quota add up.
+            if (sumq && !transfers_only) {
+                out.deficit_sum += py_max0(quota - cmax);
+                out.quota_lb = std::max(out.quota_lb, out.deficit_sum);
+            }
         }
         gone.push(ce);
     }
@@ -724,6 +743,7 @@ EqlbCtx compute_eqlb_stv26(const EqlbCtx& in, const BoundInputs& bi, const Prefi
     result.no_quota_lb = 0;
     result.winners = std::move(out.winners);
     result.round = pxlen;
+    result.deficit_sum = out.deficit_sum;
     return result;
 }
 

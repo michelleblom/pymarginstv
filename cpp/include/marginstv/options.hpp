@@ -31,6 +31,7 @@ struct Options {
     std::optional<std::string> displayname; // -displayname
     std::optional<long long> ub;      // -ub
     bool useqprefix = false;          // -useqprefix
+    bool sumq = false;                // -sumq: add up quota shortfalls
     // -evalpara: both levels of parallelism always run here, but the flag
     // still decides one set order the Python logs (see generate_children).
     bool evalpara = false;
