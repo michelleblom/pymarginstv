@@ -106,6 +106,10 @@ if __name__ == "__main__":
     parser.add_argument("-evalpara", "--evalpara", dest='evalpara', \
         action='store_true', default=False)
 
+    # Input: whether to add up the quota shortfalls of candidates seated, or
+    # required to hold a quota, in a prefix (needs -eqlb or -eqlbc).
+    parser.add_argument("-sumq", action='store_true', default=False)
+
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
 
