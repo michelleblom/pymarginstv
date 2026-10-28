@@ -115,6 +115,11 @@ if __name__ == "__main__":
     # -eqlbc).
     parser.add_argument("-multielim", action='store_true', default=False)
 
+    # Input: whether to add up the amounts by which candidates exceed the
+    # quota in an elimination round, rather than take the largest (needs
+    # -useqprefix and -eqlb or -eqlbc).
+    parser.add_argument("-sumnq", action='store_true', default=False)
+
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
 
