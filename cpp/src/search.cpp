@@ -35,7 +35,7 @@ EqlbCtx run_eqlb(const SearchInputs& in, const EqlbCtx& start, const PrefixRef& 
     if (o.eqlb || o.eqlbc) {
         return o.useqprefix
                    ? compute_eqlb_stv26_qprefix(start, in.bounds, p, tallies, false, o.sumq,
-                                                o.multielim)
+                                                o.multielim, o.sumnq)
                    : compute_eqlb_stv26(start, in.bounds, p, tallies, false, o.sumq, o.multielim);
     }
     auto ctx = compute_eqlb_bst19(start, in.bounds, p);

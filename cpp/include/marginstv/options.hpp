@@ -33,6 +33,7 @@ struct Options {
     bool useqprefix = false;          // -useqprefix
     bool sumq = false;                // -sumq: add up quota shortfalls
     bool multielim = false;           // -multielim: several-candidate elimination bound
+    bool sumnq = false;               // -sumnq: add up excesses over the quota
     // -evalpara: both levels of parallelism always run here, but the flag
     // still decides one set order the Python logs (see generate_children).
     bool evalpara = false;

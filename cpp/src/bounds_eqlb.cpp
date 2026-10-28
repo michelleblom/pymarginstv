@@ -362,13 +362,19 @@ std::vector<double> credited_tallies(const BoundInputs& bi, const Gone& gone,
 // (backcompute_nq_bound). Returns the bound and the candidates it covers.
 std::pair<double, CandSet> backcompute_nq_bound(int i, const EqlbCtx& walked, const BoundInputs& bi,
                                                 std::span<const Cand> order_c, const OrderQ& q,
-                                                std::span<const int> walked_pos) {
+                                                std::span<const int> walked_pos, bool sumnq) {
     const Gone gone(order_c, i, bi.ncands);
     const auto already = walked.nq_cons_added.get(i);
+    // Standing candidates whose quota round is later than i: none may hold a
+    // quota in round i.
+    std::vector<Cand> held;
     std::vector<Cand> rem_qs;
     for (const auto& e : q) {
-        if (!gone.set.test(e.c) && e.lo > i && !already.test(e.c)) {
-            rem_qs.push_back(e.c);
+        if (!gone.set.test(e.c) && e.lo > i) {
+            held.push_back(e.c);
+            if (!already.test(e.c)) {
+                rem_qs.push_back(e.c);
+            }
         }
     }
     CandSet added(bi.ncands);
@@ -388,6 +394,16 @@ std::pair<double, CandSet> backcompute_nq_bound(int i, const EqlbCtx& walked, co
         nqlb = std::max(nqlb, tallies[static_cast<std::size_t>(c)] - static_cast<double>(bi.quota));
         added.set(c);
     }
+
+    // -sumnq: the excesses of everyone held under the quota in round i add up.
+    if (sumnq) {
+        double total = 0;
+        for (const auto c : held) {
+            total +=
+                py_max0(tallies[static_cast<std::size_t>(c)] - static_cast<double>(bi.quota));
+        }
+        nqlb = std::max(nqlb, total);
+    }
     return {nqlb, added};
 }
 
@@ -404,7 +420,7 @@ RoundTallies compute_round_tallies_q_prefix(const EqlbCtx& ctx, const BoundInput
 
 EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,
                                    const RoundTallies* elim_tallies, bool transfers_only,
-                                   bool sumq, bool multielim) {
+                                   bool sumq, bool multielim, bool sumnq) {
     EqlbCtx out = in;
     const auto start = in.round;
     Gone gone(p.order_c, start, bi.ncands);
@@ -453,6 +469,20 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
                 }
             }
             out.nq_cons_added.merge(i, mask);
+
+            // -sumnq: a changed ballot lowers the standing candidates' tallies
+            // in this round by at most 1 in total, so their excesses over the
+            // quota add up. Summed in the Python's order: others, then ce.
+            if (sumnq) {
+                double total = 0;
+                for (int c = 0; c < n; ++c) {
+                    if (!gone.set.test(c) && c != ce) {
+                        total += py_max0(t[static_cast<std::size_t>(c)] - quota);
+                    }
+                }
+                total += py_max0(t[cei] - quota);
+                out.no_quota_lb = std::max(out.no_quota_lb, total);
+            }
 
             if (multielim) {
                 out.elim_lb = std::max(out.elim_lb, multi_elim_lb(std::move(gaps), out.deficit_sum));
@@ -550,7 +580,7 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
     if (!transfers_only && lastseat >= 0 && lastseat < pxlen - 1 &&
         (pxlen == n || (lastseat >= 1 && p.order_a[static_cast<std::size_t>(lastseat - 1)] == 1))) {
         for (int j = lastseat; j >= 0 && p.order_a[static_cast<std::size_t>(j)] == 1; --j) {
-            const auto [nqlb, nqs] = backcompute_nq_bound(j, out, bi, p.order_c, q, gone.pos);
+            const auto [nqlb, nqs] = backcompute_nq_bound(j, out, bi, p.order_c, q, gone.pos, sumnq);
             out.no_quota_lb = std::max(out.no_quota_lb, nqlb);
             out.nq_cons_added.merge(j, nqs);
         }
