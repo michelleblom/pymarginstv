@@ -246,6 +246,24 @@ def derive_rem(order_c: Sequence[int], candidates: Sequence[CandidateLike]) \
     return [c.num for c in candidates if c.num not in placed]
 
 
+def padding_start(order_a: Sequence[int], ncands: int) -> int:
+    """
+        First round of an outcome prefix that is padding. When a child fills
+        the last seat, the candidates left are appended as eliminations, but
+        the count ends once every seat is filled: those rounds never happen
+        and must not add to any bound. Returns len(order_a) when there is no
+        padding.
+    """
+    pxlen = len(order_a)
+    if pxlen != ncands:
+        return pxlen
+
+    i = pxlen
+    while i > 0 and order_a[i - 1] == 0:
+        i -= 1
+    return i
+
+
 def derive_winners(order_c: Sequence[int], order_a: Sequence[int]) -> set[int]:
     """
         Candidates seated within an outcome prefix. Derived rather than
@@ -681,9 +699,10 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
     #
     # A ballot that last moved before this round cannot have skipped a
     # continuing candidate, so it is certain who holds it. When the prefix ends
-    # with an elimination -- a padded complete prefix included -- the first
-    # constraint puts this past every reachable move_r (at most PXLEN - 2), so
-    # no ballot is ever treated as uncertain.
+    # with an elimination -- a padded complete prefix included, where no one
+    # left unseated can hold a quota as there are never more quotas than
+    # seats -- the first constraint puts this past every reachable move_r (at
+    # most PXLEN - 2), so no ballot is ever treated as uncertain.
     lastelim = PXLEN - 1
     while lastelim >= 0 and order_a[lastelim] == 1:
         lastelim -= 1
@@ -694,13 +713,15 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
     if order_q:
         qearliest = max(qearliest, max(order_q[c][0] for c in order_q))
 
+    padfrom = padding_start(order_a, eqlbctx.N)
+
     for i in range(start, PXLEN):
         ce = order_c[i]
 
         if order_a[i] == 0:  # candidate eliminated
             # An elimination round sets no transfer value, so it has nothing to
-            # contribute when only those are wanted.
-            if transfers_only:
+            # contribute when only those are wanted. Padded rounds add nothing.
+            if transfers_only or i >= padfrom:
                 gone.append(ce)
                 gone_set.add(ce)
                 gone_pos[ce] = i
@@ -1150,12 +1171,14 @@ def compute_elim_quota_lb_STV26(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike]
     start = eqlbctx.round
 
     PXLEN = len(order_c)
+    padfrom = padding_start(order_a, eqlbctx.N)
     for i in range(start, PXLEN):
         ce = order_c[i]
 
         if order_a[i] == 0:  # candidate eliminated
-            # An elimination round sets no transfer value.
-            if transfers_only:
+            # An elimination round sets no transfer value. Padded rounds add
+            # nothing.
+            if transfers_only or i >= padfrom:
                 gone.append(ce)
                 gone_set.add(ce)
                 continue
@@ -1349,8 +1372,15 @@ def compute_elim_quota_lb_BST19(eqlbctx : EqlbCtx, cands: Sequence[CandidateLike
     start = eqlbctx.round
 
     PXLEN = len(order_c)
+    padfrom = padding_start(order_a, eqlbctx.N)
     for i in range(start, PXLEN):
         ce = order_c[i]
+
+        # Padded rounds add nothing.
+        if i >= padfrom:
+            gone.append(ce)
+            gone_set.add(ce)
+            continue
 
         if order_a[i] == 0:
             # Compute min vote 'ce' could have at this point, needs to be

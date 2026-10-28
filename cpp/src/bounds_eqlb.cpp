@@ -150,6 +150,21 @@ int first_standing(std::span<const Pref> prefs, const CandSet& gone) {
     return -1;
 }
 
+// First round of an outcome prefix that is padding. When a child fills the
+// last seat, the candidates left are appended as eliminations, but the count
+// ends once every seat is filled: those rounds never happen and must not add
+// to any bound. Returns order_a.size() when there is no padding.
+int padding_start(std::span<const int> order_a, int ncands) {
+    auto i = static_cast<int>(order_a.size());
+    if (i != ncands) {
+        return i;
+    }
+    while (i > 0 && order_a[static_cast<std::size_t>(i - 1)] == 0) {
+        --i;
+    }
+    return i;
+}
+
 } // namespace
 
 QValue calc_tallies_q_prefix(std::span<const Pref> prefs, double votes, std::span<const Cand> gone,
@@ -398,13 +413,15 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
     const auto quota = static_cast<double>(bi.quota);
     const auto pxlen = static_cast<int>(p.order_c.size());
     const auto qround = quota_rounds(q, n);
+    const auto padfrom = padding_start(p.order_a, n);
 
     for (int i = start; i < pxlen; ++i) {
         const auto ce = p.order_c[static_cast<std::size_t>(i)];
         const auto cei = static_cast<std::size_t>(ce);
 
         if (p.order_a[static_cast<std::size_t>(i)] == 0) {
-            if (transfers_only) {
+            // Padded rounds add nothing.
+            if (transfers_only || i >= padfrom) {
                 gone.push(ce);
                 continue;
             }
@@ -600,13 +617,15 @@ EqlbCtx compute_eqlb_stv26(const EqlbCtx& in, const BoundInputs& bi, const Prefi
     const auto quota = static_cast<double>(bi.quota);
     const auto pxlen = static_cast<int>(p.order_c.size());
     const auto& ballots = bi.election->ballots;
+    const auto padfrom = padding_start(p.order_a, n);
 
     for (int i = start; i < pxlen; ++i) {
         const auto ce = p.order_c[static_cast<std::size_t>(i)];
         const auto cei = static_cast<std::size_t>(ce);
 
         if (p.order_a[static_cast<std::size_t>(i)] == 0) {
-            if (transfers_only) {
+            // Padded rounds add nothing.
+            if (transfers_only || i >= padfrom) {
                 gone.push(ce);
                 continue;
             }
@@ -793,10 +812,17 @@ EqlbCtx compute_eqlb_bst19(const EqlbCtx& in, const BoundInputs& bi, const Prefi
     const auto quota = static_cast<double>(bi.quota);
     const auto pxlen = static_cast<int>(p.order_c.size());
     const auto& ballots = bi.election->ballots;
+    const auto padfrom = padding_start(p.order_a, n);
 
     for (int i = start; i < pxlen; ++i) {
         const auto ce = p.order_c[static_cast<std::size_t>(i)];
         const auto cei = static_cast<std::size_t>(ce);
+
+        // Padded rounds add nothing.
+        if (i >= padfrom) {
+            gone.push(ce);
+            continue;
+        }
 
         if (p.order_a[static_cast<std::size_t>(i)] == 0) {
             auto min_ce = bi.fp[cei];
