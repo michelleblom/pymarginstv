@@ -947,6 +947,12 @@ def backcompute_nq_bound(i : int, ctx : EqlbCtx, cands: Sequence[CandidateLike],
     # Standing candidates whose quota round is later than i: none may hold a
     # quota in round i.
     held = [c for c in order_q.keys() if c not in gone_set and order_q[c][0] > i]
+    # -sumnq: a standing candidate not seated in the prefix cannot hold a quota
+    # in round i either. An elimination follows round i, and no one may hold a
+    # quota then; in a padded leaf, all seats are filled and there are never
+    # more quotas than seats.
+    if sumnq:
+        held += [c.num for c in cands if c.num not in gone_set and c.num not in order_q]
     rem_qs = [c for c in held if not((already >> c) & 1)]
 
     no_quota_lb: float = 0

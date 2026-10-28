@@ -377,6 +377,20 @@ std::pair<double, CandSet> backcompute_nq_bound(int i, const EqlbCtx& walked, co
             }
         }
     }
+    // -sumnq: a standing candidate not seated in the prefix cannot hold a quota
+    // in round i either. An elimination follows round i, and no one may hold a
+    // quota then; in a padded leaf, all seats are filled and there are never
+    // more quotas than seats.
+    if (sumnq) {
+        for (int c = 0; c < bi.ncands; ++c) {
+            if (!gone.set.test(c) && find_q(q, c) == nullptr) {
+                held.push_back(c);
+                if (!already.test(c)) {
+                    rem_qs.push_back(c);
+                }
+            }
+        }
+    }
     CandSet added(bi.ncands);
     double nqlb = 0;
     if (rem_qs.empty()) {
