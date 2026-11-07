@@ -637,11 +637,36 @@ def multi_elim_lb(gaps: list[float], deficit_sum: float) -> float:
     return best
 
 
+def elim_nq_lb(gaps: list[float], excess_sum: float, deficit_sum: float) -> float:
+    """
+    Lower bound from eliminating e in a round where no standing candidate may
+    hold a quota (-elimnq).
+
+    gaps holds T(e) - min(T(c), quota) for each continuing candidate c, and
+    excess_sum the amounts by which the continuing candidates exceed the
+    quota. In this round a changed ballot lowers the standing candidates by at
+    most 1 in total and raises them by at most 1, less what goes to earlier
+    winners' shortfalls deficit_sum. Lowering e closes every gap at once, but
+    shares its budget with lowering the over-quota candidates. The bound is
+    the best of (sum of the m largest gaps + m * excess_sum + deficit_sum) /
+    (m + 1) over m >= 1.
+    """
+    best: float = 0
+    total: float = 0
+    m = 0
+    for g in sorted(gaps, reverse=True):
+        m += 1
+        total += g
+        best = max(best, (total + m * excess_sum + deficit_sum)/(m + 1))
+    return best
+
+
 def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike], \
     ballots: list[Ballot], order_c: list[int], order_a: list[int], \
     quota: int, order_q: dict[int, QRange], elim_tallies: Optional[list[float]], \
     transfers_only: bool = False, sumq: bool = False, \
-    multielim: bool = False, sumnq: bool = False) -> EqlbCtx:
+    multielim: bool = False, sumnq: bool = False, \
+    elimnq: bool = False) -> EqlbCtx:
     """
     With transfers_only set, walk the prefix purely to maintain transfer values
     (and gone/gone_set/gone_pos/winners), accumulating none of the bounds. The
@@ -757,6 +782,14 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
             if multielim:
                 elim_lb = max(elim_lb, multi_elim_lb([tallies[ce] - tallies[c] \
                     for c in others], deficit_sum))
+
+            # -elimnq: lowering e and lowering an over-quota candidate use up
+            # the same budget, so the excesses join the elimination gaps.
+            if elimnq:
+                excess_sum = sum(max(0, tallies[c] - quota) for c in others)
+                elim_lb = max(elim_lb, elim_nq_lb([tallies[ce] - \
+                    min(tallies[c], quota) for c in others], excess_sum, \
+                    deficit_sum))
 
 
         else:  # candidate seated
@@ -2592,7 +2625,8 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
         if args.useqprefix:
             _eqlbctx = compute_elim_quota_lb_STV26_q_prefix(_eqlbctx, candidates, \
                 ballots, node_order_c, node_order_a, quota, node_order_q, None, \
-                sumq=args.sumq, multielim=args.multielim, sumnq=args.sumnq)
+                sumq=args.sumq, multielim=args.multielim, sumnq=args.sumnq, \
+                elimnq=args.elimnq)
         else:
             _eqlbctx  = compute_elim_quota_lb_STV26(_eqlbctx, candidates, ballots, \
                 node_order_c, node_order_a, quota, node_order_q, sumq=args.sumq, \
@@ -2699,7 +2733,8 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
         if args.useqprefix:
             _eqlbctx = compute_elim_quota_lb_STV26_q_prefix(eqlbctx, candidates, \
                 ballots, node_order_c, node_order_a, quota, node_order_q, precomputed_elim_tallies, \
-                sumq=args.sumq, multielim=args.multielim, sumnq=args.sumnq)
+                sumq=args.sumq, multielim=args.multielim, sumnq=args.sumnq, \
+                elimnq=args.elimnq)
         else:
             _eqlbctx = compute_elim_quota_lb_STV26(eqlbctx, candidates, ballots, \
                 node_order_c, node_order_a, quota, node_order_q, \

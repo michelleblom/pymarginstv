@@ -120,6 +120,24 @@ double multi_elim_lb(std::vector<double> gaps, double deficit_sum) {
     return best;
 }
 
+// Lower bound from eliminating e in a round where no standing candidate may
+// hold a quota (elim_nq_lb in stvtree.py). 'gaps' holds T(e) - min(T(c),
+// quota) per continuing c, and excess_sum the amounts by which they exceed
+// the quota. Returns the best (sum of the m largest gaps + m * excess_sum +
+// deficit_sum) / (m + 1) over m >= 1.
+double elim_nq_lb(std::vector<double> gaps, double excess_sum, double deficit_sum) {
+    std::sort(gaps.begin(), gaps.end(), std::greater<>());
+    double best = 0;
+    double total = 0;
+    double m = 0;
+    for (const auto g : gaps) {
+        m += 1;
+        total += g;
+        best = std::max(best, (total + m * excess_sum + deficit_sum) / (m + 1));
+    }
+    return best;
+}
+
 // Per-thread scratch for calc_tallies' set of skipped seated candidates.
 struct SeenStamps {
     std::vector<std::uint32_t> stamp;
@@ -434,7 +452,7 @@ RoundTallies compute_round_tallies_q_prefix(const EqlbCtx& ctx, const BoundInput
 
 EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,
                                    const RoundTallies* elim_tallies, bool transfers_only,
-                                   bool sumq, bool multielim, bool sumnq) {
+                                   bool sumq, bool multielim, bool sumnq, bool elimnq) {
     EqlbCtx out = in;
     const auto start = in.round;
     Gone gone(p.order_c, start, bi.ncands);
@@ -500,6 +518,23 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
 
             if (multielim) {
                 out.elim_lb = std::max(out.elim_lb, multi_elim_lb(std::move(gaps), out.deficit_sum));
+            }
+
+            // -elimnq: lowering e and lowering an over-quota candidate use up
+            // the same budget, so the excesses join the elimination gaps.
+            if (elimnq) {
+                double excess_sum = 0;
+                std::vector<double> capped;
+                for (int c = 0; c < n; ++c) {
+                    if (gone.set.test(c) || c == ce) {
+                        continue;
+                    }
+                    const auto tc = t[static_cast<std::size_t>(c)];
+                    excess_sum += py_max0(tc - quota);
+                    capped.push_back(t[cei] - std::min(tc, quota));
+                }
+                out.elim_lb = std::max(
+                    out.elim_lb, elim_nq_lb(std::move(capped), excess_sum, out.deficit_sum));
             }
         } else {
             // The precomputed round tallies stand in for the ballot walk when

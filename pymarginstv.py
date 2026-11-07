@@ -120,6 +120,12 @@ if __name__ == "__main__":
     # -useqprefix and -eqlb or -eqlbc).
     parser.add_argument("-sumnq", action='store_true', default=False)
 
+    # Input: whether to combine, in an elimination round, the gaps between
+    # the eliminated candidate and those still standing with the amounts by
+    # which the others exceed the quota (needs -useqprefix and -eqlb or
+    # -eqlbc; earlier quota shortfalls join in with -sumq).
+    parser.add_argument("-elimnq", action='store_true', default=False)
+
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
 

@@ -15,6 +15,7 @@ Options parse_options(const std::vector<std::string>& argv) {
         {"-allminlps", &o.allminlps}, {"-just_sim", &o.just_sim}, {"-useqprefix", &o.useqprefix},
         {"-evalpara", &o.evalpara}, {"--evalpara", &o.evalpara}, {"-sumq", &o.sumq},
         {"-multielim", &o.multielim}, {"-sumnq", &o.sumnq},
+        {"-elimnq", &o.elimnq},
     };
     const std::map<std::string, std::function<void(const std::string&)>> values = {
         {"-d", [&](const std::string& v) { o.data = v; }},
