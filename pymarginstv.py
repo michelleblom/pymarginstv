@@ -147,6 +147,12 @@ if __name__ == "__main__":
     parser.add_argument('-weakseed', action='store_true', default=False)
     parser.add_argument('-seedf', type=float, default=0.25)
 
+    # Input: search each run of eliminations between seatings by deciding,
+    # one candidate at a time, whether it is eliminated in the run or still
+    # standing when it ends, so a node covers every order of the run's
+    # eliminations (needs -useqprefix, -eqlbc and -nominlps).
+    parser.add_argument('-membership', action='store_true', default=False)
+
     # Output: Log file
     parser.add_argument('-log', dest='log', type=str)
 
