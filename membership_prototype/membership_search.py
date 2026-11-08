@@ -45,7 +45,9 @@ and T_R(y) - quota for each left out who is over it) and on which of them
 is seated first; or by seating everyone left when exactly seats-left
 remain. Ballots then pass over the candidates holding the quota, as STV
 does, and those candidates are seated next, with no eliminations, keeping
-the ballots they held when they reached it. A complete outcome
+the ballots they held when they reached it. Seating follows the step at
+which each reached the quota, any order within a step, as the
+quota-in-prefix search allows. A complete outcome
 whose winners differ from the reported ones ends the search: every node
 left has a bound at least as large, so the margin, over elections that
 follow the opening seatings, is at least that bound. Elections that do
@@ -173,17 +175,18 @@ class LBLevel(Level):
         hold is each ballot's holder (a flat index, or big for an
         exhausted ballot). It is tracked rather than read off the ranking,
         because ballots pass over candidates who already hold the quota.
-        queued is the candidates who hold the quota and wait to be seated;
-        while any do, nothing can be eliminated, and they keep exactly the
-        ballots they held when they reached the quota.
+        queued maps each candidate who holds the quota and waits to be
+        seated to the step at which it reached the quota; while any wait,
+        nothing can be eliminated, and they keep exactly the ballots they
+        held when they reached the quota.
     """
 
     def __init__(self, nd, w, gone, seats_left, k, hold=None, \
-        queued=frozenset()):
+        queued=None):
         self.nd, self.w, self.gone, self.seats_left, self.k = \
             nd, w, gone, seats_left, k
         self.order_mode, self.splus = "desc", False
-        self.queued = frozenset(queued)
+        self.queued = dict(queued or {})
         self.hopeful = [c for c in nd.hopeful.tolist() if not gone[c]]
         self.hold = self.holders(gone) if hold is None else hold
         ok = self.hold < nd.big
@@ -495,11 +498,13 @@ class LBLevel(Level):
     def after_seating(self, R, x, H):
         """
             The next run, once R is gone and x is seated while the
-            candidates in H hold the quota (x among them). x's ballots move
-            on at its transfer value to their next candidate that is
-            neither gone nor holding the quota (utils.next_candidate); the
-            others in H keep their ballots and wait to be seated.
+            candidates in H hold the quota (x among them; H maps each to
+            the step at which it reached the quota). x's ballots move on at
+            its transfer value to their next candidate that is neither gone
+            nor holding the quota (utils.next_candidate); the others in H
+            keep their ballots and wait to be seated.
         """
+        H = dict(H)
         nd = self.nd
         tr, h = self.after_run(R)
         gone = self.mask(R)
@@ -524,13 +529,14 @@ class LBLevel(Level):
         hold = h.copy()
         hold[moved] = np.where(pos < end, pos, nd.big)
         return LBLevel(nd, w, gone, self.seats_left - 1, self.k, hold, \
-            frozenset(H) - {x})
+            {c: s for c, s in H.items() if c != x})
 
 
 class Levels:
     """
         Runs reached so far, keyed by the path of (run, seated candidate,
-        quota holders) triples from the opening node. Building one costs ballot passes and
+        quota holders with the step each reached the quota) triples from
+        the opening node. Building one costs ballot passes and
         a copy of the ballot values, so only the most recent are kept and
         the rest are rebuilt from their parent when needed.
     """
@@ -650,9 +656,11 @@ def main():
 
         # The run is decided (i == "end": empty, as someone waits to be
         # seated). Branch on who holds the quota now: those already
-        # waiting, plus any set N of others. Each one in N under the quota
-        # needs additions; each over it and left out needs removals. Then
-        # seat any one of them.
+        # waiting, plus any set N of others, who reach it at this step.
+        # Each one in N under the quota needs additions; each over it and
+        # left out needs removals. As in the quota-in-prefix search, quota
+        # rounds never go backwards: the one seated next comes from the
+        # earliest step present, in any order within that step.
         tr, _ = lvl.after_run(IN)
         left = [c for c in lvl.hopeful if c not in IN]
         queued = lvl.queued
@@ -665,21 +673,23 @@ def main():
         room = lvl.seats_left - len(queued)
         for size in range(min(room, len(elig)) + 1):
             for N in itertools.combinations(elig, size):
-                H = queued | frozenset(N)
+                H = {**queued, **{z: len(seated) for z in N}}
                 if not H:
                     continue
+                first = min(H.values())
                 lift = sum(max(0.0, q - tr[z]) for z in N)
                 outs = [tr[y] - q for y in over if y not in N]
                 lower = (sum(outs) if a.sumnq else max(outs)) if outs else 0.0
                 nxt = deficit + lift if a.sumq else 0.0
                 b = max(bound, lift, nxt, lower)
-                for x in H:
+                Hkey = frozenset(H.items())
+                for x in [c for c, st in H.items() if st == first]:
                     now_seated = seated + (x,)
                     if lvl.seats_left == 1:
                         if opening | set(now_seated) != reported:
                             push(b, key, IN, OUT, "leaf", now_seated, nxt)
                         continue
-                    push(b, key + ((frozenset(IN), x, H),), frozenset(), \
+                    push(b, key + ((frozenset(IN), x, Hkey),), frozenset(), \
                         frozenset(), "end" if len(H) > 1 else 0, \
                         now_seated, nxt)
 
