@@ -30,6 +30,8 @@ struct SearchInputs {
     std::vector<Cand> full_order_c;
     std::vector<int> full_order_a;
     DistanceSettings distance;
+    // The starting upper bound; -weakseed measures budgets against it.
+    PyNum orig_ub;
 };
 
 struct SearchResult {
@@ -55,6 +57,9 @@ struct ChildSpec {
     std::vector<Cand> rem;
     bool isleaf = false;
     PyNum running_ub;
+    Blocks blocks;
+    // Budget of the -weakseed block expansion that produced the child.
+    std::optional<PyNum> cap;
 };
 
 struct ChildResult {
@@ -70,6 +75,8 @@ struct ChildResult {
     std::optional<PyNum> dist;
     std::optional<PyNum> dist_ub;
     bool solved = false;
+    Blocks blocks;
+    std::optional<PyNum> cap;
 };
 
 struct InitialResult {

@@ -35,6 +35,13 @@ struct Options {
     bool multielim = false;           // -multielim: several-candidate elimination bound
     bool sumnq = false;               // -sumnq: add up excesses over the quota
     bool elimnq = false;              // -elimnq: join excesses to elimination gaps
+    // -weakseed: expand a node whose prefix is empty or ends with a seating
+    // into blocks of eliminations when a strong/weak/other split proves a
+    // budget of at least -seedf times the starting upper bound, with at most
+    // -seedmaxchildren children. Results are then capped at that budget.
+    bool weakseed = false;
+    double seedf = 0.25;              // -seedf
+    int seedmaxchildren = 10000;      // -seedmaxchildren
     // -evalpara: both levels of parallelism always run here, but the flag
     // still decides one set order the Python logs (see generate_children).
     bool evalpara = false;

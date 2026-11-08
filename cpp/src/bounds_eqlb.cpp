@@ -295,6 +295,51 @@ Valuation calc_tallies(std::span<const Pref> prefs, double votes, const CalcTall
 
 namespace {
 
+// Elimination bound for a -weakseed block, valid for every order in which
+// its candidates go (block_elim_lb in stvtree.py). Tallies only rise while
+// candidates are eliminated, so when c*, the block candidate with the
+// largest tally at the block's start, is eliminated, c* holds at least
+// start[c*] and each candidate standing after the block at most end[d].
+double block_elim_lb(double elim_lb, const std::vector<double>& start,
+                     const std::vector<double>& end, std::span<const Cand> block,
+                     const std::vector<Cand>& standing, double quota, double deficit_sum,
+                     bool multielim, bool elimnq) {
+    // Python's max(): the first candidate with the largest tally.
+    auto cstar = block[0];
+    for (const auto c : block) {
+        if (start[static_cast<std::size_t>(c)] > start[static_cast<std::size_t>(cstar)]) {
+            cstar = c;
+        }
+    }
+    const auto top = start[static_cast<std::size_t>(cstar)];
+    std::vector<double> gaps;
+    for (const auto d : standing) {
+        gaps.push_back(top - end[static_cast<std::size_t>(d)]);
+    }
+    auto biggest = gaps[0];
+    for (const auto g : gaps) {
+        if (g > biggest) {
+            biggest = g;
+        }
+    }
+    elim_lb = std::max(elim_lb, py_max0(0.5 * biggest));
+    if (multielim) {
+        elim_lb = std::max(elim_lb, multi_elim_lb(gaps, deficit_sum));
+    }
+    if (elimnq) {
+        double excess_sum = 0;
+        std::vector<double> capped;
+        for (const auto d : standing) {
+            excess_sum += py_max0(start[static_cast<std::size_t>(d)] - quota);
+        }
+        for (const auto d : standing) {
+            capped.push_back(top - std::min(end[static_cast<std::size_t>(d)], quota));
+        }
+        elim_lb = std::max(elim_lb, elim_nq_lb(std::move(capped), excess_sum, deficit_sum));
+    }
+    return elim_lb;
+}
+
 struct QPlan {
     std::vector<double> tv_lo;
     std::vector<int> qround;
@@ -463,6 +508,17 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
     const auto qround = quota_rounds(q, n);
     const auto padfrom = padding_start(p.order_a, n);
 
+    // -weakseed blocks: the block, as (start, end), holding each round.
+    std::vector<std::pair<int, int>> block_at(static_cast<std::size_t>(std::max(pxlen, 0)), {-1, -1});
+    if (p.blocks != nullptr) {
+        for (const auto& se : *p.blocks) {
+            for (int r = se.first; r < se.second && r < pxlen; ++r) {
+                block_at[static_cast<std::size_t>(r)] = se;
+            }
+        }
+    }
+    std::vector<double> block_tallies;
+
     for (int i = start; i < pxlen; ++i) {
         const auto ce = p.order_c[static_cast<std::size_t>(i)];
         const auto cei = static_cast<std::size_t>(ce);
@@ -473,6 +529,67 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
                 gone.push(ce);
                 continue;
             }
+
+            const auto [bs, be] = block_at[static_cast<std::size_t>(i)];
+            if (bs >= 0) {
+                // A block stands for every order of its candidates, so no
+                // round inside it may assume who was eliminated when. Only
+                // its start and end states are the same in every order.
+                if (i == bs) {
+                    if (i == 0) {
+                        block_tallies = bi.fp;
+                    } else if (i == start && elim_tallies != nullptr) {
+                        block_tallies = elim_tallies->tallies;
+                    } else {
+                        const QPlan plan{out.transfer.dense_lo(n), qround};
+                        block_tallies = round_tallies_q(bi, gone, out.winners, plan);
+                    }
+
+                    // Nobody holds a quota at the start of the block.
+                    CandSet mask = out.nq_cons_added.get(i);
+                    for (int c = 0; c < n; ++c) {
+                        if (gone.set.test(c)) {
+                            continue;
+                        }
+                        out.no_quota_lb = std::max(
+                            out.no_quota_lb,
+                            py_max0(block_tallies[static_cast<std::size_t>(c)] - quota));
+                        if (c != ce) {
+                            mask.set(c);
+                        }
+                    }
+                    out.nq_cons_added.merge(i, mask);
+                    if (sumnq) {
+                        double total = 0;
+                        for (int c = 0; c < n; ++c) {
+                            if (!gone.set.test(c)) {
+                                total += py_max0(block_tallies[static_cast<std::size_t>(c)] - quota);
+                            }
+                        }
+                        out.no_quota_lb = std::max(out.no_quota_lb, total);
+                    }
+                }
+
+                gone.push(ce);
+
+                if (i == be - 1) {
+                    const QPlan plan{out.transfer.dense_lo(n), qround};
+                    const auto end_tallies = round_tallies_q(bi, gone, out.winners, plan);
+                    std::vector<Cand> standing;
+                    for (int c = 0; c < n; ++c) {
+                        if (!gone.set.test(c)) {
+                            standing.push_back(c);
+                        }
+                    }
+                    out.elim_lb = block_elim_lb(
+                        out.elim_lb, block_tallies, end_tallies,
+                        p.order_c.subspan(static_cast<std::size_t>(bs),
+                                          static_cast<std::size_t>(be - bs)),
+                        standing, quota, out.deficit_sum, multielim, elimnq);
+                }
+                continue;
+            }
+
             std::vector<double> computed;
             const std::vector<double>* tallies = nullptr;
             if (i == 0) {

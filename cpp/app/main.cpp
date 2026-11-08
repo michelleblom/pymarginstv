@@ -94,6 +94,7 @@ int run(const Options& opt) {
     in.distance.gap = opt.gap;
     in.distance.qprefix = opt.useqprefix;
     in.distance.sidecar_path = opt.log + ".solves.csv";
+    in.orig_ub = upper_bound;
 
     const auto tstart = wall_seconds();
     const auto res = treestv(in, upper_bound, log);

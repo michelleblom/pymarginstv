@@ -15,7 +15,7 @@ Options parse_options(const std::vector<std::string>& argv) {
         {"-allminlps", &o.allminlps}, {"-just_sim", &o.just_sim}, {"-useqprefix", &o.useqprefix},
         {"-evalpara", &o.evalpara}, {"--evalpara", &o.evalpara}, {"-sumq", &o.sumq},
         {"-multielim", &o.multielim}, {"-sumnq", &o.sumnq},
-        {"-elimnq", &o.elimnq},
+        {"-elimnq", &o.elimnq},     {"-weakseed", &o.weakseed},
     };
     const std::map<std::string, std::function<void(const std::string&)>> values = {
         {"-d", [&](const std::string& v) { o.data = v; }},
@@ -30,6 +30,8 @@ Options parse_options(const std::vector<std::string>& argv) {
         {"-ub", [&](const std::string& v) { o.ub = std::stoll(v); }},
         {"-log", [&](const std::string& v) { o.log = v; }},
         {"-threads", [&](const std::string& v) { o.threads = std::stoi(v); }},
+        {"-seedf", [&](const std::string& v) { o.seedf = std::stod(v); }},
+        {"-seedmaxchildren", [&](const std::string& v) { o.seedmaxchildren = std::stoi(v); }},
     };
 
     for (std::size_t i = 0; i < argv.size(); ++i) {
@@ -52,6 +54,11 @@ Options parse_options(const std::vector<std::string>& argv) {
     }
     if (o.pc < 1) {
         throw std::invalid_argument("-pc must be at least 1");
+    }
+    // The order-free block bounds exist for the quota-in-prefix elimination
+    // and displacement bounds only, not for the MINLP.
+    if (o.weakseed && !(o.useqprefix && (o.eqlb || o.eqlbc) && o.nominlps)) {
+        throw std::invalid_argument("-weakseed needs -useqprefix, -eqlb or -eqlbc, and -nominlps");
     }
     return o;
 }

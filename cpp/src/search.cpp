@@ -1,6 +1,7 @@
 #include "marginstv/search.hpp"
 
 #include "marginstv/pyset.hpp"
+#include "marginstv/weakseed.hpp"
 
 #include <tbb/parallel_for.h>
 #include <tbb/parallel_invoke.h>
@@ -156,6 +157,107 @@ InitialResult eval_child_initial(const SearchInputs& in, std::vector<Cand> order
 
 // ---------------------------------------------------------------- expansion
 
+namespace {
+
+// Children of a node expanded with a strong/weak/other split (block_children
+// in stvtree.py): one per subset O' of the other candidates, the node's
+// prefix followed by the weak candidates and O' eliminated as one block,
+// smallest tally first.
+void add_block_children(const SearchInputs& in, const TreeNode& node, const WeakSplit& split,
+                        const std::vector<Cand>& forder_c, const std::vector<int>& forder_a,
+                        const PySetOrder& fwinners, const PyNum& running_ub, Expansion& ex) {
+    const auto n = in.bounds.ncands;
+    std::vector<int> pos(static_cast<std::size_t>(n), -1);
+    for (std::size_t i = 0; i < split.order.size(); ++i) {
+        pos[static_cast<std::size_t>(split.order[i])] = static_cast<int>(i);
+    }
+    const auto start = static_cast<int>(forder_c.size());
+    int seated = 0;
+    for (const auto a : forder_a) {
+        seated += a;
+    }
+    const auto seats_left = in.bounds.seats - seated;
+
+    CandSet winners(n);
+    for (const auto w : fwinners.order()) {
+        winners.set(w);
+    }
+    CandSet missing(n); // winner_set - fwinners
+    for (int c = 0; c < n; ++c) {
+        if (in.winner_set.test(c) && !winners.test(c)) {
+            missing.set(c);
+        }
+    }
+
+    const auto nother = split.other.size();
+    for (std::size_t size = 0; size <= nother; ++size) {
+        // itertools.combinations(other, size), in its order.
+        std::vector<std::size_t> idx(size);
+        for (std::size_t i = 0; i < size; ++i) {
+            idx[i] = i;
+        }
+        while (true) {
+            std::vector<Cand> block = split.weak;
+            for (const auto i : idx) {
+                block.push_back(split.other[i]);
+            }
+            std::stable_sort(block.begin(), block.end(), [&](Cand a, Cand b) {
+                return -pos[static_cast<std::size_t>(a)] < -pos[static_cast<std::size_t>(b)];
+            });
+            CandSet gone(n);
+            for (const auto c : forder_c) {
+                gone.set(c);
+            }
+            for (const auto c : block) {
+                gone.set(c);
+            }
+            std::vector<Cand> rem;
+            CandSet rem_set(n);
+            for (int c = 0; c < n; ++c) {
+                if (!gone.test(c)) {
+                    rem.push_back(c);
+                    rem_set.set(c);
+                }
+            }
+
+            // Only seats-left candidates remain: every one is seated.
+            const auto isleaf = static_cast<int>(rem.size()) == seats_left;
+            if (!(isleaf && missing == rem_set)) { // else the reported outcome
+                ChildSpec spec;
+                spec.parent_dist = node.dist;
+                spec.order_c = forder_c;
+                spec.order_c.insert(spec.order_c.end(), block.begin(), block.end());
+                spec.order_a = forder_a;
+                spec.order_a.insert(spec.order_a.end(), block.size(), 0);
+                spec.order_q = node.order_q;
+                spec.winners = winners;
+                spec.rem = std::move(rem);
+                spec.isleaf = isleaf;
+                spec.running_ub = running_ub;
+                spec.blocks = node.blocks;
+                spec.blocks.emplace_back(start, start + static_cast<int>(block.size()));
+                spec.cap = split.k;
+                ex.children.push_back(std::move(spec));
+            }
+
+            // Next combination.
+            std::size_t i = size;
+            while (i > 0 && idx[i - 1] == nother - size + (i - 1)) {
+                --i;
+            }
+            if (i == 0) {
+                break;
+            }
+            ++idx[i - 1];
+            for (auto j = i; j < size; ++j) {
+                idx[j] = idx[j - 1] + 1;
+            }
+        }
+    }
+}
+
+} // namespace
+
 Expansion generate_children(const SearchInputs& in, const TreeNode& node, const PyNum& running_ub) {
     const auto& o = *in.options;
     const auto n = in.bounds.ncands;
@@ -213,6 +315,15 @@ Expansion generate_children(const SearchInputs& in, const TreeNode& node, const 
                     ? compute_round_tallies_q_prefix(node.eqlbctx, in.bounds, forder_c, forder_q)
                     : compute_round_tallies(node.eqlbctx, in.bounds, forder_c);
         });
+
+    // -weakseed: expand into blocks of eliminations when a split qualifies.
+    if (o.weakseed) {
+        if (const auto split = weak_seed_split(in.bounds, forder_c, forder_a, forder_q, running_ub,
+                                               in.orig_ub, o.seedf, o.seedmaxchildren)) {
+            add_block_children(in, node, *split, forder_c, forder_a, fwinners, running_ub, ex);
+            return ex;
+        }
+    }
 
     for (const auto r : frem) {
         for (int act = 0; act < 2; ++act) {
@@ -283,6 +394,7 @@ Expansion generate_children(const SearchInputs& in, const TreeNode& node, const 
                 spec.rem = new_rem;
                 spec.isleaf = isleaf;
                 spec.running_ub = running_ub;
+                spec.blocks = node.blocks;
                 ex.children.push_back(std::move(spec));
             };
 
@@ -312,7 +424,7 @@ Expansion generate_children(const SearchInputs& in, const TreeNode& node, const 
 ChildResult eval_child(const SearchInputs& in, const Expansion& ex, const ChildSpec& spec) {
     const auto& o = *in.options;
     const auto n = in.bounds.ncands;
-    const PrefixRef p{spec.order_c, spec.order_a, &spec.order_q};
+    const PrefixRef p{spec.order_c, spec.order_a, &spec.order_q, &spec.blocks};
     const RoundTallies* tallies = ex.elim_tallies ? &*ex.elim_tallies : nullptr;
 
     const auto start_ctx = o.eqlbc ? ex.eqlbctx : blank_eqlb(n);
@@ -320,6 +432,8 @@ ChildResult eval_child(const SearchInputs& in, const Expansion& ex, const ChildS
 
     ChildResult res;
     res.isleaf = spec.isleaf;
+    res.blocks = spec.blocks;
+    res.cap = spec.cap;
     res.order_c = spec.order_c;
     res.order_a = spec.order_a;
     res.order_q = spec.order_q;
@@ -381,7 +495,7 @@ namespace {
 class Search {
   public:
     Search(const SearchInputs& in, PyNum upperbound, Logger& log)
-        : in_(in), o_(*in.options), log_(log), running_ub_(upperbound) {}
+        : in_(in), o_(*in.options), log_(log), running_ub_(upperbound), found_ub_(upperbound) {}
 
     SearchResult run();
 
@@ -408,6 +522,11 @@ class Search {
     Frontier frontier_;
     PyNum running_ub_;
     PyNum running_lb_ = PyNum::integer(0);
+    // Smallest budget used by a -weakseed block expansion so far; running_ub_
+    // never exceeds it. found_ub_ is the smallest upper bound from the
+    // initial bound and leaves, ignoring that cap.
+    std::optional<PyNum> block_cap_;
+    PyNum found_ub_;
     std::uint64_t nexps_ = 0;
     std::uint64_t nsolves_ = 0;
 };
@@ -473,6 +592,18 @@ void Search::initial_frontier() {
 }
 
 bool Search::handle_child(ChildResult& c) {
+    if (c.cap && (!block_cap_ || *c.cap < *block_cap_)) {
+        block_cap_ = c.cap;
+        log_.line("BLOCK EXPANSION with budget " + c.cap->str());
+        if (*c.cap < running_ub_) {
+            log_.line("Capping upper bound from " + running_ub_.str() + " to " + c.cap->str());
+            running_ub_ = *c.cap;
+            if (gap_closed()) {
+                return true;
+            }
+            frontier_.prune(running_ub_, log_);
+        }
+    }
     if (c.solved) {
         ++nsolves_;
     }
@@ -497,6 +628,7 @@ bool Search::handle_child(ChildResult& c) {
             log_.line("Reducing upper bound from " + running_ub_.str() + " to " + c.dist->str());
         }
         running_ub_ = py_min(running_ub_, *c.dist);
+        found_ub_ = py_min(found_ub_, *c.dist);
         if (gap_closed()) {
             return true;
         }
@@ -506,7 +638,8 @@ bool Search::handle_child(ChildResult& c) {
 
     auto node = std::make_unique<TreeNode>(std::move(c.order_c), std::move(c.order_a),
                                            std::move(c.order_q), std::move(c.eqlbctx),
-                                           std::move(c.disp_cache), *c.dist, *c.dist_ub);
+                                           std::move(c.disp_cache), *c.dist, *c.dist_ub,
+                                           std::move(c.blocks));
     if (!frontier_.insert(std::move(node), o_.lse)) {
         log_.line("        SUBSUMED");
     }
@@ -611,6 +744,10 @@ SearchResult Search::run() {
                   std::to_string(nexps_) + " nodes expanded, " + std::to_string(nsolves_) +
                   " solves.");
         log_.line("-------------------------------------------");
+    }
+    if (block_cap_ && *block_cap_ < found_ub_) {
+        log_.line("Block expansions capped the result at " + block_cap_->str() +
+                  "; smallest upper bound found " + found_ub_.str() + ".");
     }
     log_.line("Time to finish: " + py_float_repr(wall_seconds() - tstart) + "s");
     return result();

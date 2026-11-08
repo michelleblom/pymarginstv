@@ -171,7 +171,8 @@ MergedOutcome merge_outcome(std::span<const Cand> order_c, std::span<const int> 
 }
 
 std::vector<std::uint8_t> canonical_outcome(std::span<const Cand> order_c,
-                                            std::span<const int> order_a, const OrderQ& order_q) {
+                                            std::span<const int> order_a, const OrderQ& order_q,
+                                            const Blocks& blocks) {
     std::vector<std::uint8_t> out;
     auto put = [&out](std::int32_t v) {
         const auto u = static_cast<std::uint32_t>(v);
@@ -210,12 +211,21 @@ std::vector<std::uint8_t> canonical_outcome(std::span<const Cand> order_c,
         quotas.push_back(q.hi);
     }
     emit(quotas);
+
+    if (!blocks.empty()) {
+        std::vector<std::int32_t> ends;
+        for (const auto& [s, e] : blocks) {
+            ends.push_back(s);
+            ends.push_back(e);
+        }
+        emit(ends);
+    }
     return out;
 }
 
 Signature outcome_signature(std::span<const Cand> order_c, std::span<const int> order_a,
-                            const OrderQ& order_q) {
-    const auto bytes = canonical_outcome(order_c, order_a, order_q);
+                            const OrderQ& order_q, const Blocks& blocks) {
+    const auto bytes = canonical_outcome(order_c, order_a, order_q, blocks);
     const auto digest = blake2b(bytes, 16);
     Signature sig{};
     std::copy(digest.begin(), digest.end(), sig.begin());

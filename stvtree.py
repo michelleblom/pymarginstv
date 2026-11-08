@@ -16,6 +16,7 @@ import time
 
 from array import array
 from bisect import bisect_left, bisect_right, insort
+from itertools import combinations
 from hashlib import blake2b
 from multiprocessing import Pool
 from struct import pack
@@ -120,17 +121,24 @@ def as_disp_array(values: Any) -> np.ndarray:
 
 
 
+# Stretches of an outcome prefix eliminated as a block (-weakseed): each is
+# (start, end), the positions order_c[start:end]. Every order of a block's
+# candidates is covered by the node.
+Blocks = Tuple[Tuple[int, int], ...]
+
 # Result of evaluating a child node in eval_child(): (isleaf, order_c,
-# order_a, order_q, lb, dlb, eqlb, dist, dist_ub, rem, winners, solved).
+# order_a, order_q, lb, dlb, eqlb, dist, dist_ub, rem, winners, solved,
+# blocks, cap). cap is the budget of the block expansion that produced the
+# child (infinite for an ordinary child): see -weakseed.
 ChildResult = Tuple[bool, EqlbCtx, DispCache, List[int], \
     List[int], Dict[int, QRange], float, float, float, Optional[float], \
-    Optional[float], List[int], Set[int], bool]
+    Optional[float], List[int], Set[int], bool, Blocks, float]
 
 
 # Frontier node data shipped to expand_node(): (eqlbctx, order_c, order_a,
-# order_q, rem, winners, dist).
+# order_q, rem, winners, dist, blocks).
 FNodeData = Tuple[EqlbCtx, DispCache, List[int], List[int], \
-    Dict[int, QRange], List[int], Set[int], float]
+    Dict[int, QRange], List[int], Set[int], float, Blocks]
 
 
 # Width of the outcome-prefix digest. Signatures are retained for every
@@ -142,7 +150,7 @@ SIG_DIGEST_SIZE = 16
 
 
 def _canonical_outcome(order_c: list[int], order_a: list[int], \
-    order_q: dict[int, QRange]) -> bytes:
+    order_q: dict[int, QRange], blocks: Blocks = ()) -> bytes:
     """
         Byte encoding of an outcome prefix that is equal for exactly the
         structurally equivalent prefixes described by outcome_signature.
@@ -151,7 +159,9 @@ def _canonical_outcome(order_c: list[int], order_a: list[int], \
         compare equal regardless of order, and every variable-length run
         is length-prefixed, so that no two distinct prefixes can encode
         to the same bytes. Values are packed as fixed-width signed
-        little-endian integers; order_q rounds may be -1.
+        little-endian integers; order_q rounds may be -1. A prefix with
+        -weakseed blocks also encodes their positions, so it never matches
+        a prefix without them.
     """
     out: list[bytes] = []
     block: list[int] = []
@@ -179,11 +189,14 @@ def _canonical_outcome(order_c: list[int], order_a: list[int], \
         quotas += [c, lo, hi]
     emit(quotas)
 
+    if blocks:
+        emit([i for se in blocks for i in se])
+
     return b''.join(out)
 
 
 def outcome_signature(order_c: list[int], order_a: list[int], \
-    order_q: dict[int, QRange]) -> Signature:
+    order_q: dict[int, QRange], blocks: Blocks = ()) -> Signature:
     """
         Canonical, hashable form of an outcome prefix under the node
         'similarity' relation used for subsumption: two prefixes are
@@ -199,8 +212,13 @@ def outcome_signature(order_c: list[int], order_a: list[int], \
         dominated memory over a long search; the digest is 49 bytes flat.
         blake2b is used rather than hash() because it does not vary with
         PYTHONHASHSEED and so stays stable across worker processes.
+
+        A block node (-weakseed) stands for every order of its blocks,
+        while an ordinary node stands for one order, so the two never
+        share a signature: -lse must not let an ordinary node stand in
+        for a block node.
     """
-    return blake2b(_canonical_outcome(order_c, order_a, order_q), \
+    return blake2b(_canonical_outcome(order_c, order_a, order_q, blocks), \
         digest_size=SIG_DIGEST_SIZE).digest()
 
 
@@ -332,7 +350,7 @@ class TreeNode:
     # at once. For the same reason the three order structures are held
     # packed and rebuilt on access.
     __slots__ = ('id', '_order_c', '_order_a', '_order_q', \
-        'dist', 'dist_ub', 'eqlbctx', 'disp_cache', 'sig')
+        'dist', 'dist_ub', 'eqlbctx', 'disp_cache', 'sig', 'blocks')
 
     id: Optional[int]
     _order_c: PrefSeq
@@ -343,15 +361,18 @@ class TreeNode:
     eqlbctx: EqlbCtx
     disp_cache: DispCache
     sig: Signature
+    blocks: Blocks
 
     def __init__(self, order_c: list[int], order_a: list[int], \
         order_q: dict[int, QRange], \
         eqlbctx: EqlbCtx, disp_cache: DispCache, \
-        distance: Optional[float], dist_ub: Optional[float]) -> None:
+        distance: Optional[float], dist_ub: Optional[float], \
+        blocks: Blocks = ()) -> None:
 
         self.id = None
+        self.blocks = blocks
 
-        self.sig = outcome_signature(order_c, order_a, order_q)
+        self.sig = outcome_signature(order_c, order_a, order_q, blocks)
 
         self._order_c = pack_prefs(order_c)
         self._order_a = pack_prefs(order_a)
@@ -661,12 +682,39 @@ def elim_nq_lb(gaps: list[float], excess_sum: float, deficit_sum: float) -> floa
     return best
 
 
+def block_elim_lb(elim_lb: float, start_tallies: list[float], \
+    end_tallies: list[float], block: list[int], standing: list[int], \
+    quota: float, deficit_sum: float, multielim: bool, elimnq: bool) -> float:
+    """
+        Elimination bound for a -weakseed block, valid for every order in
+        which its candidates go. Tallies only rise while candidates are
+        eliminated, so when c*, the block candidate with the largest tally
+        at the block's start, is eliminated, c* holds at least
+        start_tallies[c*] and each candidate d standing after the block at
+        most end_tallies[d]. Those gaps are the round's gaps or less, and
+        each bound below grows with its gaps, so each is a lower bound.
+        Under -elimnq the amounts by which the d exceed the quota are taken
+        from start_tallies, their least value during the block.
+    """
+    cstar = max(block, key=lambda c: start_tallies[c])
+    top = start_tallies[cstar]
+    gaps = [top - end_tallies[d] for d in standing]
+    elim_lb = max(elim_lb, max(0, 0.5 * max(gaps)))
+    if multielim:
+        elim_lb = max(elim_lb, multi_elim_lb(gaps, deficit_sum))
+    if elimnq:
+        excess_sum = sum(max(0, start_tallies[d] - quota) for d in standing)
+        elim_lb = max(elim_lb, elim_nq_lb([top - min(end_tallies[d], quota) \
+            for d in standing], excess_sum, deficit_sum))
+    return elim_lb
+
+
 def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[CandidateLike], \
     ballots: list[Ballot], order_c: list[int], order_a: list[int], \
     quota: int, order_q: dict[int, QRange], elim_tallies: Optional[list[float]], \
     transfers_only: bool = False, sumq: bool = False, \
     multielim: bool = False, sumnq: bool = False, \
-    elimnq: bool = False) -> EqlbCtx:
+    elimnq: bool = False, blocks: Blocks = ()) -> EqlbCtx:
     """
     With transfers_only set, walk the prefix purely to maintain transfer values
     (and gone/gone_set/gone_pos/winners), accumulating none of the bounds. The
@@ -740,6 +788,10 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
 
     padfrom = padding_start(order_a, eqlbctx.N)
 
+    # -weakseed blocks: the block, as (start, end), holding each round.
+    block_at = {i: se for se in blocks for i in range(*se)}
+    block_tallies: Optional[list[float]] = None
+
     for i in range(start, PXLEN):
         ce = order_c[i]
 
@@ -750,6 +802,49 @@ def compute_elim_quota_lb_STV26_q_prefix(eqlbctx: EqlbCtx, cands: Sequence[Candi
                 gone.append(ce)
                 gone_set.add(ce)
                 gone_pos[ce] = i
+                continue
+
+            se = block_at.get(i)
+            if se is not None:
+                # A block stands for every order of its candidates, so no
+                # round inside it may assume who was eliminated when. Only
+                # its start and end states are the same in every order.
+                bs, be = se
+                if i == bs:
+                    if i == 0:
+                        block_tallies = [cand.fp_votes for cand in cands]
+                    elif i == start and elim_tallies != None:
+                        block_tallies = elim_tallies
+                    else:
+                        block_tallies = compute_round_tallies_q_prefix(ballots, \
+                            gone, gone_set, transfer, winners, order_q, gone_pos, \
+                            eqlbctx.N)
+
+                    # Nobody holds a quota at the start of the block.
+                    standing = [c.num for c in cands if c.num not in gone_set]
+                    nqmask = nq_cons_added[i]
+                    for c in standing:
+                        no_quota_lb = max(no_quota_lb, \
+                            max(0, block_tallies[c] - quota))
+                        if c != ce:
+                            nqmask |= 1 << c
+                    nq_cons_added[i] = nqmask
+                    if sumnq:
+                        no_quota_lb = max(no_quota_lb, sum(max(0, \
+                            block_tallies[c] - quota) for c in standing))
+
+                gone.append(ce)
+                gone_set.add(ce)
+                gone_pos[ce] = i
+
+                if i == be - 1:
+                    assert block_tallies is not None
+                    elim_lb = block_elim_lb(elim_lb, block_tallies, \
+                        compute_round_tallies_q_prefix(ballots, gone, gone_set, \
+                            transfer, winners, order_q, gone_pos, eqlbctx.N), \
+                        order_c[bs:be], [c.num for c in cands \
+                            if c.num not in gone_set], quota, deficit_sum, \
+                        multielim, elimnq)
                 continue
 
             if i == 0:
@@ -1573,7 +1668,8 @@ def update_disp_cache_q_prefix(disp_cache: DispCache, ballots: list[Ballot], nod
 def compute_disp_lb_STV26_q_prefix(disp_cache: DispCache, ballot_metadata : BallotMetadata,\
     ballots: list[Ballot], node_order_c: list[int], node_order_a: list[int], \
     node_order_q: dict[int, QRange], winner_set: set[int], rem: list[int], \
-    quota: int, seats: int, transfer: dict[int, tuple[float,float]]) -> DispCache:
+    quota: int, seats: int, transfer: dict[int, tuple[float,float]], \
+    blocks: Blocks = ()) -> DispCache:
     """
         Consider a prefix where it is clear that at least one original loser
         still standing has to displace one of the original winners still
@@ -1670,6 +1766,10 @@ def compute_disp_lb_STV26_q_prefix(disp_cache: DispCache, ballot_metadata : Ball
     og_winners_set = set(og_winners)
 
     ca = node_order_a[-1]
+    # The incremental path adds one elimination to the parent's summaries; a
+    # -weakseed block of two or more candidates ending here adds several.
+    if blocks and blocks[-1][1] == norder and blocks[-1][1] - blocks[-1][0] > 1:
+        ca = -1
     # 'is not None' rather than a truth test: these are numpy arrays, whose
     # truth value is ambiguous and raises.
     if ca == 0 and disp_cache.curtally is not None \
@@ -2219,6 +2319,13 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
     running_ub = upperbound
     running_lb: float = 0
 
+    # Smallest budget used by a -weakseed block expansion so far. A block
+    # expansion with budget k covers only elections needing fewer than k
+    # changes, so running_ub never exceeds it. found_ub is the smallest
+    # upper bound from the initial bound and leaves, ignoring that cap.
+    block_cap = math.inf
+    found_ub = upperbound
+
     nexps = 0
     nsolves = 0
 
@@ -2237,11 +2344,24 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
     # Election invariants used by eval_child/eval_child_initial/expand_node.
     # These are sent to each worker process once (via the pool initializer)
     # rather than being pickled into every task.
+    # -weakseed measures budgets against the starting upper bound. Its
+    # order-free bounds exist for the quota-in-prefix elimination-quota and
+    # displacement bounds only, not for the MINLP.
+    args.orig_ub = upperbound
+    if getattr(args, 'weakseed', False) and not (args.useqprefix and \
+        (args.eqlb or args.eqlbc) and args.nominlps):
+        raise SystemExit("-weakseed needs -useqprefix, -eqlb or -eqlbc, "
+                         "and -nominlps")
+
     initargs = (ballots, ballot_metadata, lite_cands, winner_set, ncands, args, quota, \
         tot_ballots, list(order_c), list(order_a))
 
     # Set up the evaluation context in this process too, for args.pc == 1.
     _init_worker(*initargs)
+
+    if getattr(args, 'seedcheck', None) is not None:
+        with open(args.seedcheck, "w") as f:
+            f.write(SEED_CHECK_HEADER + "\n")
 
     pool = None
     if args.pc > 1:
@@ -2386,8 +2506,8 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                 toexpand.append(((fn.eqlbctx, fn.disp_cache, fn_order_c, \
                     fn_order_a, fn.order_q, \
                     derive_rem(fn_order_c, candidates), \
-                    derive_winners(fn_order_c, fn_order_a), fn.dist), \
-                    running_ub))
+                    derive_winners(fn_order_c, fn_order_a), fn.dist, \
+                    fn.blocks), running_ub))
 
             if pool is not None and getattr(args, "evalpara", False):
                 # Child-granularity parallelism: generate every popped node's
@@ -2411,7 +2531,25 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                 # note when MINLP not solved, the dist will be the heuristic LB; new set of continuing candidates; winners 
                 # so far in the child; a boolean indicating whether the MINLP was solved for the child.  
                 for isleaf, eqlbctx, disp_cache, node_order_c, node_order_a, node_order_q, lb, dlb, eqlb, dist, \
-                        dist_ub, new_rem, node_winners, solved in child_results:
+                        dist_ub, new_rem, node_winners, solved, blocks, cap in child_results:
+
+                    if cap < block_cap:
+                        block_cap = cap
+                        if log is not None:
+                            print("BLOCK EXPANSION with budget {}".format(cap), \
+                                file=log, flush=True)
+
+                        if cap < running_ub:
+                            if log is not None:
+                                print("Capping upper bound from {} to {}".format( \
+                                    running_ub, cap), file=log, flush=True)
+                            running_ub = cap
+
+                            if abs(running_ub - running_lb) <= agap:
+                                converged = True
+                                break
+
+                            frontier.prune(running_ub, log=log)
 
                     if solved:
                         nsolves += 1
@@ -2444,6 +2582,7 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                                   file=log, flush=True)
 
                         running_ub = min(running_ub, dist)  # update running_ub if possible
+                        found_ub = min(found_ub, dist)
 
                         if abs(running_ub - running_lb) <= agap:
                             converged = True
@@ -2453,7 +2592,7 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                     else:
                         # Context caches are stored with each node so they can be used by its children
                         newn = TreeNode(node_order_c, node_order_a, node_order_q, \
-                                        eqlbctx, disp_cache, dist, dist_ub)
+                                        eqlbctx, disp_cache, dist, dist_ub, blocks)
 
                         idx = frontier.insert(newn, lse=args.lse, log=log)
 
@@ -2519,6 +2658,10 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                 running_lb, running_ub, nexps, nsolves), file=log, flush=True)
             print("-------------------------------------------", file=log, \
                   flush=True)
+
+    if log != None and block_cap < found_ub:
+        print("Block expansions capped the result at {}; smallest upper "
+              "bound found {}.".format(block_cap, found_ub), file=log)
 
     if log != None:
         print("Time to finish: {}s".format(time.time() - tstart), file=log)
@@ -2705,10 +2848,26 @@ def eval_child_initial(node_order_c: list[int], node_order_a: list[int], \
           node_order_a, node_order_q, _eqlbctx, _disp_cache, dist, dist_ub), True
 
 # Only called to evaluate children that have been generated as a result of an expansion.
-def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node_order_c: list[int], \
+def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, \
+    node_order_c: list[int], node_order_a: list[int], \
+    node_order_q: dict[int, QRange], node_winners: set[int], rem: list[int], \
+    isleaf: bool, running_ub: float, \
+    precomputed_elim_tallies: Optional[Any] = None, blocks: Blocks = (), \
+    cap: float = math.inf) -> ChildResult:
+    """
+        Evaluates one child (see _eval_child) and adds its blocks and the
+        budget of the block expansion that produced it to the result.
+    """
+    return _eval_child(parent_dist, eqlbctx, disp_cache, node_order_c, \
+        node_order_a, node_order_q, node_winners, rem, isleaf, running_ub, \
+        precomputed_elim_tallies, tuple(blocks)) + (tuple(blocks), cap)
+
+
+def _eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node_order_c: list[int], \
                node_order_a: list[int], node_order_q: dict[int, QRange], \
                node_winners: set[int], rem: list[int], isleaf: bool, \
-               running_ub: float, precomputed_elim_tallies: Optional[Any] = None) -> ChildResult:
+               running_ub: float, precomputed_elim_tallies: Optional[Any] = None, \
+               blocks: Blocks = ()) -> tuple:
     # precomputed_elim_tallies is whatever generate_children computed once for
     # this node under -prec_et, and the two prefix variants carry different
     # payloads: a single list of round tallies for the quota-in-prefix bound, a
@@ -2734,7 +2893,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
             _eqlbctx = compute_elim_quota_lb_STV26_q_prefix(eqlbctx, candidates, \
                 ballots, node_order_c, node_order_a, quota, node_order_q, precomputed_elim_tallies, \
                 sumq=args.sumq, multielim=args.multielim, sumnq=args.sumnq, \
-                elimnq=args.elimnq)
+                elimnq=args.elimnq, blocks=blocks)
         else:
             _eqlbctx = compute_elim_quota_lb_STV26(eqlbctx, candidates, ballots, \
                 node_order_c, node_order_a, quota, node_order_q, \
@@ -2769,7 +2928,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
         if args.useqprefix:
             _disp_cache = compute_disp_lb_STV26_q_prefix(disp_cache, ballot_metadata, \
                 ballots, node_order_c, node_order_a, node_order_q, \
-                winner_set, rem, quota, args.seats, transfer)
+                winner_set, rem, quota, args.seats, transfer, blocks)
         else:
             _disp_cache = compute_disp_lb_STV26(disp_cache, candidates, ballots, \
                 node_order_c, node_order_a, winner_set, rem, quota, \
@@ -2817,6 +2976,262 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, node
         lowerbound, disp_lowerbound, eqlb, dist, dist_ub, rem, node_winners, True
 
 
+class SplitStats(NamedTuple):
+    """
+        Tallies at a node, for choosing a strong/weak/other split.
+
+        order        : candidates still standing, largest lower tally first;
+                       the strong set for size j is order[:j]
+        lo_tally[c]  : c's tally at the node, from lower ballot values
+        mpt[r][j]    : for order[r] outside the top j, the value (upper
+                       ballot values) of the ballots ranking it above every
+                       one of the top j
+        first[r][j]  : for order[r] inside the top j, the value of the
+                       ballots whose highest-ranked top-j candidate it is
+        seats_left   : seats still to fill
+    """
+    order: list[int]
+    lo_tally: list[float]
+    mpt: list[list[float]]
+    first: list[list[float]]
+    seats_left: int
+
+
+class WeakSplit(NamedTuple):
+    """
+        A split of the standing candidates into strong, weak and other.
+        Every election that follows the node with fewer than k changed
+        ballots eliminates all of weak and some subset of other, in some
+        order, before any strong candidate is eliminated or anyone is
+        seated. x is the largest k the split proves. order is every
+        standing candidate, largest tally first.
+    """
+    k: float
+    x: float
+    strong: list[int]
+    weak: list[int]
+    other: list[int]
+    order: list[int]
+
+
+def split_stats(order_c: list[int], order_a: list[int], \
+    order_q: dict[int, QRange]) -> Optional[SplitStats]:
+    """
+        Computes SplitStats at the node reached by the given prefix, or
+        None when too few candidates stand for a block (at least one weak
+        candidate beyond the seats left).
+    """
+    assert _CTX is not None
+    ballots, _, candidates, _, ncands, args, quota, _, _, _ = _CTX
+
+    m = args.seats - sum(order_a)
+    gone_set = set(order_c)
+    hopeful = [c for c in range(ncands) if c not in gone_set]
+    H = len(hopeful)
+    if m <= 0 or H < m + 1:
+        return None
+
+    # Transfer values of the seated candidates in the prefix.
+    blank = EqlbCtx(ncands, {}, 0, 0, 0, [0] * ncands, set(), [], set(), {}, 0)
+    if args.useqprefix:
+        ctx = compute_elim_quota_lb_STV26_q_prefix(blank, candidates, ballots, \
+            order_c, order_a, quota, order_q, None, transfers_only=True)
+    else:
+        ctx = compute_elim_quota_lb_STV26(blank, candidates, ballots, order_c, \
+            order_a, quota, order_q, transfers_only=True)
+    gone = list(order_c)
+    gone_pos = {c: i for i, c in enumerate(gone)}
+
+    # Each ballot's standing preferences and its value range at the node.
+    lo_tally = [0.0] * ncands
+    rows: list[tuple[list[int], float]] = []
+    for b in ballots:
+        prefs = [p for p in b.prefs if p not in gone_set]
+        if not prefs:
+            continue
+        if args.useqprefix:
+            lo, _ = calc_tallies_q_prefix(b, gone, ctx.transfer, ctx.winners, \
+                order_q, gone_pos)
+            hi = lo
+        else:
+            _, lo, hi = calc_tallies(b, gone, ctx.transfer, ctx.winners)
+        lo_tally[prefs[0]] += lo
+        rows.append((prefs, hi))
+
+    order = sorted(hopeful, key=lambda c: -lo_tally[c])
+    rank = {c: i for i, c in enumerate(order)}
+
+    # One pass gives MPT and T_S for every j. With the top j strong, a
+    # ballot counts towards mpt[rank(c)][j] for j <= min(rank(c), lowest
+    # rank before c), and towards first[rank(s)][j] for j in
+    # [rank(s)+1, lowest rank before s].
+    mpt_at = [[0.0] * (H + 1) for _ in range(H)]
+    first_diff = [[0.0] * (H + 2) for _ in range(H)]
+    for prefs, v in rows:
+        rmin = H
+        for c in prefs:
+            rc = rank[c]
+            u = min(rc, rmin)
+            if u >= m:
+                mpt_at[rc][u] += v
+            if rc < rmin:
+                lo_j = max(rc + 1, m)
+                if lo_j <= rmin:
+                    first_diff[rc][lo_j] += v
+                    first_diff[rc][rmin + 1] -= v
+                rmin = rc
+                if rmin < m:
+                    break
+
+    mpt = [[0.0] * (H + 1) for _ in range(H)]
+    first = [[0.0] * (H + 1) for _ in range(H)]
+    for r in range(H):
+        acc = 0.0
+        for j in range(H, -1, -1):
+            acc += mpt_at[r][j]
+            mpt[r][j] = acc
+        acc = 0.0
+        for j in range(H + 1):
+            acc += first_diff[r][j]
+            first[r][j] = acc
+
+    return SplitStats(order, lo_tally, mpt, first, m)
+
+
+def choose_split(st: SplitStats, quota: int, running_ub: float, \
+    min_k: float, max_children: Optional[int], \
+    per_j: Optional[list] = None) -> tuple[Optional[WeakSplit], float, float]:
+    """
+        Chooses the budget and split at a node. Returns (split, cap_x,
+        max_x); split is None when no budget of at least min_k works.
+
+        For strong set S (the top j, j >= seats left) with lowest tally t,
+        and MPT(c) the value of ballots ranking c above all of S, a split
+        proves budget k (elections with fewer than k changes) when:
+
+          weak:   t - MPT(l) >= 2k for every weak l (at least one);
+          other:  every other candidate outside S;
+          q - MPT(c) >= k for every c outside S;
+          q - T_S(s) >= k for every s in S, T_S(s) being the value of
+            the ballots whose highest-ranked strong candidate is s.
+
+        cap_x is the largest k proved by any split with at most
+        max_children children (2^|other|; no limit when None). When
+        cap_x >= min_k, k = min(cap_x, running_ub), and the split is the
+        one valid at k with the most weak candidates (fewest others on
+        ties). max_x is the largest k at which any split with one weak
+        candidate applies, whatever its number of children. per_j, when
+        given, receives (j, t, smallest MPT outside S, largest MPT outside
+        S, largest T_S) for each j.
+    """
+    order, lo_tally, mpt, first, m = st
+    H = len(order)
+    max_other = H if max_children is None \
+        else int(math.floor(math.log2(max(1, max_children))))
+
+    # Per j: the quota terms, which hold for any split of the rest.
+    x_quota = [-math.inf] * (H + 1)
+    max_x = -math.inf
+    cap_x = -math.inf
+    for j in range(m, H):
+        t = lo_tally[order[j - 1]]
+        rest = sorted(mpt[r][j] for r in range(j, H))
+        x_quota[j] = min(quota - rest[-1], \
+            quota - max(first[r][j] for r in range(j)))
+        max_x = max(max_x, min(x_quota[j], (t - rest[0]) / 2))
+        # Fewest weak candidates the child limit allows: the lowest
+        # MPTs, leaving at most max_other others.
+        nweak = max(1, len(rest) - max_other)
+        cap_x = max(cap_x, min(x_quota[j], (t - rest[nweak - 1]) / 2))
+        if per_j is not None:
+            per_j.append((j, t, rest[0], rest[-1], \
+                max(first[r][j] for r in range(j))))
+
+    k = min(cap_x, running_ub)
+    if cap_x < min_k or k <= 0:
+        return None, cap_x, max_x
+
+    best: Optional[tuple[int, int, int, float, list[int]]] = None
+    for j in range(m, H):
+        t = lo_tally[order[j - 1]]
+        weak = [r for r in range(j, H) if t - mpt[r][j] >= 2 * k]
+        nother = H - j - len(weak)
+        if not weak or nother > max_other:
+            continue
+        x = min(x_quota[j], (t - max(mpt[r][j] for r in weak)) / 2)
+        if x < k:
+            continue
+        if best is None or (len(weak), -nother) > (best[0], best[1]):
+            best = (len(weak), -nother, j, x, weak)
+
+    if best is None:
+        return None, cap_x, max_x
+    _, _, j, x, weak_ranks = best
+    weak_set = set(weak_ranks)
+    split = WeakSplit(k, x, order[:j], [order[r] for r in weak_ranks], \
+        [order[r] for r in range(j, H) if r not in weak_set], order)
+    return split, cap_x, max_x
+
+
+def weak_seed_split(order_c: list[int], order_a: list[int], \
+    order_q: dict[int, QRange], running_ub: float) -> Optional[WeakSplit]:
+    """
+        -weakseed: the split to expand a node with, or None to expand it
+        normally. Tried only where a run of eliminations starts (the
+        prefix is empty or ends with a seating). The budget must be at
+        least args.seedf times the starting upper bound (or the running
+        upper bound, if lower), with at most args.seedmaxchildren children.
+    """
+    assert _CTX is not None
+    args, quota = _CTX[5], _CTX[6]
+    if order_a and order_a[-1] != 1:
+        return None
+    st = split_stats(order_c, order_a, order_q)
+    if st is None:
+        return None
+    min_k = min(args.seedf * args.orig_ub, running_ub)
+    split, _, _ = choose_split(st, quota, running_ub, min_k, \
+        args.seedmaxchildren)
+    return split
+
+
+SEED_CHECK_HEADER = "ub,depth,seated,standing,seats_left,applies,k,S,L,O," \
+    "children,X,capX,maxX,secs,prefix"
+
+
+def seed_check(order_c: list[int], order_a: list[int], \
+    order_q: dict[int, QRange], running_ub: float, \
+    per_j: Optional[list] = None) -> Optional[str]:
+    """
+        -seedcheck: reports, as a SEED_CHECK_HEADER line, whether the
+        node's children could be replaced by blocks of eliminations (see
+        choose_split), with min_k = args.seedfrac (default 1) times the
+        running upper bound. None when too few candidates stand.
+    """
+    assert _CTX is not None
+    args, quota = _CTX[5], _CTX[6]
+
+    t0 = time.time()
+    st = split_stats(order_c, order_a, order_q)
+    if st is None:
+        return None
+    frac = getattr(args, 'seedfrac', None) or 1.0
+    split, cap_x, max_x = choose_split(st, quota, running_ub, \
+        frac * running_ub, getattr(args, 'seedmaxchildren', None), per_j)
+
+    prefix = " ".join(f"{c}{'s' if a else 'e'}" \
+        for c, a in zip(order_c, order_a))
+    if split is None:
+        cols = "0,,,,,,"
+    else:
+        n_other = len(split.other)
+        cols = f"1,{split.k:.1f},{len(split.strong)},{len(split.weak)}," \
+            f"{n_other},{2 ** n_other},{split.x:.1f}"
+    return f"{running_ub},{len(order_c)},{sum(order_a)},{len(st.order)}," \
+        f"{st.seats_left},{cols},{cap_x:.1f},{max_x:.1f}," \
+        f"{time.time() - t0:.2f},{prefix}"
+
+
 def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
     """
     Build the list of eval_child argument tuples for one frontier node,
@@ -2827,14 +3242,27 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
     assert _CTX is not None
     ballots, _, candidates, winner_set, ncands, args, _, _, _, _ = _CTX
 
-    eqlbctx, disp_cache, forder_c, forder_a, forder_q, frem, fwinners, fdist = fnode_data
+    eqlbctx, disp_cache, forder_c, forder_a, forder_q, frem, fwinners, fdist, \
+        fblocks = fnode_data
 
     # Put back what TreeNode did not store, before anything reads it: the
     # children resume both walks from this context.
     eqlbctx, disp_cache = restore_derived(eqlbctx, disp_cache, forder_c)
 
+    if getattr(args, 'seedcheck', None) is not None:
+        line = seed_check(forder_c, forder_a, forder_q, running_ub)
+        if line is not None:
+            # Workers append whole lines, so their output does not mix.
+            with open(args.seedcheck, "a") as f:
+                f.write(line + "\n")
+
+    # -weakseed: a split to expand this node with, as blocks of eliminations.
+    split = weak_seed_split(forder_c, forder_a, forder_q, running_ub) \
+        if getattr(args, 'weakseed', False) else None
+
     children: list[tuple[float, EqlbCtx, DispCache, list[int], list[int], \
-        dict[int, QRange], set[int], list[int], bool, float, Optional[Any]]] = []
+        dict[int, QRange], set[int], list[int], bool, float, Optional[Any], \
+        Blocks, float]] = []
 
     # Work done once here, for all of this node's children to share. The round
     # tallies are only read at round eqlbctx.round, and without -eqlbc
@@ -2871,8 +3299,12 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
             # have computed for itself.
             elim_tallies = compute_round_tallies(ballots, eqlbctx.gone, \
                 eqlbctx.gone_set, eqlbctx.transfer, eqlbctx.winners, ncands)
-   
-                
+
+    if split is not None:
+        return block_children(split, fdist, eqlbctx, disp_cache, forder_c, \
+            forder_a, forder_q, frem, fwinners, fblocks, running_ub, \
+            elim_tallies)
+
     # Add a candidate to the end of the outcome prefix represented
     # by the selected node. That candidate can either be seated or
     # eliminated.
@@ -2918,7 +3350,8 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
 
             if o == 0:
                 children.append((fdist, eqlbctx, disp_cache, node_order_c, node_order_a, \
-                    forder_q, node_winners, new_rem, isleaf, running_ub, elim_tallies))
+                    forder_q, node_winners, new_rem, isleaf, running_ub, elim_tallies, \
+                    fblocks, math.inf))
             else:
                 if args.useqprefix:
                     # Quota-round variants for r: any round in the run of
@@ -2942,7 +3375,8 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
                     for i in range(LENF, minqr-1, -1):
                         node_order_q = {**forder_q, r : (i, i)}
                         children.append((fdist, eqlbctx, disp_cache, node_order_c, node_order_a, \
-                            node_order_q, node_winners, new_rem, isleaf, running_ub, elim_tallies))
+                            node_order_q, node_winners, new_rem, isleaf, running_ub, elim_tallies, \
+                            fblocks, math.inf))
                 else:
                     LAST_ROUND = compute_last_round(node_order_c, \
                         node_order_a, args.seats, ncands)
@@ -2950,8 +3384,46 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
                     node_order_q = get_order_q(node_order_a, LAST_ROUND, \
                         node_winners, order_c_index)
                     children.append((fdist, eqlbctx, disp_cache, node_order_c, node_order_a, \
-                        node_order_q, node_winners, new_rem, isleaf, running_ub, elim_tallies))
+                        node_order_q, node_winners, new_rem, isleaf, running_ub, elim_tallies, \
+                        fblocks, math.inf))
 
+    return children
+
+def block_children(split: WeakSplit, fdist: float, eqlbctx: EqlbCtx, \
+    disp_cache: DispCache, forder_c: list[int], forder_a: list[int], \
+    forder_q: dict[int, QRange], frem: list[int], fwinners: set[int], \
+    fblocks: Blocks, running_ub: float, elim_tallies: Optional[Any]) -> list:
+    """
+        -weakseed: eval_child argument tuples for a node expanded with a
+        strong/weak/other split. There is one child per subset O' of the
+        other candidates: the node's prefix followed by the weak candidates
+        and O' eliminated as one block, smallest tally first. The block is
+        recorded in the child's blocks, and split.k, the budget the split
+        proves, goes with every child.
+    """
+    assert _CTX is not None
+    candidates, winner_set, args = _CTX[2], _CTX[3], _CTX[5]
+
+    pos = {c: i for i, c in enumerate(split.order)}
+    start = len(forder_c)
+    seats_left = args.seats - sum(forder_a)
+
+    children = []
+    for size in range(len(split.other) + 1):
+        for chosen in combinations(split.other, size):
+            block = sorted(split.weak + list(chosen), key=lambda c: -pos[c])
+            gone = set(forder_c) | set(block)
+            rem = [c.num for c in candidates if c.num not in gone]
+
+            # Only seats-left candidates remain: every one is seated.
+            isleaf = len(rem) == seats_left
+            if isleaf and winner_set - fwinners == set(rem):
+                continue    # the reported outcome
+
+            blocks = fblocks + ((start, start + len(block)),)
+            children.append((fdist, eqlbctx, disp_cache, forder_c + block, \
+                forder_a + [0] * len(block), forder_q, set(fwinners), rem, \
+                isleaf, running_ub, elim_tallies, blocks, split.k))
     return children
 
 

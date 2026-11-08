@@ -126,7 +126,28 @@ if __name__ == "__main__":
     # -eqlbc; earlier quota shortfalls join in with -sumq).
     parser.add_argument("-elimnq", action='store_true', default=False)
 
-    # Output: Log file 
+    # Output: file to which each node expansion appends whether its
+    # children could be replaced by blocks of eliminations (see
+    # seed_check in stvtree.py). The search itself is unchanged.
+    parser.add_argument('-seedcheck', dest='seedcheck', type=str, \
+        default=None)
+
+    # Input: for -seedcheck, the smallest budget allowed, as a fraction of
+    # the running upper bound.
+    parser.add_argument('-seedfrac', type=float, default=None)
+
+    # Input: the most block children a node may have under -seedcheck and
+    # -weakseed (2 to the number of 'other' candidates).
+    parser.add_argument('-seedmaxchildren', type=int, default=10000)
+
+    # Input: expand a node whose prefix is empty or ends with a seating
+    # into blocks of eliminations when a strong/weak/other split proves a
+    # budget of at least -seedf times the starting upper bound. Results
+    # are then capped at that budget.
+    parser.add_argument('-weakseed', action='store_true', default=False)
+    parser.add_argument('-seedf', type=float, default=0.25)
+
+    # Output: Log file
     parser.add_argument('-log', dest='log', type=str)
 
     args = parser.parse_args()

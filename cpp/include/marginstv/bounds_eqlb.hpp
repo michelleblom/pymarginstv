@@ -128,6 +128,7 @@ struct PrefixRef {
     std::span<const Cand> order_c;
     std::span<const int> order_a;
     const OrderQ* order_q;
+    const Blocks* blocks = nullptr; // -weakseed blocks, if any
 };
 
 EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,

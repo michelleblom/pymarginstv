@@ -353,7 +353,13 @@ DispCache compute_disp_lb_stv26_q_prefix(const DispCache& dc, const BoundInputs&
     out.winners = winners;
     out.start = norder;
 
-    if (p.order_a.back() == 0 && dc.complete()) {
+    // The incremental path adds one elimination to the parent's summaries;
+    // a -weakseed block of two or more candidates ending here adds several.
+    const auto block_end = p.blocks != nullptr && !p.blocks->empty() &&
+                           p.blocks->back().second == norder &&
+                           p.blocks->back().second - p.blocks->back().first > 1;
+
+    if (p.order_a.back() == 0 && dc.complete() && !block_end) {
         const auto min_r = incremental_min_r(dc, p.order_c.back());
         out.lowerbound = displacement_bound(bi, rem, st.og_losers, st.og_winners, sleft, min_r,
                                             *dc.present, *dc.above);

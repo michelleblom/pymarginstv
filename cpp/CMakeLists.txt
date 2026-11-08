@@ -149,6 +149,7 @@ add_library(marginstv_core STATIC
   src/distance.cpp
   src/frontier.cpp
   src/search.cpp
+  src/weakseed.cpp
   src/options.cpp
   src/logger.cpp)
 target_include_directories(marginstv_core PUBLIC include)

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace marginstv {
@@ -53,13 +54,20 @@ struct MergedOutcome {
 MergedOutcome merge_outcome(std::span<const Cand> order_c, std::span<const int> order_a,
                             const OrderQ& order_q, std::span<const Cand> rem, int ncands);
 
+// Stretches of a prefix eliminated as a block (-weakseed): each is
+// (start, end), the positions order_c[start:end]. A node with blocks covers
+// every order of each block's candidates.
+using Blocks = std::vector<std::pair<int, int>>;
+
 // 16 byte digest identifying a prefix up to reordering of eliminations
-// between seatings (see outcome_signature in stvtree.py).
+// between seatings (see outcome_signature in stvtree.py). A prefix with
+// blocks also encodes their positions, so it never matches one without.
 using Signature = std::array<std::uint8_t, 16>;
 
 std::vector<std::uint8_t> canonical_outcome(std::span<const Cand> order_c,
-                                            std::span<const int> order_a, const OrderQ& order_q);
+                                            std::span<const int> order_a, const OrderQ& order_q,
+                                            const Blocks& blocks = {});
 Signature outcome_signature(std::span<const Cand> order_c, std::span<const int> order_a,
-                            const OrderQ& order_q);
+                            const OrderQ& order_q, const Blocks& blocks = {});
 
 } // namespace marginstv

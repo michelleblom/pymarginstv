@@ -20,7 +20,7 @@ namespace marginstv {
 
 struct TreeNode {
     TreeNode(std::vector<Cand> order_c, std::vector<int> order_a, OrderQ order_q, EqlbCtx eqlbctx,
-             DispCache disp_cache, PyNum dist, PyNum dist_ub);
+             DispCache disp_cache, PyNum dist, PyNum dist_ub, Blocks blocks = {});
 
     std::uint64_t id = 0;
     std::vector<Pref> order_c;
@@ -30,6 +30,7 @@ struct TreeNode {
     PyNum dist_ub;
     EqlbCtx eqlbctx;
     DispCache disp_cache;
+    Blocks blocks;
     Signature sig;
 
     [[nodiscard]] std::vector<Cand> order_c_list() const { return {order_c.begin(), order_c.end()}; }
