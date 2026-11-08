@@ -53,6 +53,10 @@ def main() -> int:
             print(f"skip {row['log']}: only converged runs are regenerated")
             continue
         log = os.path.join(out_dir, row["log"])
+        # The Python appends to an existing sidecar, so clear old output first.
+        for stale in (log, log + ".solves.csv"):
+            if os.path.exists(stale):
+                os.remove(stale)
         cmd = [sys.executable, os.path.join(REPO, "pymarginstv.py"),
                "-d", os.path.join(args.data_dir, row["datafile"]), "-s", row["seats"],
                "-log", log, "-displayname", "x"] + shlex.split(row["flags"])
