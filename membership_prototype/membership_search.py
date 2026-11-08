@@ -27,6 +27,17 @@ start of the run:
       x outside IN can reach the quota at the run's end, the additions
       that lift x sharing c with those keeping OUT above top.
   few IN leaves fewer than seats-left candidates: impossible.
+  -sumq   winners seated under the quota leave a shortfall the additions
+          must cover; it adds up along the path and every bound below is
+          at least the sum, with the additions in E+ and S+ cut by it.
+          (Transfer values of such winners are already 0.)
+  -sumnq  Q adds up everyone's excess over the quota.
+  -elimnq E+ and S+: removals bringing OUT candidates under the quota
+          cannot also lower the top IN candidate.
+  D   the displacement bound at the start of the run (see disp_costs),
+      over the reported losers not in IN; 0 once the outcome has changed
+      (a reported loser seated, or a reported winner in IN), and impossible
+      when every standing reported loser is in IN.
 
 A fully decided run R ends by seating x (bound quota - T_R(x)), or by
 seating everyone left when exactly seats-left remain. A complete outcome
@@ -59,30 +70,41 @@ from membership_proto import Node
 from membership_two_level import Level
 
 
-def shared_lift_lb(gaps):
+def shared_lift_lb(gaps, excess=0.0, deficit=0.0):
     """
-        Smallest c with sum of max(0, a - c) over gaps at most c: the best
-        of (sum of the m largest positive gaps) / (m + 1) over m.
+        Smallest c with sum of max(0, a - (c - excess)) over gaps at most
+        c - deficit, and c >= deficit: the IN candidate with the largest
+        tally can be lowered by c less the removals used to bring OUT
+        candidates under the quota (excess), and the additions shared
+        among the OUT candidates total c less the earlier winners'
+        shortfalls (deficit). The best of (sum of the m largest positive
+        gaps + m * excess + deficit) / (m + 1) over m >= 0.
     """
-    best, total, m = 0.0, 0.0, 0
+    best, total, m = deficit, 0.0, 0
     for g in sorted((g for g in gaps if g > 0), reverse=True):
         m += 1
         total += g
-        best = max(best, total / (m + 1))
+        best = max(best, (total + m * excess + deficit) / (m + 1))
     return best
 
 
-def end_lb(gaps, own, need):
+def end_lb(gaps, own, need, excess=0.0, deficit=0.0):
     """
-        Smallest c >= 0 with sum of max(0, a - c) over gaps, plus
-        max(0, own - c, need), at most c. own is x's own gap to top
-        (-inf when x is not in OUT) and need = quota - Tmax(x). The left
-        side falls and the right side rises with c, so bisect.
+        Smallest c with the additions keeping the OUT candidates above the
+        largest IN tally (each gap a closed down to a - (c - excess)) plus
+        x's own lift, max(0, own - (c - excess), need), at most c -
+        deficit. own is x's gap to that tally (-inf when x is not in OUT)
+        and need = quota - Tmax(x). The left side falls and the right
+        side rises with c, so bisect.
     """
     def fits(c):
-        lift = sum(max(0.0, a - c) for a in gaps)
-        return lift + max(0.0, own - c, need) <= c
-    hi = max([0.0, need, own] + list(gaps)) * 2 + 1.0
+        if c < excess or c < deficit:
+            return False
+        low = c - excess
+        lift = sum(max(0.0, a - low) for a in gaps)
+        return lift + max(0.0, own - low, need) <= c - deficit
+    hi = max([0.0, need, own, excess, deficit] + list(gaps)) * 3 + \
+        excess + deficit + 1.0
     if not fits(hi):
         return math.inf
     lo = 0.0
@@ -130,25 +152,116 @@ class LBLevel(Level):
                 store.pop(next(iter(store)))
         return v
 
-    def lb(self, IN, OUT, floor):
+    def disp_costs(self, reported):
+        """
+            Displacement bound at the start of this run (as
+            compute_disp_lb_STV26_q_prefix in stvtree.py computes it for the
+            prefix ending with the last seating). Returns (W, costs): W is
+            the reported winners still standing and costs[l] the bound
+            for reported loser l being the one who wins:
+
+              max(displacement, min(quota_cost, left_at_end_cost))
+
+            where, with min_r[r] r's tally now, present[l] the value of the
+            ballots on which l still stands and above[r][l] those that rank
+            r above l, dp(r) = max(0, (min_r[r] - (present[l] -
+            above[r][l])) / 2) is the cost of l outlasting r;
+            displacement is the least dp(r) over reported winners r,
+            quota_cost = quota - present[l], and left_at_end_cost the
+            largest of the (standing - seats left) smallest dp(r).
+            Computed once per run.
+        """
+        cached = self.__dict__.get("_disp")
+        if cached is not None:
+            return cached
+        nd = self.nd
+        standing = np.zeros(nd.ncand, dtype=bool)
+        standing[self.hopeful] = True
+        live = self.holders(self.gone) < nd.big
+        keep = standing[nd.flat] & live[nd.seg]
+        flat, seg, idx = nd.flat[keep], nd.seg[keep], nd.idx[keep]
+        w = self.w[seg]
+        present = np.bincount(flat, weights=w, minlength=nd.ncand)
+        above = {}
+        for r in self.hopeful:
+            at = np.full(len(self.w), nd.big, dtype=np.int64)
+            hit = flat == r
+            at[seg[hit]] = idx[hit]
+            after = idx > at[seg]
+            above[r] = np.bincount(flat[after], weights=w[after], \
+                minlength=nd.ncand)
+        W = [c for c in self.hopeful if c in reported]
+        losers = [c for c in self.hopeful if c not in reported]
+        nleft = len(self.hopeful)
+        costs = {}
+        for l in losers:
+            dps, disp = [], math.inf
+            for r in self.hopeful:
+                if r == l:
+                    continue
+                dp = max(0.0, 0.5 * (self.t0[r] - (present[l] - above[r][l])))
+                dps.append(dp)
+                if r in reported:
+                    disp = min(disp, dp)
+            dps.sort()
+            need = nleft - self.seats_left
+            left_end = max(dps[:need]) if need > 0 else 0.0
+            quota_cost = max(0.0, self.nd.quota - present[l])
+            costs[l] = max(disp, min(quota_cost, left_end))
+        self._disp = (set(W), costs)
+        return self._disp
+
+    def dlb(self, IN, reported, changed):
+        """
+            Displacement bound for the family (IN, OUT): 0 once the outcome
+            has changed (a reported loser seated, or a reported winner in
+            IN); inf when every standing reported loser is in IN; otherwise
+            the least cost over the reported losers not in IN.
+        """
+        if changed:
+            return 0.0
+        W, costs = self.disp_costs(reported)
+        if W & IN or not W:
+            return 0.0
+        left = [costs[l] for l in costs if l not in IN]
+        return min(left) if left else math.inf
+
+    def lb(self, IN, OUT, floor, deficit=0.0, opts=None):
         """
             Lower bound on the changed ballots any run in (IN, OUT) needs;
             inf when none is possible. floor is the bound the node already
             has, which lets the costly M check be skipped when it cannot
-            raise it.
+            raise it. deficit is the earlier winners' summed shortfall under
+            the quota (-sumq), which the additions cannot also cover. opts
+            holds the -sumnq and -elimnq switches.
         """
         q, t0 = self.nd.quota, self.t0
+        sumnq = opts is not None and opts.sumnq
+        elimnq = opts is not None and opts.elimnq
         if len(self.hopeful) - len(IN) < self.seats_left:
             return math.inf                                       # few
         tm = self.tmax(OUT)
-        best = 0.0
+        best = deficit
         gaps = {}
+        excess = 0.0
         if IN:
-            best = max(best, max(t0[c] for c in self.hopeful) - q)  # Q
+            # Q: nobody holds a quota when the first elimination happens.
+            # -sumnq: one removed ballot lowers one candidate at a time, so
+            # the excesses add up.
+            over = [t0[c] - q for c in self.hopeful]
+            best = max(best, max(over))
+            if sumnq:
+                best = max(best, sum(e for e in over if e > 0))
             top = max(t0[c] for c in IN)
             if OUT:
                 gaps = {d: top - tm[d] for d in OUT}
-                best = max(best, shared_lift_lb(gaps.values()))    # E+
+                # -elimnq: OUT candidates over the quota at the run's start
+                # are over it when the top IN candidate goes, and bringing
+                # them under uses removals that cannot also lower it.
+                if elimnq:
+                    excess = sum(max(0.0, t0[d] - q) for d in OUT)
+                best = max(best, shared_lift_lb(gaps.values(), excess, \
+                    deficit))                                      # E+
                 # M can only exceed tm[x] - quota, so skip it below floor.
                 if any(tm[x] - q > max(best, floor) for x in OUT):
                     tmin, F = self.tmin_flow(IN)
@@ -158,7 +271,7 @@ class LBLevel(Level):
         if len(OUT) > self.seats_left:                             # S+
             best = max(best, min(end_lb(
                 [a for d, a in gaps.items() if d != x],
-                gaps.get(x, -math.inf), q - tm[x])
+                gaps.get(x, -math.inf), q - tm[x], excess, deficit)
                 for x in self.hopeful if x not in IN))
         return best
 
@@ -212,6 +325,14 @@ def main():
     ap.add_argument("-seats", type=int, default=6)
     ap.add_argument("-limit", type=float, default=3600)
     ap.add_argument("-report", type=float, default=60)
+    ap.add_argument("-sumq", action="store_true", help="carry the shortfalls "
+        "of winners seated under the quota (they take additions)")
+    ap.add_argument("-sumnq", action="store_true", help="add up the "
+        "excesses over the quota in Q")
+    ap.add_argument("-elimnq", action="store_true", help="share removals "
+        "between the top IN candidate and OUT candidates over the quota")
+    ap.add_argument("-nodlb", action="store_true", help="leave out the "
+        "displacement bound")
     a = ap.parse_args()
 
     cands, ballots = load(f"{a.data}/{a.contest}")
@@ -231,7 +352,8 @@ def main():
     reported = set(w)
     print(f"{a.contest}: UB {ub}, quota {q}, opening {v} seatings "
           f"(cost to leave it {xp[v]:.0f}), {len(nd.hopeful)} standing, "
-          f"{nd.seats_left} seats left", flush=True)
+          f"{nd.seats_left} seats left; sumq {a.sumq}, sumnq {a.sumnq}, "
+          f"elimnq {a.elimnq}, displacement {not a.nodlb}", flush=True)
 
     root = LBLevel(nd, nd.w, np.zeros(nd.ncand, dtype=bool), \
         nd.seats_left, math.inf)
@@ -241,20 +363,21 @@ def main():
     # next candidate to decide, seated the candidates seated since the
     # opening. i == None marks a fully decided run waiting to end.
     tie = itertools.count()
-    heap = [(0.0, next(tie), (), frozenset(), frozenset(), 0, ())]
+    heap = [(0.0, next(tie), (), frozenset(), frozenset(), 0, (), 0.0)]
     t0 = time.time()
     last = t0
     pops = 0
     lb = 0.0
     result = None
 
-    def push(bound, key, IN, OUT, i, seated):
+    def push(bound, key, IN, OUT, i, seated, deficit):
         if bound < ub:
-            heapq.heappush(heap, (bound, next(tie), key, IN, OUT, i, seated))
+            heapq.heappush(heap, (bound, next(tie), key, IN, OUT, i, seated, \
+                deficit))
 
     while heap:
         node = heapq.heappop(heap)
-        bound, _, key, IN, OUT, i, seated = node
+        bound, _, key, IN, OUT, i, seated, deficit = node
         lb = max(lb, bound)
         pops += 1
         now = time.time()
@@ -273,11 +396,15 @@ def main():
             break
 
         lvl = levels.get(key)
+        # A reported loser seated on this path has changed the outcome.
+        changed = any(x not in reported for x in seated)
         if i < len(lvl.order):
             c = lvl.order[i]
             for child_in, child_out in ((IN | {c}, OUT), (IN, OUT | {c})):
-                b = max(bound, lvl.lb(child_in, child_out, bound))
-                push(b, key, child_in, child_out, i + 1, seated)
+                b = max(bound, lvl.lb(child_in, child_out, bound, deficit, a))
+                if not a.nodlb:
+                    b = max(b, lvl.dlb(child_in, reported, changed))
+                push(b, key, child_in, child_out, i + 1, seated, deficit)
             continue
 
         # The run is decided: end it by seating someone.
@@ -286,15 +413,19 @@ def main():
         if len(left) == lvl.seats_left:
             winners = opening | set(seated) | set(left)
             if winners != reported:
-                push(bound, key, IN, OUT, "leaf", seated)
+                push(bound, key, IN, OUT, "leaf", seated, deficit)
         for x in left:
-            b = max(bound, q - tr[x])
+            # Lifting x to the quota takes additions. -sumq: they add to the
+            # earlier winners' shortfalls, which the additions also cover.
+            short = max(0.0, q - tr[x])
+            nxt = deficit + short if a.sumq else 0.0
+            b = max(bound, short, nxt)
             if lvl.seats_left == 1:
                 if opening | set(seated) | {x} != reported:
-                    push(b, key, IN, OUT, "leaf", seated + (x,))
+                    push(b, key, IN, OUT, "leaf", seated + (x,), nxt)
             else:
                 push(b, key + ((frozenset(IN), x),), frozenset(), \
-                    frozenset(), 0, seated + (x,))
+                    frozenset(), 0, seated + (x,), nxt)
 
     elapsed = time.time() - t0
     if result is not None:
