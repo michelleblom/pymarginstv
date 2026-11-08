@@ -497,7 +497,8 @@ RoundTallies compute_round_tallies_q_prefix(const EqlbCtx& ctx, const BoundInput
 
 EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,
                                    const RoundTallies* elim_tallies, bool transfers_only,
-                                   bool sumq, bool multielim, bool sumnq, bool elimnq) {
+                                   bool sumq, bool multielim, bool sumnq, bool elimnq,
+                                   int block_depth) {
     EqlbCtx out = in;
     const auto start = in.round;
     Gone gone(p.order_c, start, bi.ncands);
@@ -581,11 +582,36 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
                             standing.push_back(c);
                         }
                     }
-                    out.elim_lb = block_elim_lb(
-                        out.elim_lb, block_tallies, end_tallies,
-                        p.order_c.subspan(static_cast<std::size_t>(bs),
-                                          static_cast<std::size_t>(be - bs)),
-                        standing, quota, out.deficit_sum, multielim, elimnq);
+                    const auto block = p.order_c.subspan(static_cast<std::size_t>(bs),
+                                                         static_cast<std::size_t>(be - bs));
+                    out.elim_lb = block_elim_lb(out.elim_lb, block_tallies, end_tallies, block,
+                                                standing, quota, out.deficit_sum, multielim,
+                                                elimnq);
+                    // block_depth: for the block's largest candidates l, a
+                    // survivor holds at most its tally with every other block
+                    // candidate gone and l still standing when l goes.
+                    std::vector<Cand> by_tally(block.begin(), block.end());
+                    std::stable_sort(by_tally.begin(), by_tally.end(), [&](Cand a, Cand b) {
+                        return -block_tallies[static_cast<std::size_t>(a)] <
+                               -block_tallies[static_cast<std::size_t>(b)];
+                    });
+                    const auto depth = std::min<std::size_t>(
+                        by_tally.size(), static_cast<std::size_t>(std::max(block_depth, 0)));
+                    for (std::size_t li = 0; li < depth; ++li) {
+                        const auto l = by_tally[li];
+                        std::vector<Cand> list_l;
+                        for (const auto c : gone.list) {
+                            if (c != l) {
+                                list_l.push_back(c);
+                            }
+                        }
+                        const Gone gone_l(list_l, static_cast<int>(list_l.size()), n);
+                        const auto end_l = round_tallies_q(bi, gone_l, out.winners, plan);
+                        const Cand single[1] = {l};
+                        out.elim_lb = block_elim_lb(out.elim_lb, block_tallies, end_l, single,
+                                                    standing, quota, out.deficit_sum, multielim,
+                                                    elimnq);
+                    }
                 }
                 continue;
             }
@@ -754,6 +780,23 @@ EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, con
 
     out.round = pxlen;
     return out;
+}
+
+double backcompute_seating_run(const EqlbCtx& walked, const BoundInputs& bi,
+                               std::span<const Cand> order_c, std::span<const int> order_a,
+                               const OrderQ& q, bool sumnq) {
+    double val = 0.0;
+    const auto last = static_cast<int>(order_a.size()) - 1;
+    if (last >= 1 && order_a[static_cast<std::size_t>(last)] == 1 &&
+        order_a[static_cast<std::size_t>(last - 1)] == 1) {
+        const auto pos = gone_positions(order_c, order_c.size(), bi.ncands);
+        for (int j = last; j >= 0 && order_a[static_cast<std::size_t>(j)] == 1; --j) {
+            const auto [nqlb, nqs] = backcompute_nq_bound(j, walked, bi, order_c, q, pos, sumnq);
+            (void)nqs;
+            val = std::max(val, nqlb);
+        }
+    }
+    return val;
 }
 
 // ---------------------------------------------------------------- range mode

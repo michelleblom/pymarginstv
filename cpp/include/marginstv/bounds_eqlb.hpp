@@ -131,10 +131,22 @@ struct PrefixRef {
     const Blocks* blocks = nullptr; // -weakseed blocks, if any
 };
 
+// block_depth (-membership): for a block's largest candidates, also bound
+// each survivor by its tally with the rest of the block gone and that
+// candidate still standing.
 EqlbCtx compute_eqlb_stv26_qprefix(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,
                                    const RoundTallies* elim_tallies, bool transfers_only,
                                    bool sumq = false, bool multielim = false,
-                                   bool sumnq = false, bool elimnq = false);
+                                   bool sumnq = false, bool elimnq = false,
+                                   int block_depth = 0);
+
+// -membership: the no-quota bounds worked back over the run of two or more
+// seatings that ends the prefix (backcompute_nq_bound), which hold once any
+// elimination follows. 'walked' is the bound walk's context over the whole
+// prefix (run_backcompute in stvtree.py).
+double backcompute_seating_run(const EqlbCtx& walked, const BoundInputs& bi,
+                               std::span<const Cand> order_c, std::span<const int> order_a,
+                               const OrderQ& q, bool sumnq);
 
 EqlbCtx compute_eqlb_stv26(const EqlbCtx& in, const BoundInputs& bi, const PrefixRef& p,
                            const RoundTallies* precomputed, bool transfers_only,

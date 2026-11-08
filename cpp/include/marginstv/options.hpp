@@ -42,6 +42,10 @@ struct Options {
     bool weakseed = false;
     double seedf = 0.25;              // -seedf
     int seedmaxchildren = 10000;      // -seedmaxchildren
+    // -membership: search each run of eliminations between seatings by
+    // deciding, one candidate at a time, whether it is eliminated in the
+    // run or still standing when it ends.
+    bool membership = false;
     // -evalpara: both levels of parallelism always run here, but the flag
     // still decides one set order the Python logs (see generate_children).
     bool evalpara = false;

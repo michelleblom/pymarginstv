@@ -325,21 +325,23 @@ class RunState:
                 best = max(best, sum(e for e in over if e > 0))
             top = max(t0[c] for c in IN)
             if OUT:
-                gaps = {d: top - tm[d] for d in OUT}
+                # Candidate order throughout, so sums do not depend on how
+                # a set happens to iterate.
+                gaps = {d: top - tm[d] for d in sorted(OUT)}
                 if elimnq:
-                    excess = sum(max(0.0, t0[d] - q) for d in OUT)
+                    excess = sum(max(0.0, t0[d] - q) for d in sorted(OUT))
                 best = max(best, shared_lift_lb(gaps.values(), excess, \
                     deficit))                                      # E+
                 # E+ again for IN's largest candidates l: while l stands,
                 # an OUT candidate cannot hold the rows ranking l above it.
-                for l in sorted(IN, key=lambda c: -t0[c])[:depth]:
+                for l in sorted(IN, key=lambda c: (-t0[c], c))[:depth]:
                     tl = self.tmax(OUT | {l})
                     best = max(best, shared_lift_lb([t0[l] - tl[d] \
-                        for d in OUT], excess, deficit))
-                if any(tm[x] - q > max(best, floor) for x in OUT):
+                        for d in sorted(OUT)], excess, deficit))
+                if any(tm[x] - q > max(best, floor) for x in sorted(OUT)):
                     tmin, F = self.tmin_flow(IN)
-                    rows = list(IN)
-                    for x in OUT:                                  # M
+                    rows = sorted(IN)
+                    for x in sorted(OUT):                          # M
                         best = max(best, tmin[x] - F[rows, x].max() - q)
         if len(OUT) > self.seats_left:                             # S+
             best = max(best, min(end_lb(

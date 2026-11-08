@@ -16,6 +16,7 @@ Options parse_options(const std::vector<std::string>& argv) {
         {"-evalpara", &o.evalpara}, {"--evalpara", &o.evalpara}, {"-sumq", &o.sumq},
         {"-multielim", &o.multielim}, {"-sumnq", &o.sumnq},
         {"-elimnq", &o.elimnq},     {"-weakseed", &o.weakseed},
+        {"-membership", &o.membership},
     };
     const std::map<std::string, std::function<void(const std::string&)>> values = {
         {"-d", [&](const std::string& v) { o.data = v; }},
@@ -59,6 +60,13 @@ Options parse_options(const std::vector<std::string>& argv) {
     // and displacement bounds only, not for the MINLP.
     if (o.weakseed && !(o.useqprefix && (o.eqlb || o.eqlbc) && o.nominlps)) {
         throw std::invalid_argument("-weakseed needs -useqprefix, -eqlb or -eqlbc, and -nominlps");
+    }
+    // -membership resumes the bound walk where each run starts (-eqlbc) and
+    // has open-run bounds for the quota-in-prefix mode only.
+    if (o.membership && !(o.useqprefix && o.eqlbc && o.nominlps && !o.weakseed)) {
+        throw std::invalid_argument(
+            "-membership needs -useqprefix, -eqlbc and -nominlps, and cannot be combined with "
+            "-weakseed");
     }
     return o;
 }

@@ -66,8 +66,17 @@ using Signature = std::array<std::uint8_t, 16>;
 
 std::vector<std::uint8_t> canonical_outcome(std::span<const Cand> order_c,
                                             std::span<const int> order_a, const OrderQ& order_q,
-                                            const Blocks& blocks = {});
+                                            const Blocks& blocks = {},
+                                            const std::vector<std::int32_t>& extra = {});
 Signature outcome_signature(std::span<const Cand> order_c, std::span<const int> order_a,
-                            const OrderQ& order_q, const Blocks& blocks = {});
+                            const OrderQ& order_q, const Blocks& blocks = {},
+                            const std::vector<std::int32_t>& extra = {});
+
+// -membership: what a node's signature adds (membership_extra in
+// stvtree.py): the open run's OUT set and need_in flag, and every
+// elimination outside a block with its position.
+std::vector<std::int32_t> membership_extra(std::span<const Cand> order_c,
+                                           std::span<const int> order_a, const Blocks& blocks,
+                                           std::span<const Cand> out, bool need_in);
 
 } // namespace marginstv

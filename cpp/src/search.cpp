@@ -1,12 +1,17 @@
 #include "marginstv/search.hpp"
 
 #include "marginstv/pyset.hpp"
+#include "marginstv/membership.hpp"
 #include "marginstv/weakseed.hpp"
 
 #include <tbb/parallel_for.h>
 #include <tbb/parallel_invoke.h>
 
 #include <chrono>
+#include <algorithm>
+#include <mutex>
+#include <memory>
+#include <map>
 #include <cmath>
 #include <limits>
 
@@ -28,6 +33,10 @@ PyNum eqlb_value(const EqlbCtx& ctx) {
 
 bool needs_transfers(const Options& o) { return o.dlb || o.dlbc || o.prec_et; }
 
+// -membership: how many of a block's (or an open run's IN) largest
+// candidates get the bound that keeps them standing while the others go.
+constexpr int kMembershipDepth = 3;
+
 // The elimination/quota bound in the configured mode, or BST19 plus a walk
 // for transfer values when something downstream reads them.
 EqlbCtx run_eqlb(const SearchInputs& in, const EqlbCtx& start, const PrefixRef& p,
@@ -36,7 +45,8 @@ EqlbCtx run_eqlb(const SearchInputs& in, const EqlbCtx& start, const PrefixRef& 
     if (o.eqlb || o.eqlbc) {
         return o.useqprefix
                    ? compute_eqlb_stv26_qprefix(start, in.bounds, p, tallies, false, o.sumq,
-                                                o.multielim, o.sumnq, o.elimnq)
+                                                o.multielim, o.sumnq, o.elimnq,
+                                                o.membership ? kMembershipDepth : 0)
                    : compute_eqlb_stv26(start, in.bounds, p, tallies, false, o.sumq, o.multielim);
     }
     auto ctx = compute_eqlb_bst19(start, in.bounds, p);
@@ -258,6 +268,426 @@ void add_block_children(const SearchInputs& in, const TreeNode& node, const Weak
 
 } // namespace
 
+namespace {
+
+// ---------------------------------------------------------------- -membership
+
+// Where the current run of eliminations starts: after the last seating.
+std::size_t run_start_of(std::span<const int> order_a) {
+    auto i = order_a.size();
+    while (i > 0 && order_a[i - 1] == 0) {
+        --i;
+    }
+    return i;
+}
+
+// The prefix decides every seat (a leaf).
+bool membership_complete(const SearchInputs& in, std::span<const Cand> order_c,
+                         std::span<const int> order_a) {
+    int seated = 0;
+    for (const auto a : order_a) {
+        seated += a;
+    }
+    return seated == in.bounds.seats ||
+           in.bounds.ncands - static_cast<int>(order_c.size()) == in.bounds.seats - seated;
+}
+
+// Blocks once their run has closed: a block of one is an ordered elimination.
+Blocks closed_blocks(const Blocks& blocks) {
+    Blocks out;
+    for (const auto& b : blocks) {
+        if (b.second - b.first > 1) {
+            out.push_back(b);
+        }
+    }
+    return out;
+}
+
+bool refinable(const Blocks& blocks) {
+    return std::any_of(blocks.begin(), blocks.end(),
+                       [](const auto& b) { return b.second - b.first > 1; });
+}
+
+// RunState of the most recent runs, keyed by their prefix (run_state in
+// stvtree.py), shared by all threads.
+std::mutex g_runs_mutex;
+std::map<std::vector<int>, std::shared_ptr<const RunState>> g_runs;
+std::vector<std::vector<int>> g_runs_order;
+constexpr std::size_t kRunsKeep = 8;
+
+std::shared_ptr<const RunState> run_state(const SearchInputs& in, std::span<const Cand> order_c,
+                                          std::span<const int> order_a, const OrderQ& order_q,
+                                          const EqlbCtx& ctx) {
+    std::vector<int> key(order_c.begin(), order_c.end());
+    key.push_back(-1);
+    key.insert(key.end(), order_a.begin(), order_a.end());
+    key.push_back(-2);
+    auto sorted_q = order_q;
+    std::sort(sorted_q.begin(), sorted_q.end(),
+              [](const QEntry& a, const QEntry& b) { return a.c < b.c; });
+    for (const auto& e : sorted_q) {
+        key.insert(key.end(), {e.c, e.lo, e.hi});
+    }
+    const std::lock_guard<std::mutex> lock(g_runs_mutex);
+    if (const auto it = g_runs.find(key); it != g_runs.end()) {
+        return it->second;
+    }
+    const auto n = in.bounds.ncands;
+    CandSet gone(n);
+    for (const auto c : order_c) {
+        gone.set(c);
+    }
+    const auto gone_pos = gone_positions(order_c, order_c.size(), n);
+    const auto tv_lo = ctx.transfer.dense_lo(n);
+    const auto qround = quota_rounds(order_q, n);
+    const auto& ballots = in.bounds.election->ballots;
+    std::vector<std::vector<Cand>> prefs;
+    std::vector<double> values;
+    for (std::size_t b = 0; b < ballots.size(); ++b) {
+        std::vector<Cand> p;
+        for (const auto c : ballots.prefs(b)) {
+            if (!gone.test(c)) {
+                p.push_back(c);
+            }
+        }
+        if (p.empty()) {
+            continue;
+        }
+        values.push_back(calc_tallies_q_prefix(ballots.prefs(b),
+                                               static_cast<double>(ballots.votes(b)), order_c,
+                                               gone_pos, ctx.winners, tv_lo, qround)
+                             .value);
+        prefs.push_back(std::move(p));
+    }
+    std::vector<Cand> standing;
+    for (int c = 0; c < n; ++c) {
+        if (!gone.test(c)) {
+            standing.push_back(c);
+        }
+    }
+    int seated = 0;
+    for (const auto a : order_a) {
+        seated += a;
+    }
+    auto st = std::make_shared<const RunState>(n, static_cast<double>(in.bounds.quota),
+                                               in.bounds.seats - seated, std::move(standing),
+                                               prefs, values);
+    g_runs[key] = st;
+    g_runs_order.push_back(key);
+    while (g_runs.size() > kRunsKeep) {
+        g_runs.erase(g_runs_order.front());
+        g_runs_order.erase(g_runs_order.begin());
+    }
+    return st;
+}
+
+// A bound in whole votes: 3.2 means at least 4; infinity stays.
+PyNum whole(double x) {
+    if (std::isinf(x)) {
+        return PyNum::real(x);
+    }
+    return py_max(PyNum::integer(0), py_ceil(x - 1e-6));
+}
+
+// A child whose run is still open (eval_open_run in stvtree.py).
+ChildResult eval_open_run(const SearchInputs& in, const Expansion& ex, const ChildSpec& spec) {
+    const auto& o = *in.options;
+    const auto n = in.bounds.ncands;
+    const auto rs = run_start_of(spec.order_a);
+    const std::span<const Cand> pc(spec.order_c.data(), rs);
+    const std::span<const int> pa(spec.order_a.data(), rs);
+    const auto& ctx = ex.eqlbctx;
+    const auto st = run_state(in, pc, pa, spec.order_q, ctx);
+
+    std::vector<Cand> in_set(spec.order_c.begin() + static_cast<std::ptrdiff_t>(rs),
+                             spec.order_c.end());
+    std::sort(in_set.begin(), in_set.end());
+    auto out_set = spec.out;
+    std::sort(out_set.begin(), out_set.end());
+    const auto deficit = o.sumq ? ctx.deficit_sum : 0.0;
+    auto fam = st->lb(in_set, out_set, spec.parent_dist.as_double(), deficit, o.sumnq, o.elimnq,
+                      kMembershipDepth);
+    if (!in_set.empty()) {
+        fam = std::max(fam, st->nq([&] {
+            return backcompute_seating_run(ctx, in.bounds, pc, pa, spec.order_q, o.sumnq);
+        }));
+    }
+    double dlb = 0.0;
+    if (o.dlb || o.dlbc) {
+        bool changed = false;
+        for (std::size_t i = 0; i < rs; ++i) {
+            if (spec.order_a[i] == 1 && !in.winner_set.test(spec.order_c[i])) {
+                changed = true;
+            }
+        }
+        dlb = st->dlb(in_set, in.winner_set, changed);
+    }
+
+    ChildResult res;
+    res.isleaf = false;
+    res.eqlbctx = ctx;
+    res.disp_cache = blank_disp(n);
+    res.order_c = spec.order_c;
+    res.order_a = spec.order_a;
+    res.order_q = spec.order_q;
+    res.eqlb = whole(fam);
+    res.dlb = whole(dlb);
+    res.lb = py_max(py_max(spec.parent_dist, res.eqlb), res.dlb);
+    res.dist = res.lb;
+    res.dist_ub = res.lb;
+    res.blocks = spec.blocks;
+    res.out = spec.out;
+    res.need_in = spec.need_in;
+    return res;
+}
+
+// A complete outcome bounded only by its blocks: split its last block of
+// two or more by which candidate went last (refine_children in stvtree.py).
+Expansion refine_expansion(const SearchInputs& in, const TreeNode& node,
+                           const std::vector<Cand>& forder_c, const std::vector<int>& forder_a,
+                           const CandSet& winners, const PyNum& running_ub) {
+    const auto n = in.bounds.ncands;
+    Expansion ex;
+    ex.eqlbctx = blank_eqlb(n);
+    ex.disp_cache = blank_disp(n);
+    const auto& fb = node.blocks;
+    std::size_t k = 0;
+    for (std::size_t j = 0; j < fb.size(); ++j) {
+        if (fb[j].second - fb[j].first > 1) {
+            k = j;
+        }
+    }
+    const auto [s, e] = fb[k];
+    Blocks rest;
+    for (std::size_t j = 0; j < fb.size(); ++j) {
+        if (j != k) {
+            rest.push_back(fb[j]);
+        }
+    }
+    CandSet placed(n);
+    for (const auto c : forder_c) {
+        placed.set(c);
+    }
+    std::vector<Cand> rem;
+    for (int c = 0; c < n; ++c) {
+        if (!placed.test(c)) {
+            rem.push_back(c);
+        }
+    }
+    for (int li = s; li < e; ++li) {
+        const auto l = forder_c[static_cast<std::size_t>(li)];
+        std::vector<Cand> oc(forder_c.begin(), forder_c.begin() + s);
+        for (int j = s; j < e; ++j) {
+            if (forder_c[static_cast<std::size_t>(j)] != l) {
+                oc.push_back(forder_c[static_cast<std::size_t>(j)]);
+            }
+        }
+        oc.push_back(l);
+        oc.insert(oc.end(), forder_c.begin() + e, forder_c.end());
+        auto blocks = rest;
+        if (e - 1 - s > 1) {
+            blocks.emplace_back(s, e - 1);
+        }
+        std::sort(blocks.begin(), blocks.end());
+        ChildSpec spec;
+        spec.parent_dist = node.dist;
+        spec.order_c = std::move(oc);
+        spec.order_a = forder_a;
+        spec.order_q = node.order_q;
+        spec.winners = winners;
+        spec.rem = rem;
+        spec.isleaf = true;
+        spec.running_ub = running_ub;
+        spec.blocks = std::move(blocks);
+        ex.children.push_back(std::move(spec));
+    }
+    return ex;
+}
+
+// Children of a node whose run is open (membership_children in stvtree.py).
+Expansion membership_expansion(const SearchInputs& in, const TreeNode& node,
+                               const std::vector<Cand>& forder_c,
+                               const std::vector<int>& forder_a, const PySetOrder& fwinners,
+                               const PyNum& running_ub) {
+    const auto& o = *in.options;
+    const auto n = in.bounds.ncands;
+    CandSet winners(n);
+    for (const auto w : fwinners.order()) {
+        winners.set(w);
+    }
+    if (membership_complete(in, forder_c, forder_a)) {
+        return refine_expansion(in, node, forder_c, forder_a, winners, running_ub);
+    }
+    const auto& forder_q = node.order_q;
+    const auto& fblocks = node.blocks;
+    const auto rs = run_start_of(forder_a);
+    const auto st = run_state(in, std::span<const Cand>(forder_c.data(), rs),
+                              std::span<const int>(forder_a.data(), rs), forder_q, node.eqlbctx);
+
+    Expansion ex;
+    ex.eqlbctx = node.eqlbctx;
+    ex.disp_cache = blank_disp(n);
+    if (o.prec_et) {
+        RoundTallies rt;
+        rt.tallies = st->t0();
+        ex.elim_tallies = std::move(rt);
+    }
+
+    CandSet in_set(n);
+    for (std::size_t i = rs; i < forder_c.size(); ++i) {
+        in_set.set(forder_c[i]);
+    }
+    CandSet out_set(n);
+    for (const auto d : node.out) {
+        out_set.set(d);
+    }
+    std::vector<Cand> standing;
+    for (const auto c : st->standing()) {
+        if (!in_set.test(c)) {
+            standing.push_back(c);
+        }
+    }
+    int seated = 0;
+    for (const auto a : forder_a) {
+        seated += a;
+    }
+    const auto seats_left = in.bounds.seats - seated;
+    CandSet missing(n); // winner_set - fwinners
+    for (int c = 0; c < n; ++c) {
+        if (in.winner_set.test(c) && !winners.test(c)) {
+            missing.set(c);
+        }
+    }
+    auto sorted_out = node.out;
+    std::sort(sorted_out.begin(), sorted_out.end());
+
+    auto base = [&](std::vector<Cand> oc, std::vector<int> oa, OrderQ oq, CandSet w,
+                    std::vector<Cand> rem, bool isleaf, Blocks blocks) {
+        ChildSpec spec;
+        spec.parent_dist = node.dist;
+        spec.order_c = std::move(oc);
+        spec.order_a = std::move(oa);
+        spec.order_q = std::move(oq);
+        spec.winners = std::move(w);
+        spec.rem = std::move(rem);
+        spec.isleaf = isleaf;
+        spec.running_ub = running_ub;
+        spec.blocks = std::move(blocks);
+        return spec;
+    };
+
+    Cand next = -1;
+    for (const auto c : st->order()) {
+        if (!in_set.test(c) && !out_set.test(c)) {
+            next = c;
+            break;
+        }
+    }
+    if (next >= 0) {
+        const auto c = next;
+        Blocks blocks = fblocks;
+        if (rs < forder_c.size()) {
+            blocks.back().second += 1;
+        } else {
+            blocks.emplace_back(static_cast<int>(rs), static_cast<int>(rs) + 1);
+        }
+        std::vector<Cand> rem;
+        CandSet rem_set(n);
+        for (const auto x : standing) {
+            if (x != c) {
+                rem.push_back(x);
+                rem_set.set(x);
+            }
+        }
+        auto oc = forder_c;
+        oc.push_back(c);
+        auto oa = forder_a;
+        oa.push_back(0);
+        if (static_cast<int>(rem.size()) == seats_left) {
+            if (!(missing == rem_set)) {
+                ex.children.push_back(
+                    base(oc, oa, forder_q, winners, rem, true, closed_blocks(blocks)));
+            }
+        } else if (static_cast<int>(rem.size()) > seats_left) {
+            auto spec = base(oc, oa, forder_q, winners, rem, false, blocks);
+            spec.out = sorted_out;
+            spec.open_run = true;
+            ex.children.push_back(std::move(spec));
+        }
+        auto spec = base(forder_c, forder_a, forder_q, winners, standing, false, fblocks);
+        spec.out = sorted_out;
+        spec.out.push_back(c);
+        std::sort(spec.out.begin(), spec.out.end());
+        spec.need_in = true;
+        spec.open_run = true;
+        ex.children.push_back(std::move(spec));
+    }
+
+    if (node.need_in) {
+        return ex;
+    }
+
+    // Close the run with exactly IN eliminated and seat someone.
+    const auto closed = closed_blocks(fblocks);
+    for (const auto r : standing) {
+        auto node_winners = winners;
+        node_winners.set(r);
+        if (node_winners == in.winner_set) {
+            continue;
+        }
+        std::vector<Cand> rem;
+        for (const auto x : standing) {
+            if (x != r) {
+                rem.push_back(x);
+            }
+        }
+        auto oc = forder_c;
+        oc.push_back(r);
+        auto oa = forder_a;
+        oa.push_back(1);
+        const auto seats_filled = seated + 1;
+        auto new_rem = rem;
+        bool isleaf = false;
+        if (seats_filled > in.bounds.seats) {
+            continue;
+        }
+        if (seats_filled == in.bounds.seats) {
+            oc.insert(oc.end(), rem.begin(), rem.end());
+            oa.insert(oa.end(), rem.size(), 0);
+            new_rem.clear();
+            isleaf = true;
+        } else if (in.bounds.seats - seats_filled == static_cast<int>(rem.size())) {
+            CandSet miss(n);
+            for (int c = 0; c < n; ++c) {
+                if (in.winner_set.test(c) && !node_winners.test(c)) {
+                    miss.set(c);
+                }
+            }
+            CandSet rem_set(n);
+            for (const auto x : rem) {
+                rem_set.set(x);
+            }
+            if (miss == rem_set) {
+                continue;
+            }
+            isleaf = true;
+        }
+        const auto lenf = static_cast<int>(forder_a.size());
+        auto minqr = lenf;
+        if (!forder_a.empty() && forder_a.back() == 1) {
+            minqr = find_q(forder_q, forder_c.back())->lo;
+        }
+        for (auto i = lenf; i >= minqr; --i) {
+            auto q = forder_q;
+            q.push_back({r, i, i});
+            ex.children.push_back(base(oc, oa, std::move(q), node_winners, new_rem, isleaf, closed));
+        }
+    }
+    return ex;
+}
+
+} // namespace
+
 Expansion generate_children(const SearchInputs& in, const TreeNode& node, const PyNum& running_ub) {
     const auto& o = *in.options;
     const auto n = in.bounds.ncands;
@@ -287,6 +717,12 @@ Expansion generate_children(const SearchInputs& in, const TreeNode& node, const 
     }
     if (o.pc > 1 && !o.evalpara) {
         fwinners = fwinners.unpickled();
+    }
+
+    // -membership: the node's run is open; its children decide the next
+    // candidate or close the run and seat someone.
+    if (o.membership) {
+        return membership_expansion(in, node, forder_c, forder_a, fwinners, running_ub);
     }
 
     Expansion ex;
@@ -422,6 +858,9 @@ Expansion generate_children(const SearchInputs& in, const TreeNode& node, const 
 }
 
 ChildResult eval_child(const SearchInputs& in, const Expansion& ex, const ChildSpec& spec) {
+    if (spec.open_run) {
+        return eval_open_run(in, ex, spec);
+    }
     const auto& o = *in.options;
     const auto n = in.bounds.ncands;
     const PrefixRef p{spec.order_c, spec.order_a, &spec.order_q, &spec.blocks};
@@ -434,6 +873,8 @@ ChildResult eval_child(const SearchInputs& in, const Expansion& ex, const ChildS
     res.isleaf = spec.isleaf;
     res.blocks = spec.blocks;
     res.cap = spec.cap;
+    res.out = spec.out;
+    res.need_in = spec.need_in;
     res.order_c = spec.order_c;
     res.order_a = spec.order_a;
     res.order_q = spec.order_q;
@@ -455,6 +896,62 @@ ChildResult eval_child(const SearchInputs& in, const Expansion& ex, const ChildS
     } else {
         res.disp_cache = start_disp;
         res.dlb = PyNum::integer(0);
+    }
+
+    // -membership: a leaf's ordered eliminations come from refining blocks, so
+    // the prefixes just before them were never search nodes. The displacement
+    // bound holds at each of them, as at any prefix.
+    if (o.membership && spec.isleaf && o.useqprefix && (o.dlb || o.dlbc)) {
+        auto padfrom = static_cast<int>(spec.order_a.size());
+        if (padfrom == n) {
+            while (padfrom > 0 && spec.order_a[static_cast<std::size_t>(padfrom - 1)] == 0) {
+                --padfrom;
+            }
+        }
+        std::vector<char> inside(spec.order_c.size(), 0);
+        for (const auto& [s, e] : spec.blocks) {
+            for (int i = s; i < e; ++i) {
+                inside[static_cast<std::size_t>(i)] = 1;
+            }
+        }
+        for (int k = 1; k < padfrom; ++k) {
+            const auto ku = static_cast<std::size_t>(k);
+            if (spec.order_a[ku] != 0 || inside[ku] != 0) {
+                continue;
+            }
+            CandSet seated_k(n);
+            CandSet prefix(n);
+            for (std::size_t i = 0; i < ku; ++i) {
+                prefix.set(spec.order_c[i]);
+                if (spec.order_a[i] == 1) {
+                    seated_k.set(spec.order_c[i]);
+                }
+            }
+            OrderQ q_k;
+            for (const auto& e : spec.order_q) {
+                if (seated_k.test(e.c)) {
+                    q_k.push_back(e);
+                }
+            }
+            std::vector<Cand> rem_k;
+            for (int c = 0; c < n; ++c) {
+                if (!prefix.test(c)) {
+                    rem_k.push_back(c);
+                }
+            }
+            Blocks blocks_k;
+            for (const auto& b : spec.blocks) {
+                if (b.second <= k) {
+                    blocks_k.push_back(b);
+                }
+            }
+            const PrefixRef pk{std::span<const Cand>(spec.order_c.data(), ku),
+                               std::span<const int>(spec.order_a.data(), ku), &q_k, &blocks_k};
+            const auto sub = compute_disp_lb_stv26_q_prefix(blank_disp(n), in.bounds, pk,
+                                                            in.winner_set, rem_k,
+                                                            res.eqlbctx.transfer);
+            res.dlb = py_max(res.dlb, sub.lowerbound);
+        }
     }
 
     const auto lowerbound = py_max(res.eqlb, py_max(res.dlb, spec.parent_dist));
@@ -541,7 +1038,8 @@ void Search::initial_frontier() {
         std::vector<Cand> rem;
     };
     std::vector<Spec> specs;
-    for (int cand = 0; cand < n; ++cand) {
+    // -membership: the root is a single open run, in place of these.
+    for (int cand = 0; cand < n && !o_.membership; ++cand) {
         std::vector<Cand> rem;
         for (int c = 0; c < n; ++c) {
             if (c != cand) {
@@ -589,6 +1087,14 @@ void Search::initial_frontier() {
                                                     std::move(r.disp_cache), *r.dist, *r.dist_ub),
                          o_.lse);
     }
+
+    if (o_.membership) {
+        frontier_.insert(std::make_unique<TreeNode>(std::vector<Cand>{}, std::vector<int>{},
+                                                    OrderQ{}, blank_eqlb(n), blank_disp(n),
+                                                    PyNum::integer(0), PyNum::integer(0),
+                                                    Blocks{}, std::vector<Cand>{}, false, true),
+                         o_.lse);
+    }
 }
 
 bool Search::handle_child(ChildResult& c) {
@@ -607,9 +1113,15 @@ bool Search::handle_child(ChildResult& c) {
     if (c.solved) {
         ++nsolves_;
     }
+    std::string run_out;
+    if (o_.membership) {
+        auto sorted_out = c.out;
+        std::sort(sorted_out.begin(), sorted_out.end());
+        run_out = " OUT " + py_list_str(sorted_out) + (c.need_in ? " needs IN" : "");
+    }
     log_.line("EVALUATED " + py_list_str(c.order_c) + "/" + py_list_str(c.order_a) + "/" +
               order_q_str(c.order_q) + " LB " + c.lb.str() + " (D " + c.dlb.str() + " EQ " +
-              c.eqlb.str() + ")");
+              c.eqlb.str() + ")" + run_out);
     if (!c.dist) {
         log_.line("    DISTANCE None/Infeasible");
     } else {
@@ -619,6 +1131,21 @@ bool Search::handle_child(ChildResult& c) {
 
     if (!c.dist || *c.dist >= running_ub_) {
         log_.line("        PRUNED!");
+        return false;
+    }
+
+    if (c.isleaf && o_.membership && refinable(c.blocks)) {
+        // A complete outcome bounded only by its blocks goes to the frontier
+        // and is refined when it reaches the top.
+        log_.line("        LEAF TO REFINE");
+        auto node = std::make_unique<TreeNode>(std::move(c.order_c), std::move(c.order_a),
+                                               std::move(c.order_q), std::move(c.eqlbctx),
+                                               std::move(c.disp_cache), *c.dist, *c.dist_ub,
+                                               std::move(c.blocks), std::move(c.out), c.need_in,
+                                               true);
+        if (!frontier_.insert(std::move(node), o_.lse)) {
+            log_.line("        SUBSUMED");
+        }
         return false;
     }
 
@@ -639,7 +1166,8 @@ bool Search::handle_child(ChildResult& c) {
     auto node = std::make_unique<TreeNode>(std::move(c.order_c), std::move(c.order_a),
                                            std::move(c.order_q), std::move(c.eqlbctx),
                                            std::move(c.disp_cache), *c.dist, *c.dist_ub,
-                                           std::move(c.blocks));
+                                           std::move(c.blocks), std::move(c.out), c.need_in,
+                                           o_.membership);
     if (!frontier_.insert(std::move(node), o_.lse)) {
         log_.line("        SUBSUMED");
     }

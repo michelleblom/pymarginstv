@@ -3070,12 +3070,12 @@ def eval_open_run(parent_dist: float, eqlbctx: EqlbCtx, \
         changed = any(node_order_a[i] == 1 and node_order_c[i] not in winner_set \
             for i in range(rs))
         dlb = st.dlb(IN, winner_set, changed)
-    raw = max(fam, dlb)
-    if math.isinf(raw):
-        lb = math.inf
-    else:
-        # Changed ballots are whole: a bound of 3.2 means at least 4.
-        lb = max(parent_dist, math.ceil(raw - 1e-6))
+    # Changed ballots are whole: a bound of 3.2 means at least 4. The parts
+    # are reported the same way.
+    def whole(x: float) -> float:
+        return x if math.isinf(x) else max(0, math.ceil(x - 1e-6))
+    fam, dlb = whole(fam), whole(dlb)
+    lb = max(parent_dist, fam, dlb)
     return (False, eqlbctx, blank_disp_cache(ncands), node_order_c, \
         node_order_a, node_order_q, lb, dlb, fam, lb, lb, rem, node_winners, \
         False)

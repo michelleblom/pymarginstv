@@ -60,6 +60,11 @@ struct ChildSpec {
     Blocks blocks;
     // Budget of the -weakseed block expansion that produced the child.
     std::optional<PyNum> cap;
+    // -membership: the open run's OUT set, whether it needs another IN
+    // before it can close, and whether the child's run is still open.
+    std::vector<Cand> out;
+    bool need_in = false;
+    bool open_run = false;
 };
 
 struct ChildResult {
@@ -77,6 +82,8 @@ struct ChildResult {
     bool solved = false;
     Blocks blocks;
     std::optional<PyNum> cap;
+    std::vector<Cand> out;
+    bool need_in = false;
 };
 
 struct InitialResult {

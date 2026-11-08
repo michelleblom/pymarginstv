@@ -12,10 +12,14 @@ constexpr double kEpsilon = 0.9;
 } // namespace
 
 TreeNode::TreeNode(std::vector<Cand> oc, std::vector<int> oa, OrderQ oq, EqlbCtx ctx,
-                   DispCache dc, PyNum d, PyNum dub, Blocks b)
+                   DispCache dc, PyNum d, PyNum dub, Blocks b, std::vector<Cand> o, bool ni,
+                   bool membership)
     : order_c(oc.begin(), oc.end()), order_a(oa.begin(), oa.end()), order_q(std::move(oq)),
       dist(d), dist_ub(dub), eqlbctx(std::move(ctx)), disp_cache(std::move(dc)),
-      blocks(std::move(b)), sig(outcome_signature(oc, oa, order_q, blocks)) {}
+      blocks(std::move(b)), out(std::move(o)), need_in(ni),
+      sig(outcome_signature(oc, oa, order_q, blocks,
+                            membership ? membership_extra(oc, oa, blocks, out, need_in)
+                                       : std::vector<std::int32_t>{})) {}
 
 std::string TreeNode::str() const {
     std::vector<std::vector<Cand>> quotas(order_c.size());

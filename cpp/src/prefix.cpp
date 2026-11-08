@@ -172,7 +172,8 @@ MergedOutcome merge_outcome(std::span<const Cand> order_c, std::span<const int> 
 
 std::vector<std::uint8_t> canonical_outcome(std::span<const Cand> order_c,
                                             std::span<const int> order_a, const OrderQ& order_q,
-                                            const Blocks& blocks) {
+                                            const Blocks& blocks,
+                                            const std::vector<std::int32_t>& extra) {
     std::vector<std::uint8_t> out;
     auto put = [&out](std::int32_t v) {
         const auto u = static_cast<std::uint32_t>(v);
@@ -220,12 +221,41 @@ std::vector<std::uint8_t> canonical_outcome(std::span<const Cand> order_c,
         }
         emit(ends);
     }
+
+    // -membership: the open run's OUT set and need_in, and ordered tails.
+    if (!extra.empty()) {
+        emit(extra);
+    }
     return out;
 }
 
+std::vector<std::int32_t> membership_extra(std::span<const Cand> order_c,
+                                           std::span<const int> order_a, const Blocks& blocks,
+                                           std::span<const Cand> out, bool need_in) {
+    std::vector<char> inside(order_c.size(), 0);
+    for (const auto& [s, e] : blocks) {
+        for (int i = s; i < e && i < static_cast<int>(order_c.size()); ++i) {
+            inside[static_cast<std::size_t>(i)] = 1;
+        }
+    }
+    std::vector<std::int32_t> extra{1, need_in ? 1 : 0};
+    std::vector<Cand> sorted_out(out.begin(), out.end());
+    std::sort(sorted_out.begin(), sorted_out.end());
+    extra.insert(extra.end(), sorted_out.begin(), sorted_out.end());
+    extra.push_back(-1);
+    for (std::size_t i = 0; i < order_c.size(); ++i) {
+        if (order_a[i] == 0 && inside[i] == 0) {
+            extra.push_back(static_cast<std::int32_t>(i));
+            extra.push_back(order_c[i]);
+        }
+    }
+    return extra;
+}
+
 Signature outcome_signature(std::span<const Cand> order_c, std::span<const int> order_a,
-                            const OrderQ& order_q, const Blocks& blocks) {
-    const auto bytes = canonical_outcome(order_c, order_a, order_q, blocks);
+                            const OrderQ& order_q, const Blocks& blocks,
+                            const std::vector<std::int32_t>& extra) {
+    const auto bytes = canonical_outcome(order_c, order_a, order_q, blocks, extra);
     const auto digest = blake2b(bytes, 16);
     Signature sig{};
     std::copy(digest.begin(), digest.end(), sig.begin());
