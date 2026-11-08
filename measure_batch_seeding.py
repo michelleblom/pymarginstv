@@ -202,8 +202,9 @@ class Count:
         queue order before anything is eliminated. A batch that reaches
         the quota at the start or after a seating is queued largest
         surplus first; a batch after an elimination is queued in
-        candidate number order. A seated candidate's ballots move on at
-        (surplus when queued) / (tally when seated).
+        candidate number order. Ballots that move pass over candidates
+        already in the queue, so a seated candidate's ballots move on at
+        (tally when queued - quota) / (tally when queued).
     """
 
     def __init__(self, ballots, ncand: int, quota: int, seats: int) -> None:
@@ -248,12 +249,16 @@ class Count:
         return batch
 
     def _move(self, c: int, factor: float) -> None:
-        """ Passes c's ballots to their next standing candidate. """
+        """
+            Passes c's ballots to their next candidate that is standing and
+            has not reached the quota (utils.next_candidate).
+        """
         for b in self.pile[c]:
             self.weight[b] *= factor
             p = self.prefs[b]
             i = self.pos[b] + 1
-            while i < len(p) and not self.standing[p[i]]:
+            while i < len(p) and (not self.standing[p[i]] or \
+                p[i] in self.surplus):
                 i += 1
             self.pos[b] = i
             if i < len(p):
