@@ -39,8 +39,13 @@ start of the run:
       (a reported loser seated, or a reported winner in IN), and impossible
       when every standing reported loser is in IN.
 
-A fully decided run R ends by seating x (bound quota - T_R(x)), or by
-seating everyone left when exactly seats-left remain. A complete outcome
+A fully decided run R ends when some set of candidates holds the quota:
+the search branches on that set (adding quota - T_R(z) for each under it,
+and T_R(y) - quota for each left out who is over it) and on which of them
+is seated first; or by seating everyone left when exactly seats-left
+remain. Ballots then pass over the candidates holding the quota, as STV
+does, and those candidates are seated next, with no eliminations, keeping
+the ballots they held when they reached it. A complete outcome
 whose winners differ from the reported ones ends the search: every node
 left has a bound at least as large, so the margin, over elections that
 follow the opening seatings, is at least that bound. Elections that do
@@ -68,6 +73,47 @@ from measure_batch_seeding import load, Count, forced_profile
 from utils import simulate_stv, compute_simple_ub, compute_weub
 from membership_proto import Node
 from membership_two_level import Level
+
+
+def expand_ranges(starts, ends, owners):
+    """
+        Every flat index in [start, end) for each pair, with the owner
+        (ballot) of each, as arrays.
+    """
+    lens = np.maximum(ends - starts, 0)
+    total = int(lens.sum())
+    if total == 0:
+        return np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64)
+    offsets = np.cumsum(lens) - lens
+    pos = np.arange(total) - np.repeat(offsets, lens) + np.repeat(starts, lens)
+    return pos, np.repeat(owners, lens)
+
+
+def prepare(nd):
+    """
+        Adds to a Node, once: where each ballot's entries end, and each
+        candidate's entries (flat indices, in ballot order).
+    """
+    nd.ends = np.append(nd.start[1:], len(nd.flat)).astype(np.int64)
+    order = np.argsort(nd.flat, kind="stable")
+    counts = np.bincount(nd.flat, minlength=nd.ncand)
+    cuts = np.cumsum(counts)[:-1]
+    nd.by_cand = np.split(order.astype(np.int64), cuts)
+    return nd
+
+
+def merged_contest(ct):
+    """
+        The node's ballots with identical remaining rankings merged (their
+        values summed). Identical rankings move together from here on, so
+        every tally is unchanged.
+    """
+    total = {}
+    for p, w in zip(ct.prefs, ct.weight):
+        total[p] = total.get(p, 0.0) + w
+    ct.prefs = list(total)
+    ct.weight = [total[p] for p in ct.prefs]
+    return ct
 
 
 def shared_lift_lb(gaps, excess=0.0, deficit=0.0):
@@ -110,7 +156,8 @@ def end_lb(gaps, own, need, excess=0.0, deficit=0.0):
     lo = 0.0
     if fits(lo):
         return 0.0
-    for _ in range(60):
+    # Bounds are reported to whole votes; stop well short of that.
+    while hi - lo > 1e-3 * max(1.0, hi):
         mid = (lo + hi) / 2
         if fits(mid):
             hi = mid
@@ -120,37 +167,192 @@ def end_lb(gaps, own, need, excess=0.0, deficit=0.0):
 
 
 class LBLevel(Level):
-    """ A run of eliminations whose checks return lower bounds. """
+    """
+        A run of eliminations whose checks return lower bounds.
+
+        hold is each ballot's holder (a flat index, or big for an
+        exhausted ballot). It is tracked rather than read off the ranking,
+        because ballots pass over candidates who already hold the quota.
+        queued is the candidates who hold the quota and wait to be seated;
+        while any do, nothing can be eliminated, and they keep exactly the
+        ballots they held when they reached the quota.
+    """
+
+    def __init__(self, nd, w, gone, seats_left, k, hold=None, \
+        queued=frozenset()):
+        self.nd, self.w, self.gone, self.seats_left, self.k = \
+            nd, w, gone, seats_left, k
+        self.order_mode, self.splus = "desc", False
+        self.queued = frozenset(queued)
+        self.hopeful = [c for c in nd.hopeful.tolist() if not gone[c]]
+        self.hold = self.holders(gone) if hold is None else hold
+        ok = self.hold < nd.big
+        self.t0 = np.bincount(nd.flat[self.hold[ok]], weights=w[ok], \
+            minlength=nd.ncand)
+        self.order = sorted(self.hopeful, key=lambda c: -self.t0[c])
+        self.tm_cache, self.tf_cache = {}, {}
+        self.checks = 0
 
     # Best-first search revisits the same IN and OUT sets in no fixed
-    # order, so keep many: a Tmax is one tally per candidate, a Tmin with
-    # its flows one table of them.
+    # order. A Tmax is one tally per candidate and is kept for many OUT
+    # sets; the per-ballot positions behind it (one per ballot) only for
+    # the most recent, from which a child's are updated rather than
+    # recomputed. The same for Tmin and its flows over IN sets.
     TM_KEEP = 20000
-    TF_KEEP = 500
+    POS_KEEP = 48
+    TF_KEEP = 48
+
+    def _start(self):
+        """
+            Per run, computed once: each ballot's holder at the run's start
+            (a flat index, or big) and whether it is still live.
+        """
+        st = self.__dict__.get("_st")
+        if st is None:
+            p0 = self.hold
+            st = (p0, p0 < self.nd.big)
+            self._st = st
+        return st
+
+    @staticmethod
+    def _lru_put(store, key, value, keep):
+        store[key] = value
+        while len(store) > keep:
+            store.pop(next(iter(store)))
 
     def tmax(self, OUT):
+        """
+            Tmax per candidate: for d in OUT the value of the ballots whose
+            first OUT candidate is d; for d outside OUT the value of the
+            ballots ranking d above every OUT candidate. Updated from the
+            positions of OUT less one candidate when they are kept.
+        """
         key = frozenset(OUT)
-        store = self.__dict__.setdefault("_tm", {})
-        t = store.get(key)
-        if t is None:
-            self.tm_cache = {}            # the parent's own small cache
-            t = Level.tmax(self, OUT)
-            store[key] = t
-            while len(store) > self.TM_KEEP:
-                store.pop(next(iter(store)))
+        tms = self.__dict__.setdefault("_tm", {})
+        t = tms.get(key)
+        if t is not None:
+            return t
+        poss = self.__dict__.setdefault("_pos", {})
+        nd = self.nd
+        _, live = self._start()
+        for c in key:
+            parent = key - {c}
+            if parent in poss and parent in tms:
+                p, t = self._add_out(poss[parent], tms[parent], c, live)
+                break
+        else:
+            out = np.zeros(nd.ncand, dtype=bool)
+            out[list(key)] = True
+            p = nd.first_pos(out)
+            lim = np.where(live, np.where(p < nd.big, p, nd.big), 0)
+            before = nd.idx < lim[nd.seg]
+            t = np.bincount(nd.flat[before], weights=self.w[nd.seg[before]], \
+                minlength=nd.ncand)
+            ok = (p < nd.big) & live
+            t += np.bincount(nd.flat[p[ok]], weights=self.w[ok], \
+                minlength=nd.ncand)
+        self._lru_put(tms, key, t, self.TM_KEEP)
+        self._lru_put(poss, key, p, self.POS_KEEP)
         return t
 
+    def _add_out(self, p_parent, t_parent, c, live):
+        """
+            Positions and Tmax once c joins OUT. Only live ballots ranking
+            c ahead of their first OUT candidate change: the candidates
+            between c and that candidate lose the ballot, that candidate
+            stops being its first OUT, and c, counted before, counts now as
+            its first OUT.
+        """
+        nd = self.nd
+        ent = nd.by_cand[c]
+        b = nd.seg[ent]
+        sel = live[b] & (ent < p_parent[b])
+        ent, b = ent[sel], b[sel]
+        old = p_parent[b]
+        end = np.where(old < nd.big, old, nd.ends[b])
+        pos, bb = expand_ranges(ent + 1, end, b)
+        t = t_parent.copy()
+        if len(pos):
+            t -= np.bincount(nd.flat[pos], weights=self.w[bb], \
+                minlength=nd.ncand)
+        had = old < nd.big
+        if had.any():
+            t -= np.bincount(nd.flat[old[had]], weights=self.w[b[had]], \
+                minlength=nd.ncand)
+        p = p_parent.copy()
+        p[b] = ent
+        return p, t
+
     def tmin_flow(self, IN):
+        """
+            Tmin: tallies with IN gone. F[l, x]: value of the ballots x
+            holds then that rank l above x since the run's start. Updated
+            from IN less one candidate when kept.
+        """
         key = frozenset(IN)
-        store = self.__dict__.setdefault("_tf", {})
-        v = store.get(key)
-        if v is None:
-            self.tf_cache = {}
-            v = Level.tmin_flow(self, IN)
-            store[key] = v
-            while len(store) > self.TF_KEEP:
-                store.pop(next(iter(store)))
-        return v
+        tfs = self.__dict__.setdefault("_tf", {})
+        v = tfs.get(key)
+        if v is not None:
+            return v[1], v[2]
+        nd = self.nd
+        p0, live = self._start()
+        gone = self.mask(key)
+        for c in key:
+            parent = key - {c}
+            if parent in tfs:
+                h, tmin, F = self._add_in(*tfs[parent], c, gone, p0)
+                break
+        else:
+            h = self.holders(gone)
+            ok = h < nd.big
+            holder = np.where(ok, nd.flat[np.where(ok, h, 0)], -1)
+            tmin = np.bincount(holder[ok], weights=self.w[ok], \
+                minlength=nd.ncand)
+            start = np.where(p0 < nd.big, p0, nd.big)
+            before = (nd.idx >= start[nd.seg]) & \
+                (nd.idx < np.where(ok, h, 0)[nd.seg])
+            x = holder[nd.seg[before]]
+            pair = nd.flat[before].astype(np.int64) * nd.ncand + x
+            F = np.bincount(pair, weights=self.w[nd.seg[before]], \
+                minlength=nd.ncand * nd.ncand).reshape(nd.ncand, nd.ncand)
+        self._lru_put(tfs, key, (h, tmin, F), self.TF_KEEP)
+        return tmin, F
+
+    def _add_in(self, h_parent, tmin_parent, F_parent, c, gone, p0):
+        """
+            Holders, Tmin and F once c joins IN. Only the ballots c holds
+            move, to their next candidate not gone, and that candidate's
+            column of F gains their whole span since the run's start.
+        """
+        nd = self.nd
+        ok = h_parent < nd.big
+        moved = np.nonzero(ok)[0]
+        moved = moved[nd.flat[h_parent[moved]] == c]
+        pos = h_parent[moved] + 1
+        end = nd.ends[moved]
+        active = pos < end
+        while active.any():
+            act = np.nonzero(active)[0]
+            step = gone[nd.flat[pos[act]]]
+            pos[act[step]] += 1
+            active[act[~step]] = False
+            active &= pos < end
+        new_h = np.where(pos < end, pos, nd.big)
+        h = h_parent.copy()
+        h[moved] = new_h
+        tmin = tmin_parent.copy()
+        tmin[c] = 0.0
+        has = new_h < nd.big
+        x = nd.flat[new_h[has]]
+        tmin += np.bincount(x, weights=self.w[moved[has]], minlength=nd.ncand)
+        F = F_parent.copy()
+        F[:, c] = 0.0                     # c holds nothing now
+        span, bb = expand_ranges(p0[moved[has]], new_h[has], moved[has])
+        if len(span):
+            pair = nd.flat[span].astype(np.int64) * nd.ncand + nd.flat[h[bb]]
+            F += np.bincount(pair, weights=self.w[bb], \
+                minlength=nd.ncand * nd.ncand).reshape(nd.ncand, nd.ncand)
+        return h, tmin, F
 
     def disp_costs(self, reported):
         """
@@ -177,7 +379,7 @@ class LBLevel(Level):
         nd = self.nd
         standing = np.zeros(nd.ncand, dtype=bool)
         standing[self.hopeful] = True
-        live = self.holders(self.gone) < nd.big
+        _, live = self._start()
         keep = standing[nd.flat] & live[nd.seg]
         flat, seg, idx = nd.flat[keep], nd.seg[keep], nd.idx[keep]
         w = self.w[seg]
@@ -275,25 +477,60 @@ class LBLevel(Level):
                 for x in self.hopeful if x not in IN))
         return best
 
-    def after_seating(self, R, x, tr):
-        """ The next run, once R is gone and x is seated. """
+    def after_run(self, R):
+        """
+            Tallies and holders once the run R is gone. Eliminations happen
+            only when nobody holds the quota, so then every ballot sits with
+            its first candidate still standing.
+        """
+        if not R:
+            return self.t0, self.hold
+        assert not self.queued
+        h = self.holders(self.mask(R))
+        ok = h < self.nd.big
+        t = np.bincount(self.nd.flat[h[ok]], weights=self.w[ok], \
+            minlength=self.nd.ncand)
+        return t, h
+
+    def after_seating(self, R, x, H):
+        """
+            The next run, once R is gone and x is seated while the
+            candidates in H hold the quota (x among them). x's ballots move
+            on at its transfer value to their next candidate that is
+            neither gone nor holding the quota (utils.next_candidate); the
+            others in H keep their ballots and wait to be seated.
+        """
         nd = self.nd
+        tr, h = self.after_run(R)
         gone = self.mask(R)
-        p = self.holders(gone)
-        ok = p < nd.big
-        held = np.zeros(len(self.w), dtype=bool)
-        held[ok] = nd.flat[p[ok]] == x
+        gone[x] = True
+        skip = gone.copy()
+        skip[list(H)] = True
+        ok = h < nd.big
+        moved = np.nonzero(ok)[0]
+        moved = moved[nd.flat[h[moved]] == x]
         tv = max(0.0, tr[x] - nd.quota) / tr[x] if tr[x] > 0 else 0.0
         w = self.w.copy()
-        w[held] *= tv
-        gone[x] = True
-        return LBLevel(nd, w, gone, self.seats_left - 1, self.k)
+        w[moved] *= tv
+        pos = h[moved] + 1
+        end = nd.ends[moved]
+        active = pos < end
+        while active.any():
+            act = np.nonzero(active)[0]
+            step = skip[nd.flat[pos[act]]]
+            pos[act[step]] += 1
+            active[act[~step]] = False
+            active &= pos < end
+        hold = h.copy()
+        hold[moved] = np.where(pos < end, pos, nd.big)
+        return LBLevel(nd, w, gone, self.seats_left - 1, self.k, hold, \
+            frozenset(H) - {x})
 
 
 class Levels:
     """
-        Runs reached so far, keyed by the path of (run, seated candidate)
-        pairs from the opening node. Building one costs ballot passes and
+        Runs reached so far, keyed by the path of (run, seated candidate,
+        quota holders) triples from the opening node. Building one costs ballot passes and
         a copy of the ballot values, so only the most recent are kept and
         the rest are rebuilt from their parent when needed.
     """
@@ -307,9 +544,8 @@ class Levels:
         if key in self.cache:
             return self.cache[key]
         parent = self.get(key[:-1])
-        R, x = key[-1]
-        tr = parent.tally(parent.mask(R))
-        lvl = parent.after_seating(set(R), x, tr)
+        R, x, H = key[-1]
+        lvl = parent.after_seating(set(R), x, H)
         self.cache[key] = lvl
         self.order.append(key)
         while len(self.cache) > self.keep:
@@ -347,14 +583,19 @@ def main():
     ct = Count(ballots, len(cands), q, a.seats)
     for _ in range(v):
         ct.step()
-    nd = Node(ct.contest(0))
+    base = merged_contest(ct.contest(0))
+    nd = prepare(Node(base))
     opening = set(oc[:v])
     reported = set(w)
     print(f"{a.contest}: UB {ub}, quota {q}, opening {v} seatings "
           f"(cost to leave it {xp[v]:.0f}), {len(nd.hopeful)} standing, "
-          f"{nd.seats_left} seats left; sumq {a.sumq}, sumnq {a.sumnq}, "
+          f"{nd.seats_left} seats left, {len(nd.start)} distinct remaining "
+          f"rankings; sumq {a.sumq}, sumnq {a.sumnq}, "
           f"elimnq {a.elimnq}, displacement {not a.nodlb}", flush=True)
 
+    if ct.queue:
+        sys.exit(f"candidates {ct.queue} hold the quota at the starting "
+                 "node; start after they are seated")
     root = LBLevel(nd, nd.w, np.zeros(nd.ncand, dtype=bool), \
         nd.seats_left, math.inf)
     levels = Levels(root)
@@ -398,7 +639,7 @@ def main():
         lvl = levels.get(key)
         # A reported loser seated on this path has changed the outcome.
         changed = any(x not in reported for x in seated)
-        if i < len(lvl.order):
+        if i != "end" and i < len(lvl.order):
             c = lvl.order[i]
             for child_in, child_out in ((IN | {c}, OUT), (IN, OUT | {c})):
                 b = max(bound, lvl.lb(child_in, child_out, bound, deficit, a))
@@ -407,25 +648,40 @@ def main():
                 push(b, key, child_in, child_out, i + 1, seated, deficit)
             continue
 
-        # The run is decided: end it by seating someone.
+        # The run is decided (i == "end": empty, as someone waits to be
+        # seated). Branch on who holds the quota now: those already
+        # waiting, plus any set N of others. Each one in N under the quota
+        # needs additions; each over it and left out needs removals. Then
+        # seat any one of them.
+        tr, _ = lvl.after_run(IN)
         left = [c for c in lvl.hopeful if c not in IN]
-        tr = lvl.tally(lvl.mask(IN))
+        queued = lvl.queued
         if len(left) == lvl.seats_left:
             winners = opening | set(seated) | set(left)
             if winners != reported:
                 push(bound, key, IN, OUT, "leaf", seated, deficit)
-        for x in left:
-            # Lifting x to the quota takes additions. -sumq: they add to the
-            # earlier winners' shortfalls, which the additions also cover.
-            short = max(0.0, q - tr[x])
-            nxt = deficit + short if a.sumq else 0.0
-            b = max(bound, short, nxt)
-            if lvl.seats_left == 1:
-                if opening | set(seated) | {x} != reported:
-                    push(b, key, IN, OUT, "leaf", seated + (x,), nxt)
-            else:
-                push(b, key + ((frozenset(IN), x),), frozenset(), \
-                    frozenset(), 0, seated + (x,), nxt)
+        over = [y for y in left if y not in queued and tr[y] >= q]
+        elig = [z for z in left if z not in queued and q - tr[z] < ub]
+        room = lvl.seats_left - len(queued)
+        for size in range(min(room, len(elig)) + 1):
+            for N in itertools.combinations(elig, size):
+                H = queued | frozenset(N)
+                if not H:
+                    continue
+                lift = sum(max(0.0, q - tr[z]) for z in N)
+                outs = [tr[y] - q for y in over if y not in N]
+                lower = (sum(outs) if a.sumnq else max(outs)) if outs else 0.0
+                nxt = deficit + lift if a.sumq else 0.0
+                b = max(bound, lift, nxt, lower)
+                for x in H:
+                    now_seated = seated + (x,)
+                    if lvl.seats_left == 1:
+                        if opening | set(now_seated) != reported:
+                            push(b, key, IN, OUT, "leaf", now_seated, nxt)
+                        continue
+                    push(b, key + ((frozenset(IN), x, H),), frozenset(), \
+                        frozenset(), "end" if len(H) > 1 else 0, \
+                        now_seated, nxt)
 
     elapsed = time.time() - t0
     if result is not None:
