@@ -60,7 +60,7 @@ double end_lb(const std::vector<double>& gaps, double own, double need, double e
     if (fits(lo)) {
         return 0.0;
     }
-    while (hi - lo > 1e-3 * std::max(1.0, hi)) {
+    while (hi - lo > 1e-6 * std::max(1.0, hi)) {
         const auto mid = (lo + hi) / 2;
         if (fits(mid)) {
             hi = mid;
@@ -68,7 +68,8 @@ double end_lb(const std::vector<double>& gaps, double own, double need, double e
             lo = mid;
         }
     }
-    return hi;
+    // lo does not fit, so it is a lower bound; hi could overshoot.
+    return lo;
 }
 
 } // namespace

@@ -101,13 +101,14 @@ def end_lb(gaps: Sequence[float], own: float, need: float, \
     lo = 0.0
     if fits(lo):
         return 0.0
-    while hi - lo > 1e-3 * max(1.0, hi):
+    while hi - lo > 1e-6 * max(1.0, hi):
         mid = (lo + hi) / 2
         if fits(mid):
             hi = mid
         else:
             lo = mid
-    return hi
+    # lo does not fit, so it is a lower bound; hi could overshoot.
+    return lo
 
 
 class RunState:

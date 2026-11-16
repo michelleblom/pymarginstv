@@ -414,13 +414,17 @@ ChildResult eval_open_run(const SearchInputs& in, const Expansion& ex, const Chi
     }
     double dlb = 0.0;
     if (o.dlb || o.dlbc) {
+        // The outcome has changed once a reported loser is seated or a
+        // reported winner is eliminated: the bound is then 0.
         bool changed = false;
         for (std::size_t i = 0; i < rs; ++i) {
-            if (spec.order_a[i] == 1 && !in.winner_set.test(spec.order_c[i])) {
+            if ((spec.order_a[i] == 1) != in.winner_set.test(spec.order_c[i])) {
                 changed = true;
             }
         }
-        dlb = st->dlb(in_set, in.winner_set, changed);
+        if (!changed) {
+            dlb = st->dlb(in_set, in.winner_set, changed);
+        }
     }
 
     ChildResult res;
@@ -757,7 +761,11 @@ Expansion generate_children(const SearchInputs& in, const TreeNode& node, const 
         if (const auto split = weak_seed_split(in.bounds, forder_c, forder_a, forder_q, running_ub,
                                                in.orig_ub, o.seedf, o.seedmaxchildren)) {
             add_block_children(in, node, *split, forder_c, forder_a, fwinners, running_ub, ex);
-            return ex;
+            // With no block children nothing would carry the split's budget
+            // to the search, so the node is expanded normally instead.
+            if (!ex.children.empty()) {
+                return ex;
+            }
         }
     }
 

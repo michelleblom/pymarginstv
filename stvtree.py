@@ -3067,9 +3067,12 @@ def eval_open_run(parent_dist: float, eqlbctx: EqlbCtx, \
             node_order_a[:rs], node_order_q, eqlbctx))
     dlb = 0.0
     if args.dlb or args.dlbc:
-        changed = any(node_order_a[i] == 1 and node_order_c[i] not in winner_set \
+        # The outcome has changed once a reported loser is seated or a
+        # reported winner is eliminated: the bound is then 0.
+        changed = any((node_order_a[i] == 1) != (node_order_c[i] in winner_set) \
             for i in range(rs))
-        dlb = st.dlb(IN, winner_set, changed)
+        if not changed:
+            dlb = st.dlb(IN, winner_set, changed)
     # Changed ballots are whole: a bound of 3.2 means at least 4. The parts
     # are reported the same way.
     def whole(x: float) -> float:
@@ -3549,9 +3552,13 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
                 eqlbctx.gone_set, eqlbctx.transfer, eqlbctx.winners, ncands)
 
     if split is not None:
-        return block_children(split, fdist, eqlbctx, disp_cache, forder_c, \
-            forder_a, forder_q, frem, fwinners, fblocks, running_ub, \
+        block_specs = block_children(split, fdist, eqlbctx, disp_cache, \
+            forder_c, forder_a, forder_q, frem, fwinners, fblocks, running_ub, \
             elim_tallies)
+        # With no block children nothing would carry the split's budget
+        # to the search, so the node is expanded normally instead.
+        if block_specs:
+            return block_specs
 
     # Add a candidate to the end of the outcome prefix represented
     # by the selected node. That candidate can either be seated or
