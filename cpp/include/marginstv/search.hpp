@@ -65,6 +65,8 @@ struct ChildSpec {
     std::vector<Cand> out;
     bool need_in = false;
     bool open_run = false;
+    // A leaf made by refining a block: see refine_expansion.
+    bool refined = false;
 };
 
 struct ChildResult {

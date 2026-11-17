@@ -245,7 +245,11 @@ void add_block_children(const SearchInputs& in, const TreeNode& node, const Weak
                 spec.isleaf = isleaf;
                 spec.running_ub = running_ub;
                 spec.blocks = node.blocks;
-                spec.blocks.emplace_back(start, start + static_cast<int>(block.size()));
+                // A block of one is an ordered elimination, which the round
+                // bound handles exactly.
+                if (block.size() > 1) {
+                    spec.blocks.emplace_back(start, start + static_cast<int>(block.size()));
+                }
                 spec.cap = split.k;
                 ex.children.push_back(std::move(spec));
             }
@@ -503,6 +507,7 @@ Expansion refine_expansion(const SearchInputs& in, const TreeNode& node,
         spec.isleaf = true;
         spec.running_ub = running_ub;
         spec.blocks = std::move(blocks);
+        spec.refined = true;
         ex.children.push_back(std::move(spec));
     }
     return ex;
@@ -729,6 +734,15 @@ Expansion generate_children(const SearchInputs& in, const TreeNode& node, const 
         return membership_expansion(in, node, forder_c, forder_a, fwinners, running_ub);
     }
 
+    // -weakseed: a complete outcome on the frontier is one to refine.
+    if (o.weakseed && membership_complete(in, forder_c, forder_a)) {
+        CandSet winners(n);
+        for (const auto w : fwinners.order()) {
+            winners.set(w);
+        }
+        return refine_expansion(in, node, forder_c, forder_a, winners, running_ub);
+    }
+
     Expansion ex;
     ex.eqlbctx = node.eqlbctx;
     ex.disp_cache = node.disp_cache;
@@ -906,10 +920,11 @@ ChildResult eval_child(const SearchInputs& in, const Expansion& ex, const ChildS
         res.dlb = PyNum::integer(0);
     }
 
-    // -membership: a leaf's ordered eliminations come from refining blocks, so
-    // the prefixes just before them were never search nodes. The displacement
-    // bound holds at each of them, as at any prefix.
-    if (o.membership && spec.isleaf && o.useqprefix && (o.dlb || o.dlbc)) {
+    // A -membership leaf, or a refined leaf: its ordered eliminations come
+    // from refining blocks, so the prefixes just before them were never
+    // search nodes. The displacement bound holds at each of them, as at any
+    // prefix.
+    if ((o.membership || spec.refined) && spec.isleaf && o.useqprefix && (o.dlb || o.dlbc)) {
         auto padfrom = static_cast<int>(spec.order_a.size());
         if (padfrom == n) {
             while (padfrom > 0 && spec.order_a[static_cast<std::size_t>(padfrom - 1)] == 0) {
@@ -1142,7 +1157,7 @@ bool Search::handle_child(ChildResult& c) {
         return false;
     }
 
-    if (c.isleaf && o_.membership && refinable(c.blocks)) {
+    if (c.isleaf && (o_.membership || o_.weakseed) && refinable(c.blocks)) {
         // A complete outcome bounded only by its blocks goes to the frontier
         // and is refined when it reaches the top.
         log_.line("        LEAF TO REFINE");

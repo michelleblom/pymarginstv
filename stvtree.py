@@ -2369,6 +2369,7 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
     running_lb: float = 0
 
     membership = getattr(args, 'membership', False)
+    weakseed = getattr(args, 'weakseed', False)
 
     # Smallest budget used by a -weakseed block expansion so far. A block
     # expansion with budget k covers only elections needing fewer than k
@@ -2642,15 +2643,16 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                             print("        PRUNED!", file=log, flush=True)
                         continue
 
-                    if isleaf and membership and refinable(blocks):
-                        # -membership: a complete outcome bounded only by its
-                        # blocks. It goes to the frontier, and is refined
-                        # when it reaches the top rather than taken as final.
+                    if isleaf and (membership or weakseed) and refinable(blocks):
+                        # A complete outcome bounded only by its blocks. It
+                        # goes to the frontier, and is refined when it
+                        # reaches the top rather than taken as final. Its
+                        # signature keeps the order of its eliminations.
                         if log != None:
                             print("        LEAF TO REFINE", file=log, flush=True)
                         newn = TreeNode(node_order_c, node_order_a, node_order_q, \
                                         eqlbctx, disp_cache, dist, dist_ub, blocks, \
-                                        out, need_in, membership)
+                                        out, need_in, True)
                         idx = frontier.insert(newn, lse=args.lse, log=log)
                         if log is not None and idx is None:
                             print("        SUBSUMED", file=log, flush=True)
@@ -2937,7 +2939,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, \
     isleaf: bool, running_ub: float, \
     precomputed_elim_tallies: Optional[Any] = None, blocks: Blocks = (), \
     cap: float = math.inf, out: Tuple[int, ...] = (), need_in: bool = False, \
-    open_run: bool = False) -> ChildResult:
+    open_run: bool = False, refined: bool = False) -> ChildResult:
     """
         Evaluates one child (see _eval_child, or eval_open_run for a
         -membership child whose run is still open) and adds its blocks,
@@ -2950,7 +2952,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, \
     else:
         res = _eval_child(parent_dist, eqlbctx, disp_cache, node_order_c, \
             node_order_a, node_order_q, node_winners, rem, isleaf, running_ub, \
-            precomputed_elim_tallies, tuple(blocks))
+            precomputed_elim_tallies, tuple(blocks), refined)
     return res + (tuple(blocks), cap, tuple(out), need_in)
 
 
@@ -3088,7 +3090,7 @@ def _eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, nod
                node_order_a: list[int], node_order_q: dict[int, QRange], \
                node_winners: set[int], rem: list[int], isleaf: bool, \
                running_ub: float, precomputed_elim_tallies: Optional[Any] = None, \
-               blocks: Blocks = ()) -> tuple:
+               blocks: Blocks = (), refined: bool = False) -> tuple:
     # precomputed_elim_tallies is whatever generate_children computed once for
     # this node under -prec_et, and the two prefix variants carry different
     # payloads: a single list of round tallies for the quota-in-prefix bound, a
@@ -3161,11 +3163,12 @@ def _eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, nod
         _disp_cache = disp_cache
         disp_lowerbound = 0
 
-    # -membership: a leaf's ordered eliminations come from refining blocks,
-    # so the prefixes just before them were never search nodes. The
-    # displacement bound holds at each of them (the rest of the block gone,
-    # in any order), as it does at any prefix.
-    if getattr(args, 'membership', False) and isleaf and args.useqprefix and \
+    # A -membership leaf, or a refined leaf: its ordered eliminations come
+    # from refining blocks, so the prefixes just before them were never
+    # search nodes. The displacement bound holds at each of them (the rest
+    # of the block gone, in any order), as it does at any prefix.
+    if (getattr(args, 'membership', False) or refined) and isleaf and \
+        args.useqprefix and \
         (args.dlb or args.dlbc) and transfer is not None:
         padfrom = padding_start(node_order_a, ncands)
         inside = {i for s_, e_ in blocks for i in range(s_, e_)}
@@ -3507,6 +3510,12 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
         return membership_children(fdist, eqlbctx, forder_c, forder_a, \
             forder_q, fwinners, fblocks, fout, fneed_in, running_ub)
 
+    # -weakseed: a complete outcome on the frontier is one to refine.
+    if getattr(args, 'weakseed', False) and \
+        membership_complete(forder_c, forder_a):
+        return refine_children(fdist, forder_c, forder_a, forder_q, fwinners, \
+            fblocks, running_ub)
+
     # -weakseed: a split to expand this node with, as blocks of eliminations.
     split = weak_seed_split(forder_c, forder_a, forder_q, running_ub) \
         if getattr(args, 'weakseed', False) else None
@@ -3645,7 +3654,7 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
     return children
 
 def membership_complete(order_c: Sequence[int], order_a: Sequence[int]) -> bool:
-    """ -membership: the prefix decides every seat (a leaf). """
+    """ The prefix decides every seat (a leaf). """
     assert _CTX is not None
     ncands, args = _CTX[4], _CTX[5]
     seated = sum(order_a)
@@ -3670,8 +3679,8 @@ def refine_children(fdist: float, forder_c: list[int], forder_a: list[int], \
     forder_q: dict[int, QRange], fwinners: set[int], fblocks: Blocks, \
     running_ub: float) -> list:
     """
-        -membership: a complete outcome whose block bounds were all it had.
-        Its last block of two or more candidates is split by which of them
+        A complete outcome (-membership or -weakseed) whose block bounds
+        were all it had. Its last block of two or more candidates is split by which of them
         was eliminated last: that one becomes an ordered elimination at the
         block's end, the rest stay a block (a block of one is an ordered
         elimination). Each child is bounded by the elimination-quota walk
@@ -3693,7 +3702,7 @@ def refine_children(fdist: float, forder_c: list[int], forder_a: list[int], \
         blocks = tuple(sorted(blocks))
         children.append((fdist, blank_ctx, blank_disp_cache(ncands), order_c, \
             list(forder_a), forder_q, set(fwinners), rem, True, running_ub, \
-            None, blocks, math.inf, (), False, False))
+            None, blocks, math.inf, (), False, False, True))
     return children
 
 
@@ -3833,7 +3842,10 @@ def block_children(split: WeakSplit, fdist: float, eqlbctx: EqlbCtx, \
             if isleaf and winner_set - fwinners == set(rem):
                 continue    # the reported outcome
 
-            blocks = fblocks + ((start, start + len(block)),)
+            # A block of one is an ordered elimination, which the round
+            # bound handles exactly.
+            blocks = fblocks + ((start, start + len(block)),) \
+                if len(block) > 1 else fblocks
             children.append((fdist, eqlbctx, disp_cache, forder_c + block, \
                 forder_a + [0] * len(block), forder_q, set(fwinners), rem, \
                 isleaf, running_ub, elim_tallies, blocks, split.k))
