@@ -613,6 +613,25 @@ DiveSeq dive_continue(const SearchInputs& in, const std::vector<Cand>& pc,
 
 } // namespace
 
+namespace {
+
+// A leaf's order, actions and quota rounds, for spotting repeats.
+std::vector<int> dive_key(const DiveLeaf& leaf) {
+    std::vector<int> key(leaf.order_c.begin(), leaf.order_c.end());
+    key.push_back(-1);
+    key.insert(key.end(), leaf.order_a.begin(), leaf.order_a.end());
+    key.push_back(-1);
+    auto q = leaf.order_q;
+    std::sort(q.begin(), q.end(), [](const QEntry& a, const QEntry& b) { return a.c < b.c; });
+    for (const auto& e : q) {
+        key.push_back(e.c);
+        key.push_back(e.lo);
+    }
+    return key;
+}
+
+} // namespace
+
 std::vector<DiveLeaf> dive_leaves(const SearchInputs& in) {
     const auto n = in.bounds.ncands;
     const auto& oc = in.full_order_c;
@@ -726,17 +745,7 @@ std::vector<DiveLeaf> dive_leaves(const SearchInputs& in) {
     std::vector<DiveLeaf> unique;
     std::set<std::vector<int>> seen;
     for (auto& leaf : leaves) {
-        std::vector<int> key(leaf.order_c.begin(), leaf.order_c.end());
-        key.push_back(-1);
-        key.insert(key.end(), leaf.order_a.begin(), leaf.order_a.end());
-        key.push_back(-1);
-        auto q = leaf.order_q;
-        std::sort(q.begin(), q.end(), [](const QEntry& a, const QEntry& b) { return a.c < b.c; });
-        for (const auto& e : q) {
-            key.push_back(e.c);
-            key.push_back(e.lo);
-        }
-        if (seen.insert(key).second) {
+        if (seen.insert(dive_key(leaf)).second) {
             unique.push_back(std::move(leaf));
         }
     }
@@ -747,8 +756,11 @@ namespace {
 
 // -dive: evaluate the leaves near the reported last seat, and start from the
 // cheapest as the upper bound.
-// -dive: most improving steps taken from the cheapest dive leaf.
+// -dive: most improving steps taken from the cheapest dive leaf; how many of
+// a leaf's last rounds a step may change; how far an elimination may move.
 constexpr int kDiveSteps = 50;
+constexpr int kDiveWindow = 14;
+constexpr int kDiveReach = 4;
 
 // How many of a leaf's rounds the search decides one by one. A leaf that
 // fills the last seat is padded with the rest as eliminations in the same
@@ -765,8 +777,9 @@ int dive_size(const DiveLeaf& leaf) {
     return size;
 }
 
-// The leaves one step from a leaf (dive_moves in stvtree.py).
-std::vector<DiveLeaf> dive_moves(const SearchInputs& in, const DiveLeaf& leaf) {
+// The leaves one step from a leaf, changing only its rounds from start on
+// (dive_moves in stvtree.py).
+std::vector<DiveLeaf> dive_moves(const SearchInputs& in, const DiveLeaf& leaf, int start) {
     const auto n = in.bounds.ncands;
     const auto size = dive_size(leaf);
     const std::vector<Cand> seq_c(leaf.order_c.begin(), leaf.order_c.begin() + size);
@@ -776,64 +789,79 @@ std::vector<DiveLeaf> dive_moves(const SearchInputs& in, const DiveLeaf& leaf) {
         want[static_cast<std::size_t>(e.c)] = e.lo;
     }
     std::vector<DiveLeaf> moves;
-    for (int i = 0; i < size; ++i) {
+    std::set<std::vector<int>> seen;
+    const auto add = [&](const std::vector<Cand>& c, const std::vector<int>& a,
+                         const std::vector<int>& q) {
+        auto moved = dive_leaf(in, c, a, q);
+        if (!moved) {
+            return;
+        }
+        if (seen.insert(dive_key(*moved)).second) {
+            moves.push_back(std::move(*moved));
+        }
+    };
+    for (int i = start; i < size; ++i) {
         const auto iu = static_cast<std::size_t>(i);
-        if (seq_a[iu] != 1) {
+        if (seq_a[iu] == 1) {
+            for (const auto d : {-1, 1}) {
+                const auto r = want[static_cast<std::size_t>(seq_c[iu])] + d;
+                const auto lo = i > 0 && seq_a[iu - 1] == 1
+                                    ? want[static_cast<std::size_t>(seq_c[iu - 1])]
+                                    : i;
+                if (lo <= r && r <= i) {
+                    auto q = want;
+                    q[static_cast<std::size_t>(seq_c[iu])] = r;
+                    add(seq_c, seq_a, q);
+                }
+            }
             continue;
         }
-        for (const auto j : {i - 1, i + 1}) {
-            if (j < 0 || j >= size || seq_a[static_cast<std::size_t>(j)] != 0) {
+        for (int d = -kDiveReach; d <= kDiveReach; ++d) {
+            const auto j = i + d;
+            if (d == 0 || j < start || j >= size) {
                 continue;
             }
             auto c = seq_c;
             auto a = seq_a;
-            std::swap(c[iu], c[static_cast<std::size_t>(j)]);
-            std::swap(a[iu], a[static_cast<std::size_t>(j)]);
-            if (auto moved = dive_leaf(in, c, a, want)) {
-                moves.push_back(std::move(*moved));
-            }
-        }
-        for (const auto d : {-1, 1}) {
-            const auto r = want[static_cast<std::size_t>(seq_c[iu])] + d;
-            const auto lo = i > 0 && seq_a[iu - 1] == 1
-                                ? want[static_cast<std::size_t>(seq_c[iu - 1])]
-                                : i;
-            if (r < lo || r > i) {
-                continue;
-            }
-            auto q = want;
-            q[static_cast<std::size_t>(seq_c[iu])] = r;
-            if (auto moved = dive_leaf(in, seq_c, seq_a, q)) {
-                moves.push_back(std::move(*moved));
-            }
-        }
-    }
-    // Neighbouring eliminations swap.
-    for (int i = 0; i + 1 < size; ++i) {
-        const auto iu = static_cast<std::size_t>(i);
-        if (seq_a[iu] != 0 || seq_a[iu + 1] != 0) {
-            continue;
-        }
-        auto c = seq_c;
-        std::swap(c[iu], c[iu + 1]);
-        if (auto moved = dive_leaf(in, c, seq_a, want)) {
-            moves.push_back(std::move(*moved));
+            const auto x = c[iu];
+            const auto y = a[iu];
+            c.erase(c.begin() + i);
+            a.erase(a.begin() + i);
+            c.insert(c.begin() + j, x);
+            a.insert(a.begin() + j, y);
+            add(c, a, want);
         }
     }
     return moves;
 }
 
+// A leaf's walk evaluated up to some prefix (DiveState in stvtree.py).
+struct DiveState {
+    int m = 0;
+    EqlbCtx ctx;
+    DispCache disp;
+    PyNum dist;
+    ChildResult res;
+};
+
 // A leaf's bound as the search would give it on reaching the leaf: each
 // prefix on the way is evaluated as a child of the one before, with the same
 // shared work generate_children does. Stops at the first prefix whose bound
-// reaches running_ub (dive_value in stvtree.py).
-ChildResult dive_value(const SearchInputs& in, const DiveLeaf& leaf, const PyNum& running_ub) {
+// reaches running_ub. start resumes from a prefix already evaluated; with
+// stop, the walk ends at that prefix and stores its state in *at
+// (dive_walk in stvtree.py).
+ChildResult dive_walk(const SearchInputs& in, const DiveLeaf& leaf, const PyNum& running_ub,
+                      const DiveState* start = nullptr, int stop = -1,
+                      std::optional<DiveState>* at = nullptr) {
     const auto& o = *in.options;
     const auto n = in.bounds.ncands;
     const auto& oc = leaf.order_c;
     const auto& oa = leaf.order_a;
-
     const auto size = dive_size(leaf);
+    // A start at or past the leaf's own end does not apply to it.
+    if (start != nullptr && start->m >= size) {
+        start = nullptr;
+    }
 
     const auto prefix = [&](int m, bool isleaf) {
         ChildSpec s;
@@ -864,25 +892,42 @@ ChildResult dive_value(const SearchInputs& in, const DiveLeaf& leaf, const PyNum
         return s;
     };
 
-    auto first = prefix(1, false);
-    auto init = eval_child_initial(in, first.order_c, first.order_a, first.order_q, first.winners,
-                                   first.rem, running_ub);
+    int m0 = 1;
     ChildResult res;
-    res.isleaf = false;
-    res.lb = init.lb;
-    res.dlb = init.dlb;
-    res.eqlb = init.eqlb;
-    res.dist = init.dist;
-    res.dist_ub = init.dist_ub;
-    res.solved = init.solved;
-    if (size == 1 || !res.dist || *res.dist >= running_ub) {
+    EqlbCtx ctx;
+    DispCache disp;
+    PyNum dist;
+    ChildSpec parent;
+    if (start == nullptr) {
+        parent = prefix(1, false);
+        auto init = eval_child_initial(in, parent.order_c, parent.order_a, parent.order_q,
+                                       parent.winners, parent.rem, running_ub);
+        res.lb = init.lb;
+        res.dlb = init.dlb;
+        res.eqlb = init.eqlb;
+        res.dist = init.dist;
+        res.dist_ub = init.dist_ub;
+        res.solved = init.solved;
+        if (size == 1 || !res.dist || *res.dist >= running_ub) {
+            return res;
+        }
+        ctx = std::move(init.eqlbctx);
+        disp = std::move(init.disp_cache);
+        dist = *res.dist;
+    } else {
+        m0 = start->m;
+        ctx = start->ctx;
+        disp = start->disp;
+        dist = start->dist;
+        res = start->res;
+        parent = prefix(m0, false);
+    }
+    if (stop == m0 && at != nullptr) {
+        *at = DiveState{m0, ctx, disp, dist, res};
         return res;
     }
-    auto ctx = std::move(init.eqlbctx);
-    auto disp = std::move(init.disp_cache);
-    auto parent = std::move(first);
 
-    for (int m = 2; m <= size; ++m) {
+    for (int m = m0 + 1; m <= size; ++m) {
         Expansion ex;
         ex.eqlbctx = ctx;
         ex.disp_cache = o.dlbc ? update_disp_cache_q_prefix(disp, in.bounds, parent.order_c,
@@ -904,16 +949,26 @@ ChildResult dive_value(const SearchInputs& in, const DiveLeaf& leaf, const PyNum
         } else {
             child = prefix(m, false);
         }
-        child.parent_dist = *res.dist;
+        child.parent_dist = dist;
         res = eval_child(in, ex, child);
         if (!res.dist || *res.dist >= running_ub) {
-            break;
+            return res;
         }
+        dist = *res.dist;
         ctx = res.eqlbctx;
         disp = res.disp_cache;
         parent = std::move(child);
+        if (m == stop && at != nullptr) {
+            *at = DiveState{m, ctx, disp, dist, res};
+            return res;
+        }
     }
     return res;
+}
+
+ChildResult dive_value(const SearchInputs& in, const DiveLeaf& leaf, const PyNum& running_ub,
+                       const DiveState* start = nullptr) {
+    return dive_walk(in, leaf, running_ub, start);
 }
 
 void Search::dive() {
@@ -959,10 +1014,19 @@ void Search::dive() {
     auto cur = leaves[*best];
     auto cur_val = *results[*best].dist;
     for (int step = 0; step < kDiveSteps; ++step) {
-        const auto moves = dive_moves(in_, cur);
+        // The rounds before the window are the same in every move: their
+        // walk is done once.
+        const auto first = std::max(1, dive_size(cur) - kDiveWindow);
+        std::optional<DiveState> state;
+        dive_walk(in_, cur, cur_val, nullptr, first, &state);
+        if (!state) {
+            break;
+        }
+        const auto moves = dive_moves(in_, cur, first);
         std::vector<ChildResult> vals(moves.size());
-        tbb::parallel_for(std::size_t{0}, moves.size(),
-                          [&](std::size_t i) { vals[i] = dive_value(in_, moves[i], cur_val); });
+        tbb::parallel_for(std::size_t{0}, moves.size(), [&](std::size_t i) {
+            vals[i] = dive_value(in_, moves[i], cur_val, &*state);
+        });
         std::optional<std::size_t> pick;
         for (std::size_t i = 0; i < vals.size(); ++i) {
             const auto& d = vals[i].dist;

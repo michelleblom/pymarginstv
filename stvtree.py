@@ -2377,8 +2377,11 @@ def dive_leaves(order_c: list[int], order_a: list[int], \
     return unique
 
 
-# -dive: most improving steps taken from the cheapest dive leaf.
+# -dive: most improving steps taken from the cheapest dive leaf; how many of
+# a leaf's last rounds a step may change; how far an elimination may move.
 DIVE_STEPS = 50
+DIVE_WINDOW = 14
+DIVE_REACH = 4
 
 
 def dive_size(order_a: list[int], rem: list[int]) -> int:
@@ -2393,58 +2396,63 @@ def dive_size(order_a: list[int], rem: list[int]) -> int:
 
 
 def dive_moves(leaf: tuple[list[int], list[int], dict[int, QRange], \
-    set[int], list[int]], winner_set: set[int], ncands: int, seats: int) \
-    -> list[tuple[list[int], list[int], dict[int, QRange], set[int], \
-    list[int]]]:
+    set[int], list[int]], start: int, winner_set: set[int], ncands: int, \
+    seats: int) -> list[tuple[list[int], list[int], dict[int, QRange], \
+    set[int], list[int]]]:
     """
-        -dive: the leaves one step from a leaf. For each seat, in order: the
-        elimination just before it moves to just after it; the elimination
-        just after it moves to just before it; its quota round moves one
-        earlier; then one later. After that, each pair of neighbouring
-        eliminations, in order, swaps. Seats keep their quota rounds where
-        the search allows (see dive_leaf).
+        -dive: the leaves one step from a leaf, changing only its rounds from
+        start on. For each such round, in order: a seat's quota round moves
+        one earlier, then one later; an elimination moves up to DIVE_REACH
+        places earlier or later (seats included), nearest the start of the
+        leaf first. Seats keep their quota rounds where the search allows
+        (see dive_leaf). Repeated leaves are left out.
     """
     oc, oa, oq, _, rem = leaf
     size = dive_size(oa, rem)
     seq_c, seq_a = oc[:size], oa[:size]
     want_q = {c: v[0] for c, v in oq.items()}
     moves = []
-    for i in range(size):
-        if seq_a[i] != 1:
+    seen: set[tuple] = set()
+
+    def add(c: list[int], a: list[int], q: dict[int, int]) -> None:
+        moved = dive_leaf(c, a, q, winner_set, ncands, seats)
+        if moved is None:
+            return
+        key = (tuple(moved[0]), tuple(moved[1]), \
+            tuple(sorted(moved[2].items())))
+        if key not in seen:
+            seen.add(key)
+            moves.append(moved)
+
+    for i in range(start, size):
+        if seq_a[i] == 1:
+            for d in (-1, 1):
+                r = want_q[seq_c[i]] + d
+                lo = oq[seq_c[i - 1]][0] if i > 0 and seq_a[i - 1] == 1 else i
+                if lo <= r <= i:
+                    add(seq_c, seq_a, {**want_q, seq_c[i]: r})
             continue
-        for j in (i - 1, i + 1):
-            if j < 0 or j >= size or seq_a[j] != 0:
+        for d in list(range(-DIVE_REACH, 0)) + list(range(1, DIVE_REACH + 1)):
+            j = i + d
+            if j < start or j >= size:
                 continue
             c, a = list(seq_c), list(seq_a)
-            c[i], c[j] = c[j], c[i]
-            a[i], a[j] = a[j], a[i]
-            moved = dive_leaf(c, a, want_q, winner_set, ncands, seats)
-            if moved is not None:
-                moves.append(moved)
-        for d in (-1, 1):
-            r = want_q[seq_c[i]] + d
-            lo = oq[seq_c[i - 1]][0] if i > 0 and seq_a[i - 1] == 1 else i
-            if r < lo or r > i:
-                continue
-            moved = dive_leaf(seq_c, seq_a, {**want_q, seq_c[i]: r}, \
-                winner_set, ncands, seats)
-            if moved is not None:
-                moves.append(moved)
-    for i in range(size - 1):
-        if seq_a[i] != 0 or seq_a[i + 1] != 0:
-            continue
-        c = list(seq_c)
-        c[i], c[i + 1] = c[i + 1], c[i]
-        moved = dive_leaf(c, seq_a, want_q, winner_set, ncands, seats)
-        if moved is not None:
-            moves.append(moved)
+            c.insert(j, c.pop(i))
+            a.insert(j, a.pop(i))
+            add(c, a, want_q)
     return moves
 
 
-def dive_value(order_c: list[int], order_a: list[int], \
+# -dive: a leaf's walk evaluated up to some prefix: (prefix length, bound
+# walk context, displacement cache, bound, and the bound's parts as
+# returned by dive_value).
+DiveState = Tuple[int, EqlbCtx, DispCache, float, tuple]
+
+
+def dive_walk(order_c: list[int], order_a: list[int], \
     order_q: dict[int, QRange], winners: set[int], rem: list[int], \
-    running_ub: float) -> tuple[float, float, float, Optional[float], \
-    Optional[float], bool]:
+    running_ub: float, start: Optional[DiveState] = None, \
+    stop: Optional[int] = None) -> tuple[tuple, Optional[DiveState]]:
     """
         -dive: a leaf's bound as the search would give it on reaching the
         leaf. Each prefix on the way is evaluated as a child of the one
@@ -2452,13 +2460,19 @@ def dive_value(order_c: list[int], order_a: list[int], \
         leaf gets the largest bound along its path. Stops at the first
         prefix whose bound reaches running_ub.
 
+        start resumes from a prefix already evaluated; with stop, the walk
+        ends at that prefix length and also returns its state.
+
         Returns (lb, dlb, eqlb, dist, dist_ub, solved) of the last prefix
-        evaluated.
+        evaluated, and the state at stop (None when not reached).
     """
     assert _CTX is not None
     ballots, _, _, _, ncands, args, _, _, _, _ = _CTX
 
     size = dive_size(order_a, rem)
+    # A start at or past the leaf's own end does not apply to it.
+    if start is not None and start[0] >= size:
+        start = None
 
     def prefix(m: int) -> tuple[list[int], list[int], dict[int, QRange], \
         set[int], list[int]]:
@@ -2468,12 +2482,61 @@ def dive_value(order_c: list[int], order_a: list[int], \
             {c for c, a in zip(pc, order_a[:m]) if a == 1}, \
             [c for c in range(ncands) if c not in placed]
 
-    pc, pa, pq, pw, pr = prefix(1)
-    lb, dlb, eqlb, node, solved = eval_child_initial(pc, pa, pq, pw, pr, \
-        running_ub)
-    dist, dist_ub = node.dist, node.dist_ub
-    if size == 1 or dist is None or dist >= running_ub:
-        return lb, dlb, eqlb, dist, dist_ub, solved
+    if start is None:
+        m0 = 1
+        pc, pa, pq, pw, pr = prefix(1)
+        lb, dlb, eqlb, node, solved = eval_child_initial(pc, pa, pq, pw, pr, \
+            running_ub)
+        dist, dist_ub = node.dist, node.dist_ub
+        out = (lb, dlb, eqlb, dist, dist_ub, solved)
+        if size == 1 or dist is None or dist >= running_ub:
+            return out, None
+        eqlbctx, disp_cache = restore_derived(node.eqlbctx, node.disp_cache, pc)
+    else:
+        m0, eqlbctx, disp_cache, dist, out = start
+        pc, pa, pq, pw, pr = prefix(m0)
+    if stop == m0:
+        return out, (m0, eqlbctx, disp_cache, dist, out)
+
+    for m in range(m0 + 1, size + 1):
+        # The shared work generate_children does for the parent's children.
+        elim_tallies = None
+        if args.dlbc:
+            disp_cache = update_disp_cache_q_prefix(disp_cache, ballots, pc, \
+                pq, pr, eqlbctx.transfer)
+        if args.prec_et and args.eqlbc:
+            elim_tallies = compute_round_tallies_q_prefix(ballots, \
+                eqlbctx.gone, eqlbctx.gone_set, eqlbctx.transfer, \
+                eqlbctx.winners, pq, eqlbctx.gone_pos, ncands)
+
+        if m == size:
+            child = (order_c, order_a, order_q, winners, rem, True)
+        else:
+            cc, ca, cq, cw, cr = prefix(m)
+            child = (cc, ca, cq, cw, cr, False)
+        res = eval_child(dist, eqlbctx, disp_cache, child[0], child[1], \
+            child[2], child[3], child[4], child[5], running_ub, elim_tallies)
+        dist = res[9]
+        out = (res[6], res[7], res[8], res[9], res[10], res[13])
+        if dist is None or dist >= running_ub:
+            return out, None
+        eqlbctx, disp_cache = res[1], res[2]
+        pc, pa, pq, pw, pr = child[0], child[1], child[2], child[3], child[4]
+        if m == stop:
+            return out, (m, eqlbctx, disp_cache, dist, out)
+
+    return out, None
+
+
+def dive_value(order_c: list[int], order_a: list[int], \
+    order_q: dict[int, QRange], winners: set[int], rem: list[int], \
+    running_ub: float, start: Optional[DiveState] = None) -> tuple:
+    """
+        -dive: (lb, dlb, eqlb, dist, dist_ub, solved) of a leaf, as
+        dive_walk gives it.
+    """
+    return dive_walk(order_c, order_a, order_q, winners, rem, running_ub, \
+        start)[0]
     eqlbctx, disp_cache = restore_derived(node.eqlbctx, node.disp_cache, pc)
 
     for m in range(2, size + 1):
@@ -2640,8 +2703,15 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                 cur_val, best = min(valued)
                 cur = leaves[best]
                 for _ in range(DIVE_STEPS):
-                    moves = dive_moves(cur, winner_set, ncands, args.seats)
-                    specs = [m + (cur_val,) for m in moves]
+                    # The rounds before the window are the same in every
+                    # move: their walk is done once.
+                    first = max(1, dive_size(cur[1], cur[4]) - DIVE_WINDOW)
+                    _, state = dive_walk(*cur, cur_val, None, first)
+                    if state is None:
+                        break
+                    moves = dive_moves(cur, first, winner_set, ncands, \
+                        args.seats)
+                    specs = [m + (cur_val, state) for m in moves]
                     if pool is not None:
                         vals = pool.starmap(dive_value, specs)
                     else:
