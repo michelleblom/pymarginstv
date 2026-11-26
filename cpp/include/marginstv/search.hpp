@@ -30,7 +30,13 @@ struct SearchInputs {
     std::vector<Cand> full_order_c;
     std::vector<int> full_order_a;
     DistanceSettings distance;
+    // -dive: the round each reported winner first held a quota.
+    std::optional<OrderQ> reported_q;
 };
+
+// -dive: for each candidate seated in the reported outcome, the first round
+// at whose start they held a quota (reported_quota_rounds in stvtree.py).
+OrderQ reported_quota_rounds(const Outcome& outcome, int ncands);
 
 struct SearchResult {
     PyNum lb;
@@ -42,6 +48,16 @@ struct SearchResult {
 };
 
 SearchResult treestv(const SearchInputs& in, PyNum upperbound, Logger& log);
+
+// -dive: a leaf near the reported last seat (see dive_leaves in stvtree.py).
+struct DiveLeaf {
+    std::vector<Cand> order_c;
+    std::vector<int> order_a;
+    OrderQ order_q;
+    CandSet winners;
+    std::vector<Cand> rem;
+};
+std::vector<DiveLeaf> dive_leaves(const SearchInputs& in);
 
 // ------------------------------------------------------------------------
 // Pieces of the search, exposed for the replay tests.

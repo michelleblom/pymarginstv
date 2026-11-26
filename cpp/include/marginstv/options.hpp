@@ -35,6 +35,9 @@ struct Options {
     bool multielim = false;           // -multielim: several-candidate elimination bound
     bool sumnq = false;               // -sumnq: add up excesses over the quota
     bool elimnq = false;              // -elimnq: join excesses to elimination gaps
+    // -dive: before the search, try swaps of a winner and a non-winner near
+    // the reported last seat, and start from the cheapest as the upper bound.
+    bool dive = false;
     // -evalpara: both levels of parallelism always run here, but the flag
     // still decides one set order the Python logs (see generate_children).
     bool evalpara = false;

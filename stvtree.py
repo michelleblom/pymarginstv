@@ -2164,10 +2164,107 @@ def cap_worker_count(requested: int, log: Optional[TextIO] = None) -> int:
     return allowed
 
 
+def reported_quota_rounds(order_c: list[int], order_a: list[int], \
+    tallies: dict[int, list[float]], quota: int) -> dict[int, QRange]:
+    """
+        -dive: for each candidate seated in the reported outcome, the first
+        round at whose start they held a quota (quota-in-prefix convention).
+        A seating that follows another seating cannot take an earlier round
+        than the one before it. A candidate seated without a quota (left
+        standing at the end) gets their own round.
+
+        tallies[c][r] is c's tally at the start of round r.
+    """
+    order_q: dict[int, QRange] = {}
+    prev: Optional[int] = None
+    for p, (c, a) in enumerate(zip(order_c, order_a)):
+        if a == 0:
+            prev = None
+            continue
+        lo = p if prev is None else prev
+        r = next((i for i in range(lo, p + 1) if tallies[c][i] >= quota), p)
+        order_q[c] = (r, r)
+        prev = r
+    return order_q
+
+
+def dive_leaf(seq_c: list[int], seq_a: list[int], want_q: dict[int, int], \
+    winner_set: set[int], ncands: int, seats: int) \
+    -> Optional[tuple[list[int], list[int], dict[int, QRange], set[int], list[int]]]:
+    """
+        -dive: the leaf the search would reach by following seq_c/seq_a, cut
+        where generate_children ends a prefix: when every seat is filled
+        (the rest are then eliminated, by candidate number), or when the
+        seats left equal the candidates still standing. A seated candidate
+        takes the quota round in want_q, kept within the rounds the search
+        allows (from the round of the seating just before, if any, to its
+        own round). None when the leaf elects the reported winners.
+    """
+    oc: list[int] = []
+    oa: list[int] = []
+    oq: dict[int, QRange] = {}
+    won: set[int] = set()
+    rem: list[int] = []
+    for c, a in zip(seq_c, seq_a):
+        p = len(oc)
+        oc.append(c)
+        oa.append(a)
+        if a == 1:
+            lo = oq[oc[p - 1]][0] if p > 0 and oa[p - 1] == 1 else p
+            r = min(max(want_q.get(c, p), lo), p)
+            oq[c] = (r, r)
+            won.add(c)
+        placed = set(oc)
+        rem = [d for d in range(ncands) if d not in placed]
+        seated = len(won)
+        if seated == seats:
+            oc += rem
+            oa += [0] * len(rem)
+            rem = []
+            break
+        if seats - seated == len(rem):
+            break
+    if won | set(rem) == winner_set:
+        return None
+    return oc, oa, oq, won, rem
+
+
+def dive_leaves(order_c: list[int], order_a: list[int], \
+    reported_q: dict[int, QRange], winner_set: set[int], ncands: int, \
+    seats: int) -> list[tuple[list[int], list[int], dict[int, QRange], \
+    set[int], list[int]]]:
+    """
+        -dive: alternative outcomes near the reported outcome's last seat.
+        The reported outcome is followed up to its last elimination before
+        the final seat. Then, for each winner w still standing and each
+        candidate x still standing who did not win, w and x swap places in
+        the rest of the reported order: x takes w's seat (and quota round)
+        and w is eliminated where x was. Each is cut to a leaf by dive_leaf.
+    """
+    last_seat = max(i for i, a in enumerate(order_a) if a == 1)
+    elims = [i for i in range(last_seat) if order_a[i] == 0]
+    if not elims:
+        return []
+    j = elims[-1]
+    tail = order_c[j:]
+    want_q = {c: q[0] for c, q in reported_q.items()}
+    leaves = []
+    for w in [c for c in tail if c in winner_set]:
+        for x in [c for c in tail if c not in winner_set]:
+            seq_c = order_c[:j] + [x if c == w else w if c == x else c \
+                for c in tail]
+            q = {**want_q, x: want_q[w]}
+            leaf = dive_leaf(seq_c, order_a, q, winner_set, ncands, seats)
+            if leaf is not None:
+                leaves.append(leaf)
+    return leaves
+
+
 def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates: list[Candidate], \
             winners: list[int], order_c: list[int], order_a: list[int], \
             upperbound: float, args: argparse.Namespace, \
-            quota: int, tot_ballots: float, log: Optional[TextIO] = None) \
+            quota: int, tot_ballots: float, log: Optional[TextIO] = None, \
+            reported_q: Optional[dict[int, QRange]] = None) \
             -> tuple[float, float, int, int, int, int]:
     """
         Main function for performing the branch-and-bound algorithm that
@@ -2261,6 +2358,40 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
             initargs=initargs, maxtasksperchild=50) 
 
     try:
+        # -dive: start from the cheapest leaf near the reported last seat.
+        if reported_q is not None:
+            blank_ctx = EqlbCtx(ncands, {}, 0, 0, 0, [0] * ncands, set(), [], \
+                set(), {}, 0)
+            blank_dc = DispCache(ncands, False, {}, set(), None, None, None, \
+                None, 0, 0)
+            specs = [(0, blank_ctx, blank_dc, oc, oa, oq, won, rem, True, \
+                running_ub, None) for oc, oa, oq, won, rem in dive_leaves( \
+                order_c, order_a, reported_q, winner_set, ncands, args.seats)]
+            if pool is not None:
+                dived = pool.starmap(eval_child, specs)
+            else:
+                dived = [eval_child(*c) for c in specs]
+            for isleaf, _, _, node_order_c, node_order_a, node_order_q, lb, \
+                dlb, eqlb, dist, dist_ub, _, _, solved in dived:
+                if solved:
+                    nsolves += 1
+                if log != None:
+                    print("DIVE {}/{}/{} LB {} (D {} EQ {})".format( \
+                        node_order_c, node_order_a, node_order_q, lb, dlb, \
+                        eqlb), file=log, flush=True)
+                    if dist is None:
+                        print("    DISTANCE None/Infeasible", file=log, \
+                            flush=True)
+                    else:
+                        print("    DISTANCE {}/{}, MINLP used: {}".format( \
+                            dist, dist_ub, solved), file=log, flush=True)
+                if dist is None or dist < 0 or dist >= running_ub:
+                    continue
+                if log != None:
+                    print("Reducing upper bound from {} to {}".format( \
+                        running_ub, dist), file=log, flush=True)
+                running_ub = dist
+
         # Each element in this list will contain: order_c, order_a, order_q,
         # winners so far, and continuining candidate list for the cihld node, 
         # and current running_ub.

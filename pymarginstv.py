@@ -25,7 +25,7 @@ import time
 from utils import read_ballots_txt, read_ballots_json, \
     read_ballots_blt, simulate_stv, compute_weub, compute_simple_ub
 
-from stvtree import treestv
+from stvtree import reported_quota_rounds, treestv
 
 
 if __name__ == "__main__":
@@ -126,6 +126,12 @@ if __name__ == "__main__":
     # -eqlbc; earlier quota shortfalls join in with -sumq).
     parser.add_argument("-elimnq", action='store_true', default=False)
 
+    # Input: before the search, follow the reported outcome to its last
+    # elimination before the final seat, try each swap of a winner still
+    # standing with a candidate who did not win, and start from the
+    # cheapest of these leaves as the upper bound (needs -useqprefix).
+    parser.add_argument("-dive", action='store_true', default=False)
+
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
 
@@ -197,8 +203,14 @@ if __name__ == "__main__":
 
     # Start branch and bound.
     tstart = time.time()
+    if args.dive and not args.useqprefix:
+        parser.error("-dive needs -useqprefix")
+    reported_q = reported_quota_rounds(order_c, order_a, tallies, quota) \
+        if args.dive else None
+
     lb, ub, nexps, nsolves, ignores, agg_prunes = treestv(ballots, ballot_metadata, candidates, \
-        winners, order_c, order_a, upper_bound, args, quota, totvotes, log=log)
+        winners, order_c, order_a, upper_bound, args, quota, totvotes, log=log, \
+        reported_q=reported_q)
     tend = time.time()
 
     print("{}--{}, {}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores, \

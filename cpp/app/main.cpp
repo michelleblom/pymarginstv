@@ -94,6 +94,9 @@ int run(const Options& opt) {
     in.distance.gap = opt.gap;
     in.distance.qprefix = opt.useqprefix;
     in.distance.sidecar_path = opt.log + ".solves.csv";
+    if (opt.dive) {
+        in.reported_q = reported_quota_rounds(outcome, in.bounds.ncands);
+    }
 
     const auto tstart = wall_seconds();
     const auto res = treestv(in, upper_bound, log);
