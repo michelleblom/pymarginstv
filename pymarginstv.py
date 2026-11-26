@@ -126,6 +126,10 @@ if __name__ == "__main__":
     # -eqlbc; earlier quota shortfalls join in with -sumq).
     parser.add_argument("-elimnq", action='store_true', default=False)
 
+    # Output: file to write, at the end of the run, the election orders
+    # behind the final lower and upper bounds.
+    parser.add_argument("-orders", dest='orders', type=str, default=None)
+
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)
 
