@@ -2229,35 +2229,210 @@ def dive_leaf(seq_c: list[int], seq_a: list[int], want_q: dict[int, int], \
     return oc, oa, oq, won, rem
 
 
+# -dive: how many of the reported outcome's last seats to start a
+# continuation before, and how many non-winners to try in each winner's place.
+DIVE_SEATS = 4
+DIVE_CONTENDERS = 3
+
+
+def dive_tallies(ctx: EqlbCtx, order_c: list[int], order_a: list[int], \
+    order_q: dict[int, QRange]) -> tuple[EqlbCtx, list[float]]:
+    """
+        -dive: tallies at the end of a prefix, and the transfer walk over it
+        (resumed from ctx, which ends at ctx.round).
+    """
+    assert _CTX is not None
+    ballots, _, candidates, _, ncands, _, quota, _, _, _ = _CTX
+    if not order_c:
+        return ctx, [cand.fp_votes for cand in candidates]
+    ctx = compute_elim_quota_lb_STV26_q_prefix(ctx, candidates, ballots, \
+        order_c, order_a, quota, order_q, None, transfers_only=True)
+    assert ctx.gone is not None and ctx.gone_set is not None and \
+        ctx.gone_pos is not None
+    return ctx, compute_round_tallies_q_prefix(ballots, ctx.gone, ctx.gone_set, \
+        ctx.transfer, ctx.winners, order_q, ctx.gone_pos, ncands)
+
+
+def dive_continue(order_c: list[int], order_a: list[int], \
+    order_q: dict[int, QRange], new_winners: set[int], seats: int) \
+    -> tuple[list[int], list[int], dict[int, int]]:
+    """
+        -dive: the count continued from a prefix so that only candidates in
+        new_winners are seated. Each round, a candidate in new_winners
+        holding a quota is seated (the largest tally first); otherwise the
+        candidate outside new_winners with the smallest tally is eliminated
+        (ties by candidate number). Stops where the search would end the
+        prefix. Returns the sequence and each seated candidate's quota round.
+    """
+    assert _CTX is not None
+    ncands, quota = _CTX[4], _CTX[6]
+    oc, oa = list(order_c), list(order_a)
+    q = dict(order_q)
+    first_q: dict[int, int] = {}
+    ctx = EqlbCtx(ncands, {}, 0, 0, 0, [0] * ncands, set(), [], set(), {}, 0)
+    while True:
+        placed = set(oc)
+        standing = [c for c in range(ncands) if c not in placed]
+        seated = sum(oa)
+        if seated == seats or len(standing) == seats - seated:
+            break
+        ctx, tallies = dive_tallies(ctx, oc, oa, q)
+        p = len(oc)
+        for c in standing:
+            if c not in first_q and tallies[c] >= quota:
+                first_q[c] = p
+        ready = [c for c in standing if c in new_winners and c in first_q]
+        if ready:
+            c = max(ready, key=lambda c: (tallies[c], -c))
+            oc.append(c)
+            oa.append(1)
+            q[c] = (first_q[c], first_q[c])
+            continue
+        others = [c for c in standing if c not in new_winners]
+        if not others:
+            break
+        c = min(others, key=lambda c: (tallies[c], c))
+        oc.append(c)
+        oa.append(0)
+    return oc, oa, {c: v[0] for c, v in q.items()}
+
+
 def dive_leaves(order_c: list[int], order_a: list[int], \
     reported_q: dict[int, QRange], winner_set: set[int], ncands: int, \
     seats: int) -> list[tuple[list[int], list[int], dict[int, QRange], \
     set[int], list[int]]]:
     """
-        -dive: alternative outcomes near the reported outcome's last seat.
-        The reported outcome is followed up to its last elimination before
-        the final seat. Then, for each winner w still standing and each
-        candidate x still standing who did not win, w and x swap places in
-        the rest of the reported order: x takes w's seat (and quota round)
-        and w is eliminated where x was. Each is cut to a leaf by dive_leaf.
+        -dive: alternative outcomes near the end of the reported outcome.
+
+        Swaps: the reported outcome is followed up to its last elimination
+        before the final seat. Then, for each winner w still standing and
+        each candidate x still standing who did not win, w and x swap places
+        in the rest of the reported order: x takes w's seat (and quota
+        round) and w is eliminated where x was.
+
+        Continuations: for k = 1 to DIVE_SEATS, the reported outcome is
+        followed until k seats are left. Each remaining winner w is replaced
+        by each of the DIVE_CONTENDERS non-winners with the largest tallies
+        there, and the count goes on by dive_continue.
+
+        Each is cut to a leaf by dive_leaf.
     """
+    leaves = []
     last_seat = max(i for i, a in enumerate(order_a) if a == 1)
     elims = [i for i in range(last_seat) if order_a[i] == 0]
-    if not elims:
-        return []
-    j = elims[-1]
-    tail = order_c[j:]
     want_q = {c: q[0] for c, q in reported_q.items()}
-    leaves = []
-    for w in [c for c in tail if c in winner_set]:
-        for x in [c for c in tail if c not in winner_set]:
-            seq_c = order_c[:j] + [x if c == w else w if c == x else c \
-                for c in tail]
-            q = {**want_q, x: want_q[w]}
-            leaf = dive_leaf(seq_c, order_a, q, winner_set, ncands, seats)
-            if leaf is not None:
-                leaves.append(leaf)
-    return leaves
+    if elims:
+        j = elims[-1]
+        tail = order_c[j:]
+        for w in [c for c in tail if c in winner_set]:
+            for x in [c for c in tail if c not in winner_set]:
+                seq_c = order_c[:j] + [x if c == w else w if c == x else c \
+                    for c in tail]
+                q = {**want_q, x: want_q[w]}
+                leaf = dive_leaf(seq_c, order_a, q, winner_set, ncands, seats)
+                if leaf is not None:
+                    leaves.append(leaf)
+
+    # Continuations: follow the reported outcome until k seats are left,
+    # then put one of the DIVE_CONTENDERS non-winners with the largest
+    # tallies there in place of one of the remaining winners.
+    seat_pos = [i for i, a in enumerate(order_a) if a == 1]
+    nseat = len(seat_pos)
+    blank_ctx = EqlbCtx(ncands, {}, 0, 0, 0, [0] * ncands, set(), [], set(), \
+        {}, 0)
+    for k in range(1, min(DIVE_SEATS, nseat) + 1):
+        t = seat_pos[nseat - k - 1] + 1 if nseat - k - 1 >= 0 else 0
+        pc, pa = order_c[:t], order_a[:t]
+        pq = {c: reported_q[c] for c in pc if c in reported_q}
+        _, tallies = dive_tallies(blank_ctx, pc, pa, pq)
+        placed = set(pc)
+        standing = [c for c in range(ncands) if c not in placed]
+        remaining = [c for c in standing if c in winner_set]
+        contenders = sorted((c for c in standing if c not in winner_set), \
+            key=lambda c: (-tallies[c], c))[:DIVE_CONTENDERS]
+        for w in remaining:
+            for x in contenders:
+                new_winners = (set(remaining) - {w}) | {x}
+                sc, sa, sq = dive_continue(pc, pa, pq, new_winners, seats)
+                leaf = dive_leaf(sc, sa, sq, winner_set, ncands, seats)
+                if leaf is not None:
+                    leaves.append(leaf)
+
+    # The same leaf can come from more than one route: keep the first.
+    seen: set[tuple] = set()
+    unique = []
+    for leaf in leaves:
+        key = (tuple(leaf[0]), tuple(leaf[1]), tuple(sorted(leaf[2].items())))
+        if key not in seen:
+            seen.add(key)
+            unique.append(leaf)
+    return unique
+
+
+def dive_value(order_c: list[int], order_a: list[int], \
+    order_q: dict[int, QRange], winners: set[int], rem: list[int], \
+    running_ub: float) -> tuple[float, float, float, Optional[float], \
+    Optional[float], bool]:
+    """
+        -dive: a leaf's bound as the search would give it on reaching the
+        leaf. Each prefix on the way is evaluated as a child of the one
+        before, with the same shared work generate_children does, so the
+        leaf gets the largest bound along its path. Stops at the first
+        prefix whose bound reaches running_ub.
+
+        Returns (lb, dlb, eqlb, dist, dist_ub, solved) of the last prefix
+        evaluated.
+    """
+    assert _CTX is not None
+    ballots, _, _, _, ncands, args, _, _, _, _ = _CTX
+
+    # A leaf that fills the last seat is padded with the rest as
+    # eliminations in the same step.
+    size = max(i for i, a in enumerate(order_a) if a == 1) + 1 if not rem \
+        else len(order_c)
+
+    def prefix(m: int) -> tuple[list[int], list[int], dict[int, QRange], \
+        set[int], list[int]]:
+        pc = order_c[:m]
+        placed = set(pc)
+        return pc, order_a[:m], {c: order_q[c] for c in pc if c in order_q}, \
+            {c for c, a in zip(pc, order_a[:m]) if a == 1}, \
+            [c for c in range(ncands) if c not in placed]
+
+    pc, pa, pq, pw, pr = prefix(1)
+    lb, dlb, eqlb, node, solved = eval_child_initial(pc, pa, pq, pw, pr, \
+        running_ub)
+    dist, dist_ub = node.dist, node.dist_ub
+    if size == 1 or dist is None or dist >= running_ub:
+        return lb, dlb, eqlb, dist, dist_ub, solved
+    eqlbctx, disp_cache = restore_derived(node.eqlbctx, node.disp_cache, pc)
+
+    for m in range(2, size + 1):
+        # The shared work generate_children does for the parent's children.
+        elim_tallies = None
+        if args.dlbc:
+            disp_cache = update_disp_cache_q_prefix(disp_cache, ballots, pc, \
+                pq, pr, eqlbctx.transfer)
+        if args.prec_et and args.eqlbc:
+            elim_tallies = compute_round_tallies_q_prefix(ballots, \
+                eqlbctx.gone, eqlbctx.gone_set, eqlbctx.transfer, \
+                eqlbctx.winners, pq, eqlbctx.gone_pos, ncands)
+
+        if m == size:
+            child = (order_c, order_a, order_q, winners, rem, True)
+        else:
+            cc, ca, cq, cw, cr = prefix(m)
+            child = (cc, ca, cq, cw, cr, False)
+        res = eval_child(dist, eqlbctx, disp_cache, child[0], child[1], \
+            child[2], child[3], child[4], child[5], running_ub, elim_tallies)
+        lb, dlb, eqlb, dist, dist_ub, solved = res[6], res[7], res[8], \
+            res[9], res[10], res[13]
+        if dist is None or dist >= running_ub:
+            break
+        eqlbctx, disp_cache = res[1], res[2]
+        pc, pa, pq, pw, pr = child[0], child[1], child[2], child[3], child[4]
+
+    return lb, dlb, eqlb, dist, dist_ub, solved
 
 
 def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates: list[Candidate], \
@@ -2360,19 +2535,15 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
     try:
         # -dive: start from the cheapest leaf near the reported last seat.
         if reported_q is not None:
-            blank_ctx = EqlbCtx(ncands, {}, 0, 0, 0, [0] * ncands, set(), [], \
-                set(), {}, 0)
-            blank_dc = DispCache(ncands, False, {}, set(), None, None, None, \
-                None, 0, 0)
-            specs = [(0, blank_ctx, blank_dc, oc, oa, oq, won, rem, True, \
-                running_ub, None) for oc, oa, oq, won, rem in dive_leaves( \
-                order_c, order_a, reported_q, winner_set, ncands, args.seats)]
+            leaves = dive_leaves(order_c, order_a, reported_q, winner_set, \
+                ncands, args.seats)
+            specs = [leaf + (running_ub,) for leaf in leaves]
             if pool is not None:
-                dived = pool.starmap(eval_child, specs)
+                dived = pool.starmap(dive_value, specs)
             else:
-                dived = [eval_child(*c) for c in specs]
-            for isleaf, _, _, node_order_c, node_order_a, node_order_q, lb, \
-                dlb, eqlb, dist, dist_ub, _, _, solved in dived:
+                dived = [dive_value(*c) for c in specs]
+            for (node_order_c, node_order_a, node_order_q, _, _), \
+                (lb, dlb, eqlb, dist, dist_ub, solved) in zip(leaves, dived):
                 if solved:
                     nsolves += 1
                 if log != None:

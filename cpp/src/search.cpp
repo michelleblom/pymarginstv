@@ -5,9 +5,11 @@
 #include <tbb/parallel_for.h>
 #include <tbb/parallel_invoke.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <set>
 
 namespace marginstv {
 
@@ -497,6 +499,102 @@ std::optional<DiveLeaf> dive_leaf(const SearchInputs& in, const std::vector<Cand
     return leaf;
 }
 
+// -dive: how many of the reported outcome's last seats to start a
+// continuation before, and how many non-winners to try in each winner's place.
+constexpr int kDiveSeats = 4;
+constexpr std::size_t kDiveContenders = 3;
+
+// Tallies at the end of a prefix, with the transfer walk over it resumed
+// from ctx (dive_tallies in stvtree.py).
+std::vector<double> dive_tallies(const SearchInputs& in, EqlbCtx& ctx, const std::vector<Cand>& oc,
+                                 const std::vector<int>& oa, const OrderQ& q) {
+    if (oc.empty()) {
+        return in.bounds.fp;
+    }
+    const PrefixRef p{oc, oa, &q};
+    ctx = compute_eqlb_stv26_qprefix(ctx, in.bounds, p, nullptr, true);
+    return compute_round_tallies_q_prefix(ctx, in.bounds, oc, q).tallies;
+}
+
+struct DiveSeq {
+    std::vector<Cand> order_c;
+    std::vector<int> order_a;
+    std::vector<int> want_q;
+};
+
+// The count continued from a prefix so that only candidates in new_winners
+// are seated (dive_continue in stvtree.py).
+DiveSeq dive_continue(const SearchInputs& in, const std::vector<Cand>& pc,
+                      const std::vector<int>& pa, const OrderQ& pq, const CandSet& new_winners) {
+    const auto n = in.bounds.ncands;
+    const auto seats = in.bounds.seats;
+    const auto quota = static_cast<double>(in.bounds.quota);
+    DiveSeq d{pc, pa, std::vector<int>(static_cast<std::size_t>(n), -1)};
+    auto q = pq;
+    std::vector<int> first_q(static_cast<std::size_t>(n), -1);
+    auto ctx = blank_eqlb(n);
+    while (true) {
+        CandSet placed(n);
+        for (const auto c : d.order_c) {
+            placed.set(c);
+        }
+        std::vector<Cand> standing;
+        for (int c = 0; c < n; ++c) {
+            if (!placed.test(c)) {
+                standing.push_back(c);
+            }
+        }
+        const auto seated = static_cast<int>(std::count(d.order_a.begin(), d.order_a.end(), 1));
+        if (seated == seats || static_cast<int>(standing.size()) == seats - seated) {
+            break;
+        }
+        const auto t = dive_tallies(in, ctx, d.order_c, d.order_a, q);
+        const auto p = static_cast<int>(d.order_c.size());
+        for (const auto c : standing) {
+            const auto ci = static_cast<std::size_t>(c);
+            if (first_q[ci] < 0 && t[ci] >= quota) {
+                first_q[ci] = p;
+            }
+        }
+        std::optional<Cand> seat;
+        for (const auto c : standing) {
+            const auto ci = static_cast<std::size_t>(c);
+            if (!new_winners.test(c) || first_q[ci] < 0) {
+                continue;
+            }
+            // Largest tally first; on a tie the smaller candidate number.
+            if (!seat || t[ci] > t[static_cast<std::size_t>(*seat)]) {
+                seat = c;
+            }
+        }
+        if (seat) {
+            const auto r = first_q[static_cast<std::size_t>(*seat)];
+            d.order_c.push_back(*seat);
+            d.order_a.push_back(1);
+            q.push_back(QEntry{*seat, r, r});
+            continue;
+        }
+        std::optional<Cand> elim;
+        for (const auto c : standing) {
+            if (new_winners.test(c)) {
+                continue;
+            }
+            if (!elim || t[static_cast<std::size_t>(c)] < t[static_cast<std::size_t>(*elim)]) {
+                elim = c;
+            }
+        }
+        if (!elim) {
+            break;
+        }
+        d.order_c.push_back(*elim);
+        d.order_a.push_back(0);
+    }
+    for (const auto& e : q) {
+        d.want_q[static_cast<std::size_t>(e.c)] = e.lo;
+    }
+    return d;
+}
+
 } // namespace
 
 std::vector<DiveLeaf> dive_leaves(const SearchInputs& in) {
@@ -516,68 +614,234 @@ std::vector<DiveLeaf> dive_leaves(const SearchInputs& in) {
         }
     }
     std::vector<DiveLeaf> leaves;
-    if (j < 0 || !in.reported_q) {
+    if (!in.reported_q) {
         return leaves;
     }
     std::vector<int> want(static_cast<std::size_t>(n), -1);
     for (const auto& e : *in.reported_q) {
         want[static_cast<std::size_t>(e.c)] = e.lo;
     }
-    const std::vector<Cand> tail(oc.begin() + j, oc.end());
-    for (const auto w : tail) {
-        if (!in.winner_set.test(w)) {
-            continue;
-        }
-        for (const auto x : tail) {
-            if (in.winner_set.test(x)) {
+    if (j >= 0) {
+        const std::vector<Cand> tail(oc.begin() + j, oc.end());
+        for (const auto w : tail) {
+            if (!in.winner_set.test(w)) {
                 continue;
             }
-            std::vector<Cand> seq(oc.begin(), oc.begin() + j);
-            for (const auto c : tail) {
-                seq.push_back(c == w ? x : c == x ? w : c);
-            }
-            auto q = want;
-            q[static_cast<std::size_t>(x)] = want[static_cast<std::size_t>(w)];
-            if (auto leaf = dive_leaf(in, seq, oa, q)) {
-                leaves.push_back(std::move(*leaf));
+            for (const auto x : tail) {
+                if (in.winner_set.test(x)) {
+                    continue;
+                }
+                std::vector<Cand> seq(oc.begin(), oc.begin() + j);
+                for (const auto c : tail) {
+                    seq.push_back(c == w ? x : c == x ? w : c);
+                }
+                auto q = want;
+                q[static_cast<std::size_t>(x)] = want[static_cast<std::size_t>(w)];
+                if (auto leaf = dive_leaf(in, seq, oa, q)) {
+                    leaves.push_back(std::move(*leaf));
+                }
             }
         }
     }
-    return leaves;
+
+    // Continuations: follow the reported outcome until k seats are left,
+    // then put one of the kDiveContenders non-winners with the largest
+    // tallies there in place of one of the remaining winners.
+    std::vector<int> seat_pos;
+    for (std::size_t i = 0; i < oa.size(); ++i) {
+        if (oa[i] == 1) {
+            seat_pos.push_back(static_cast<int>(i));
+        }
+    }
+    const auto nseat = static_cast<int>(seat_pos.size());
+    for (int k = 1; k <= std::min(kDiveSeats, nseat); ++k) {
+        const auto t = nseat - k - 1 >= 0 ? seat_pos[static_cast<std::size_t>(nseat - k - 1)] + 1 : 0;
+        const std::vector<Cand> pc(oc.begin(), oc.begin() + t);
+        const std::vector<int> pa(oa.begin(), oa.begin() + t);
+        OrderQ pq;
+        CandSet placed(n);
+        for (const auto c : pc) {
+            placed.set(c);
+            for (const auto& e : *in.reported_q) {
+                if (e.c == c) {
+                    pq.push_back(e);
+                }
+            }
+        }
+        auto ctx = blank_eqlb(n);
+        const auto tallies = dive_tallies(in, ctx, pc, pa, pq);
+        std::vector<Cand> remaining;
+        std::vector<Cand> contenders;
+        for (int c = 0; c < n; ++c) {
+            if (placed.test(c)) {
+                continue;
+            }
+            (in.winner_set.test(c) ? remaining : contenders).push_back(c);
+        }
+        std::stable_sort(contenders.begin(), contenders.end(), [&](Cand a, Cand b) {
+            return tallies[static_cast<std::size_t>(a)] > tallies[static_cast<std::size_t>(b)];
+        });
+        if (contenders.size() > kDiveContenders) {
+            contenders.resize(kDiveContenders);
+        }
+        for (const auto w : remaining) {
+            for (const auto x : contenders) {
+                CandSet nw(n);
+                for (const auto c : remaining) {
+                    if (c != w) {
+                        nw.set(c);
+                    }
+                }
+                nw.set(x);
+                const auto d = dive_continue(in, pc, pa, pq, nw);
+                if (auto leaf = dive_leaf(in, d.order_c, d.order_a, d.want_q)) {
+                    leaves.push_back(std::move(*leaf));
+                }
+            }
+        }
+    }
+
+    // The same leaf can come from more than one route: keep the first.
+    std::vector<DiveLeaf> unique;
+    std::set<std::vector<int>> seen;
+    for (auto& leaf : leaves) {
+        std::vector<int> key(leaf.order_c.begin(), leaf.order_c.end());
+        key.push_back(-1);
+        key.insert(key.end(), leaf.order_a.begin(), leaf.order_a.end());
+        key.push_back(-1);
+        auto q = leaf.order_q;
+        std::sort(q.begin(), q.end(), [](const QEntry& a, const QEntry& b) { return a.c < b.c; });
+        for (const auto& e : q) {
+            key.push_back(e.c);
+            key.push_back(e.lo);
+        }
+        if (seen.insert(key).second) {
+            unique.push_back(std::move(leaf));
+        }
+    }
+    return unique;
 }
 
 namespace {
 
 // -dive: evaluate the leaves near the reported last seat, and start from the
 // cheapest as the upper bound.
-void Search::dive() {
-    const auto n = in_.bounds.ncands;
-    auto leaves = dive_leaves(in_);
-    Expansion ex;
-    ex.eqlbctx = blank_eqlb(n);
-    ex.disp_cache = blank_disp(n);
-    std::vector<ChildSpec> specs;
-    for (auto& l : leaves) {
-        ChildSpec s;
-        s.parent_dist = PyNum::integer(0);
-        s.order_c = std::move(l.order_c);
-        s.order_a = std::move(l.order_a);
-        s.order_q = std::move(l.order_q);
-        s.winners = std::move(l.winners);
-        s.rem = std::move(l.rem);
-        s.isleaf = true;
-        s.running_ub = running_ub_;
-        specs.push_back(std::move(s));
+// A leaf's bound as the search would give it on reaching the leaf: each
+// prefix on the way is evaluated as a child of the one before, with the same
+// shared work generate_children does. Stops at the first prefix whose bound
+// reaches running_ub (dive_value in stvtree.py).
+ChildResult dive_value(const SearchInputs& in, const DiveLeaf& leaf, const PyNum& running_ub) {
+    const auto& o = *in.options;
+    const auto n = in.bounds.ncands;
+    const auto& oc = leaf.order_c;
+    const auto& oa = leaf.order_a;
+
+    // A leaf that fills the last seat is padded with the rest as
+    // eliminations in the same step.
+    auto size = static_cast<int>(oc.size());
+    if (leaf.rem.empty()) {
+        for (std::size_t i = 0; i < oa.size(); ++i) {
+            if (oa[i] == 1) {
+                size = static_cast<int>(i) + 1;
+            }
+        }
     }
-    std::vector<ChildResult> results(specs.size());
-    tbb::parallel_for(std::size_t{0}, specs.size(),
-                      [&](std::size_t i) { results[i] = eval_child(in_, ex, specs[i]); });
-    for (const auto& c : results) {
+
+    const auto prefix = [&](int m, bool isleaf) {
+        ChildSpec s;
+        s.order_c.assign(oc.begin(), oc.begin() + m);
+        s.order_a.assign(oa.begin(), oa.begin() + m);
+        CandSet placed(n);
+        for (const auto c : s.order_c) {
+            placed.set(c);
+        }
+        for (const auto& e : leaf.order_q) {
+            if (placed.test(e.c)) {
+                s.order_q.push_back(e);
+            }
+        }
+        s.winners = CandSet(n);
+        for (std::size_t i = 0; i < s.order_c.size(); ++i) {
+            if (s.order_a[i] == 1) {
+                s.winners.set(s.order_c[i]);
+            }
+        }
+        for (int c = 0; c < n; ++c) {
+            if (!placed.test(c)) {
+                s.rem.push_back(c);
+            }
+        }
+        s.isleaf = isleaf;
+        s.running_ub = running_ub;
+        return s;
+    };
+
+    auto first = prefix(1, false);
+    auto init = eval_child_initial(in, first.order_c, first.order_a, first.order_q, first.winners,
+                                   first.rem, running_ub);
+    ChildResult res;
+    res.isleaf = false;
+    res.lb = init.lb;
+    res.dlb = init.dlb;
+    res.eqlb = init.eqlb;
+    res.dist = init.dist;
+    res.dist_ub = init.dist_ub;
+    res.solved = init.solved;
+    if (size == 1 || !res.dist || *res.dist >= running_ub) {
+        return res;
+    }
+    auto ctx = std::move(init.eqlbctx);
+    auto disp = std::move(init.disp_cache);
+    auto parent = std::move(first);
+
+    for (int m = 2; m <= size; ++m) {
+        Expansion ex;
+        ex.eqlbctx = ctx;
+        ex.disp_cache = o.dlbc ? update_disp_cache_q_prefix(disp, in.bounds, parent.order_c,
+                                                            parent.order_q, parent.rem, ctx.transfer)
+                               : disp;
+        if (o.prec_et && o.eqlbc) {
+            ex.elim_tallies =
+                compute_round_tallies_q_prefix(ctx, in.bounds, parent.order_c, parent.order_q);
+        }
+        ChildSpec child;
+        if (m == size) {
+            child.order_c = oc;
+            child.order_a = oa;
+            child.order_q = leaf.order_q;
+            child.winners = leaf.winners;
+            child.rem = leaf.rem;
+            child.isleaf = true;
+            child.running_ub = running_ub;
+        } else {
+            child = prefix(m, false);
+        }
+        child.parent_dist = *res.dist;
+        res = eval_child(in, ex, child);
+        if (!res.dist || *res.dist >= running_ub) {
+            break;
+        }
+        ctx = res.eqlbctx;
+        disp = res.disp_cache;
+        parent = std::move(child);
+    }
+    return res;
+}
+
+void Search::dive() {
+    const auto leaves = dive_leaves(in_);
+    std::vector<ChildResult> results(leaves.size());
+    const auto ub = running_ub_;
+    tbb::parallel_for(std::size_t{0}, leaves.size(),
+                      [&](std::size_t i) { results[i] = dive_value(in_, leaves[i], ub); });
+    for (std::size_t i = 0; i < results.size(); ++i) {
+        const auto& c = results[i];
+        const auto& l = leaves[i];
         if (c.solved) {
             ++nsolves_;
         }
-        log_.line("DIVE " + py_list_str(c.order_c) + "/" + py_list_str(c.order_a) + "/" +
-                  order_q_str(c.order_q) + " LB " + c.lb.str() + " (D " + c.dlb.str() + " EQ " +
+        log_.line("DIVE " + py_list_str(l.order_c) + "/" + py_list_str(l.order_a) + "/" +
+                  order_q_str(l.order_q) + " LB " + c.lb.str() + " (D " + c.dlb.str() + " EQ " +
                   c.eqlb.str() + ")");
         if (!c.dist) {
             log_.line("    DISTANCE None/Infeasible");
