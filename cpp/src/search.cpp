@@ -6,6 +6,7 @@
 #include <tbb/parallel_invoke.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -525,13 +526,28 @@ struct DiveSeq {
 // The count continued from a prefix so that only candidates in new_winners
 // are seated (dive_continue in stvtree.py).
 DiveSeq dive_continue(const SearchInputs& in, const std::vector<Cand>& pc,
-                      const std::vector<int>& pa, const OrderQ& pq, const CandSet& new_winners) {
+                      const std::vector<int>& pa, const OrderQ& pq, const CandSet& new_winners,
+                      const std::vector<int>& known_q) {
     const auto n = in.bounds.ncands;
     const auto seats = in.bounds.seats;
     const auto quota = static_cast<double>(in.bounds.quota);
     DiveSeq d{pc, pa, std::vector<int>(static_cast<std::size_t>(n), -1)};
     auto q = pq;
+    // A reported winner who already held a quota keeps that round.
     std::vector<int> first_q(static_cast<std::size_t>(n), -1);
+    {
+        CandSet in_prefix(n);
+        for (const auto c : pc) {
+            in_prefix.set(c);
+        }
+        for (int c = 0; c < n; ++c) {
+            const auto r = known_q[static_cast<std::size_t>(c)];
+            if (new_winners.test(c) && !in_prefix.test(c) && r >= 0 &&
+                r < static_cast<int>(pc.size())) {
+                first_q[static_cast<std::size_t>(c)] = r;
+            }
+        }
+    }
     auto ctx = blank_eqlb(n);
     while (true) {
         CandSet placed(n);
@@ -654,6 +670,7 @@ std::vector<DiveLeaf> dive_leaves(const SearchInputs& in) {
         }
     }
     const auto nseat = static_cast<int>(seat_pos.size());
+    const std::vector<int> none(static_cast<std::size_t>(n), -1);
     for (int k = 1; k <= std::min(kDiveSeats, nseat); ++k) {
         const auto t = nseat - k - 1 >= 0 ? seat_pos[static_cast<std::size_t>(nseat - k - 1)] + 1 : 0;
         const std::vector<Cand> pc(oc.begin(), oc.begin() + t);
@@ -693,9 +710,13 @@ std::vector<DiveLeaf> dive_leaves(const SearchInputs& in) {
                     }
                 }
                 nw.set(x);
-                const auto d = dive_continue(in, pc, pa, pq, nw);
-                if (auto leaf = dive_leaf(in, d.order_c, d.order_a, d.want_q)) {
-                    leaves.push_back(std::move(*leaf));
+                // With the reported quota rounds kept, and with each round
+                // taken from where the continuation first sees the quota.
+                for (const auto* known : std::array<const std::vector<int>*, 2>{&want, &none}) {
+                    const auto d = dive_continue(in, pc, pa, pq, nw, *known);
+                    if (auto leaf = dive_leaf(in, d.order_c, d.order_a, d.want_q)) {
+                        leaves.push_back(std::move(*leaf));
+                    }
                 }
             }
         }
@@ -726,6 +747,70 @@ namespace {
 
 // -dive: evaluate the leaves near the reported last seat, and start from the
 // cheapest as the upper bound.
+// -dive: most improving steps taken from the cheapest dive leaf.
+constexpr int kDiveSteps = 50;
+
+// How many of a leaf's rounds the search decides one by one. A leaf that
+// fills the last seat is padded with the rest as eliminations in the same
+// step (dive_size in stvtree.py).
+int dive_size(const DiveLeaf& leaf) {
+    auto size = static_cast<int>(leaf.order_a.size());
+    if (leaf.rem.empty()) {
+        for (std::size_t i = 0; i < leaf.order_a.size(); ++i) {
+            if (leaf.order_a[i] == 1) {
+                size = static_cast<int>(i) + 1;
+            }
+        }
+    }
+    return size;
+}
+
+// The leaves one step from a leaf (dive_moves in stvtree.py).
+std::vector<DiveLeaf> dive_moves(const SearchInputs& in, const DiveLeaf& leaf) {
+    const auto n = in.bounds.ncands;
+    const auto size = dive_size(leaf);
+    const std::vector<Cand> seq_c(leaf.order_c.begin(), leaf.order_c.begin() + size);
+    const std::vector<int> seq_a(leaf.order_a.begin(), leaf.order_a.begin() + size);
+    std::vector<int> want(static_cast<std::size_t>(n), -1);
+    for (const auto& e : leaf.order_q) {
+        want[static_cast<std::size_t>(e.c)] = e.lo;
+    }
+    std::vector<DiveLeaf> moves;
+    for (int i = 0; i < size; ++i) {
+        const auto iu = static_cast<std::size_t>(i);
+        if (seq_a[iu] != 1) {
+            continue;
+        }
+        for (const auto j : {i - 1, i + 1}) {
+            if (j < 0 || j >= size || seq_a[static_cast<std::size_t>(j)] != 0) {
+                continue;
+            }
+            auto c = seq_c;
+            auto a = seq_a;
+            std::swap(c[iu], c[static_cast<std::size_t>(j)]);
+            std::swap(a[iu], a[static_cast<std::size_t>(j)]);
+            if (auto moved = dive_leaf(in, c, a, want)) {
+                moves.push_back(std::move(*moved));
+            }
+        }
+        for (const auto d : {-1, 1}) {
+            const auto r = want[static_cast<std::size_t>(seq_c[iu])] + d;
+            const auto lo = i > 0 && seq_a[iu - 1] == 1
+                                ? want[static_cast<std::size_t>(seq_c[iu - 1])]
+                                : i;
+            if (r < lo || r > i) {
+                continue;
+            }
+            auto q = want;
+            q[static_cast<std::size_t>(seq_c[iu])] = r;
+            if (auto moved = dive_leaf(in, seq_c, seq_a, q)) {
+                moves.push_back(std::move(*moved));
+            }
+        }
+    }
+    return moves;
+}
+
 // A leaf's bound as the search would give it on reaching the leaf: each
 // prefix on the way is evaluated as a child of the one before, with the same
 // shared work generate_children does. Stops at the first prefix whose bound
@@ -736,16 +821,7 @@ ChildResult dive_value(const SearchInputs& in, const DiveLeaf& leaf, const PyNum
     const auto& oc = leaf.order_c;
     const auto& oa = leaf.order_a;
 
-    // A leaf that fills the last seat is padded with the rest as
-    // eliminations in the same step.
-    auto size = static_cast<int>(oc.size());
-    if (leaf.rem.empty()) {
-        for (std::size_t i = 0; i < oa.size(); ++i) {
-            if (oa[i] == 1) {
-                size = static_cast<int>(i) + 1;
-            }
-        }
-    }
+    const auto size = dive_size(leaf);
 
     const auto prefix = [&](int m, bool isleaf) {
         ChildSpec s;
@@ -854,6 +930,52 @@ void Search::dive() {
         }
         log_.line("Reducing upper bound from " + running_ub_.str() + " to " + c.dist->str());
         running_ub_ = *c.dist;
+    }
+
+    // Local improvement from the cheapest leaf: take the cheapest step that
+    // lowers its bound, until none does.
+    std::optional<std::size_t> best;
+    for (std::size_t i = 0; i < results.size(); ++i) {
+        const auto& d = results[i].dist;
+        if (d && *d >= PyNum::integer(0) && (!best || *d < *results[*best].dist)) {
+            best = i;
+        }
+    }
+    if (!best) {
+        return;
+    }
+    auto cur = leaves[*best];
+    auto cur_val = *results[*best].dist;
+    for (int step = 0; step < kDiveSteps; ++step) {
+        const auto moves = dive_moves(in_, cur);
+        std::vector<ChildResult> vals(moves.size());
+        tbb::parallel_for(std::size_t{0}, moves.size(),
+                          [&](std::size_t i) { vals[i] = dive_value(in_, moves[i], cur_val); });
+        std::optional<std::size_t> pick;
+        for (std::size_t i = 0; i < vals.size(); ++i) {
+            const auto& d = vals[i].dist;
+            if (d && *d < cur_val && (!pick || *d < *vals[*pick].dist)) {
+                pick = i;
+            }
+        }
+        if (!pick) {
+            break;
+        }
+        const auto& c = vals[*pick];
+        cur = moves[*pick];
+        cur_val = *c.dist;
+        if (c.solved) {
+            ++nsolves_;
+        }
+        log_.line("DIVE STEP " + py_list_str(cur.order_c) + "/" + py_list_str(cur.order_a) + "/" +
+                  order_q_str(cur.order_q) + " LB " + c.lb.str() + " (D " + c.dlb.str() + " EQ " +
+                  c.eqlb.str() + ")");
+        log_.line("    DISTANCE " + c.dist->str() + "/" + c.dist_ub->str() +
+                  ", MINLP used: " + std::string(py_bool(c.solved)));
+    }
+    if (cur_val < running_ub_) {
+        log_.line("Reducing upper bound from " + running_ub_.str() + " to " + cur_val.str());
+        running_ub_ = cur_val;
     }
 }
 

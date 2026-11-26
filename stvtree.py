@@ -2254,8 +2254,8 @@ def dive_tallies(ctx: EqlbCtx, order_c: list[int], order_a: list[int], \
 
 
 def dive_continue(order_c: list[int], order_a: list[int], \
-    order_q: dict[int, QRange], new_winners: set[int], seats: int) \
-    -> tuple[list[int], list[int], dict[int, int]]:
+    order_q: dict[int, QRange], new_winners: set[int], seats: int, \
+    known_q: dict[int, int]) -> tuple[list[int], list[int], dict[int, int]]:
     """
         -dive: the count continued from a prefix so that only candidates in
         new_winners are seated. Each round, a candidate in new_winners
@@ -2263,12 +2263,16 @@ def dive_continue(order_c: list[int], order_a: list[int], \
         candidate outside new_winners with the smallest tally is eliminated
         (ties by candidate number). Stops where the search would end the
         prefix. Returns the sequence and each seated candidate's quota round.
+
+        A candidate in known_q whose round there is before the prefix ends
+        (a reported winner who already held a quota) keeps that round.
     """
     assert _CTX is not None
     ncands, quota = _CTX[4], _CTX[6]
     oc, oa = list(order_c), list(order_a)
     q = dict(order_q)
-    first_q: dict[int, int] = {}
+    first_q = {c: r for c, r in known_q.items() \
+        if c in new_winners and c not in set(order_c) and r < len(order_c)}
     ctx = EqlbCtx(ncands, {}, 0, 0, 0, [0] * ncands, set(), [], set(), {}, 0)
     while True:
         placed = set(oc)
@@ -2353,10 +2357,14 @@ def dive_leaves(order_c: list[int], order_a: list[int], \
         for w in remaining:
             for x in contenders:
                 new_winners = (set(remaining) - {w}) | {x}
-                sc, sa, sq = dive_continue(pc, pa, pq, new_winners, seats)
-                leaf = dive_leaf(sc, sa, sq, winner_set, ncands, seats)
-                if leaf is not None:
-                    leaves.append(leaf)
+                # With the reported quota rounds kept, and with each round
+                # taken from where the continuation first sees the quota.
+                for known in (want_q, {}):
+                    sc, sa, sq = dive_continue(pc, pa, pq, new_winners, \
+                        seats, known)
+                    leaf = dive_leaf(sc, sa, sq, winner_set, ncands, seats)
+                    if leaf is not None:
+                        leaves.append(leaf)
 
     # The same leaf can come from more than one route: keep the first.
     seen: set[tuple] = set()
@@ -2367,6 +2375,61 @@ def dive_leaves(order_c: list[int], order_a: list[int], \
             seen.add(key)
             unique.append(leaf)
     return unique
+
+
+# -dive: most improving steps taken from the cheapest dive leaf.
+DIVE_STEPS = 50
+
+
+def dive_size(order_a: list[int], rem: list[int]) -> int:
+    """
+        -dive: how many of a leaf's rounds the search decides one by one. A
+        leaf that fills the last seat is padded with the rest as
+        eliminations in the same step.
+    """
+    if rem:
+        return len(order_a)
+    return max(i for i, a in enumerate(order_a) if a == 1) + 1
+
+
+def dive_moves(leaf: tuple[list[int], list[int], dict[int, QRange], \
+    set[int], list[int]], winner_set: set[int], ncands: int, seats: int) \
+    -> list[tuple[list[int], list[int], dict[int, QRange], set[int], \
+    list[int]]]:
+    """
+        -dive: the leaves one step from a leaf. For each seat, in order: the
+        elimination just before it moves to just after it; the elimination
+        just after it moves to just before it; its quota round moves one
+        earlier; then one later. Seats keep their quota rounds where the
+        search allows (see dive_leaf).
+    """
+    oc, oa, oq, _, rem = leaf
+    size = dive_size(oa, rem)
+    seq_c, seq_a = oc[:size], oa[:size]
+    want_q = {c: v[0] for c, v in oq.items()}
+    moves = []
+    for i in range(size):
+        if seq_a[i] != 1:
+            continue
+        for j in (i - 1, i + 1):
+            if j < 0 or j >= size or seq_a[j] != 0:
+                continue
+            c, a = list(seq_c), list(seq_a)
+            c[i], c[j] = c[j], c[i]
+            a[i], a[j] = a[j], a[i]
+            moved = dive_leaf(c, a, want_q, winner_set, ncands, seats)
+            if moved is not None:
+                moves.append(moved)
+        for d in (-1, 1):
+            r = want_q[seq_c[i]] + d
+            lo = oq[seq_c[i - 1]][0] if i > 0 and seq_a[i - 1] == 1 else i
+            if r < lo or r > i:
+                continue
+            moved = dive_leaf(seq_c, seq_a, {**want_q, seq_c[i]: r}, \
+                winner_set, ncands, seats)
+            if moved is not None:
+                moves.append(moved)
+    return moves
 
 
 def dive_value(order_c: list[int], order_a: list[int], \
@@ -2386,10 +2449,7 @@ def dive_value(order_c: list[int], order_a: list[int], \
     assert _CTX is not None
     ballots, _, _, _, ncands, args, _, _, _, _ = _CTX
 
-    # A leaf that fills the last seat is padded with the rest as
-    # eliminations in the same step.
-    size = max(i for i, a in enumerate(order_a) if a == 1) + 1 if not rem \
-        else len(order_c)
+    size = dive_size(order_a, rem)
 
     def prefix(m: int) -> tuple[list[int], list[int], dict[int, QRange], \
         set[int], list[int]]:
@@ -2562,6 +2622,41 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                     print("Reducing upper bound from {} to {}".format( \
                         running_ub, dist), file=log, flush=True)
                 running_ub = dist
+
+            # Local improvement from the cheapest leaf: take the cheapest
+            # step that lowers its bound, until none does.
+            valued = [(r[3], i) for i, r in enumerate(dived) \
+                if r[3] is not None and r[3] >= 0]
+            if valued:
+                cur_val, best = min(valued)
+                cur = leaves[best]
+                for _ in range(DIVE_STEPS):
+                    moves = dive_moves(cur, winner_set, ncands, args.seats)
+                    specs = [m + (cur_val,) for m in moves]
+                    if pool is not None:
+                        vals = pool.starmap(dive_value, specs)
+                    else:
+                        vals = [dive_value(*c) for c in specs]
+                    better = [(r[3], i) for i, r in enumerate(vals) \
+                        if r[3] is not None and r[3] < cur_val]
+                    if not better:
+                        break
+                    cur_val, i = min(better)
+                    cur = moves[i]
+                    lb, dlb, eqlb, dist, dist_ub, solved = vals[i]
+                    if solved:
+                        nsolves += 1
+                    if log != None:
+                        print("DIVE STEP {}/{}/{} LB {} (D {} EQ {})".format( \
+                            cur[0], cur[1], cur[2], lb, dlb, eqlb), file=log, \
+                            flush=True)
+                        print("    DISTANCE {}/{}, MINLP used: {}".format( \
+                            dist, dist_ub, solved), file=log, flush=True)
+                if cur_val < running_ub:
+                    if log != None:
+                        print("Reducing upper bound from {} to {}".format( \
+                            running_ub, cur_val), file=log, flush=True)
+                    running_ub = cur_val
 
         # Each element in this list will contain: order_c, order_a, order_q,
         # winners so far, and continuining candidate list for the cihld node, 
