@@ -808,6 +808,18 @@ std::vector<DiveLeaf> dive_moves(const SearchInputs& in, const DiveLeaf& leaf) {
             }
         }
     }
+    // Neighbouring eliminations swap.
+    for (int i = 0; i + 1 < size; ++i) {
+        const auto iu = static_cast<std::size_t>(i);
+        if (seq_a[iu] != 0 || seq_a[iu + 1] != 0) {
+            continue;
+        }
+        auto c = seq_c;
+        std::swap(c[iu], c[iu + 1]);
+        if (auto moved = dive_leaf(in, c, seq_a, want)) {
+            moves.push_back(std::move(*moved));
+        }
+    }
     return moves;
 }
 

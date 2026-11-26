@@ -2400,8 +2400,9 @@ def dive_moves(leaf: tuple[list[int], list[int], dict[int, QRange], \
         -dive: the leaves one step from a leaf. For each seat, in order: the
         elimination just before it moves to just after it; the elimination
         just after it moves to just before it; its quota round moves one
-        earlier; then one later. Seats keep their quota rounds where the
-        search allows (see dive_leaf).
+        earlier; then one later. After that, each pair of neighbouring
+        eliminations, in order, swaps. Seats keep their quota rounds where
+        the search allows (see dive_leaf).
     """
     oc, oa, oq, _, rem = leaf
     size = dive_size(oa, rem)
@@ -2429,6 +2430,14 @@ def dive_moves(leaf: tuple[list[int], list[int], dict[int, QRange], \
                 winner_set, ncands, seats)
             if moved is not None:
                 moves.append(moved)
+    for i in range(size - 1):
+        if seq_a[i] != 0 or seq_a[i + 1] != 0:
+            continue
+        c = list(seq_c)
+        c[i], c[i + 1] = c[i + 1], c[i]
+        moved = dive_leaf(c, seq_a, want_q, winner_set, ncands, seats)
+        if moved is not None:
+            moves.append(moved)
     return moves
 
 
