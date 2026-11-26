@@ -54,5 +54,6 @@ FILE=${FILES[$i]}
     -sumq -multielim -sumnq -elimnq -nominlps \
     -dive \
     -threads "$SLURM_CPUS_PER_TASK" \
+    -orders "orders_${FILE//\//}_M3_pc${PC}_dive.txt" \
     -log "log_${FILE//\//}_M3_pc${PC}_dive_cpp.log" \
     | tail -n 1 > "summary_2025_dive_pc${PC}_${i}.csv"
