@@ -59,6 +59,10 @@ class Frontier {
   public:
     [[nodiscard]] std::size_t size() const { return nodes_.size(); }
     [[nodiscard]] PyNum lower_bound() const;
+    // The node with the smallest distance (the next one popped); null when empty.
+    [[nodiscard]] const TreeNode* top() const {
+        return nodes_.empty() ? nullptr : nodes_.begin()->second.get();
+    }
 
     // Removes and returns up to 'number' nodes with the smallest distance.
     std::vector<NodePtr> pop(std::size_t number);

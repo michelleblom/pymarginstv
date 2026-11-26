@@ -50,5 +50,6 @@ FILE=${FILES[$i]}
     -sumq -multielim -sumnq -elimnq -nominlps \
     -membership -dive \
     -threads "$SLURM_CPUS_PER_TASK" \
+    -orders "orders_${FILE//\//}_M3_pc${PC}_membership_dive.txt" \
     -log "log_${FILE//\//}_M3_pc${PC}_membership_dive_cpp.log" \
     | tail -n 1 > "summary6_2025_membership_dive_pc${PC}_${i}.csv"

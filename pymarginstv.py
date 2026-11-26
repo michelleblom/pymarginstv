@@ -158,6 +158,10 @@ if __name__ == "__main__":
     # (smallest first) and evaluate that ordered outcome as a leaf.
     parser.add_argument('-dive', action='store_true', default=False)
 
+    # Output: file to write, at the end of the run, the election orders
+    # behind the final lower and upper bounds.
+    parser.add_argument('-orders', dest='orders', type=str, default=None)
+
     # Output: Log file
     parser.add_argument('-log', dest='log', type=str)
 

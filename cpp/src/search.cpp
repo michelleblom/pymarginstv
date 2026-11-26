@@ -8,6 +8,7 @@
 #include <tbb/parallel_invoke.h>
 
 #include <chrono>
+#include <fstream>
 #include <algorithm>
 #include <mutex>
 #include <memory>
@@ -1061,12 +1062,130 @@ ChildResult eval_child(const SearchInputs& in, const Expansion& ex, const ChildS
 
 namespace {
 
+// -orders: an election order behind a bound (OrderRecord in stvtree.py).
+struct OrderRecord {
+    std::vector<Cand> order_c;
+    std::vector<int> order_a;
+    OrderQ order_q;
+    PyNum dist;
+    std::vector<std::pair<int, int>> blocks;
+    std::vector<Cand> out;
+    bool need_in = false;
+};
+
+OrderRecord order_record(const TreeNode& node) {
+    return {node.order_c_list(), node.order_a_list(), node.order_q, node.dist,
+            node.blocks,         node.out,           node.need_in};
+}
+
+// The election orders behind the final lower and upper bounds, as text
+// (orders_text in stvtree.py).
+std::string orders_text(const SearchInputs& in, const PyNum& lb, const PyNum& ub,
+                        const std::optional<OrderRecord>& lb_rec, bool lb_is_ub,
+                        const std::optional<OrderRecord>& ub_rec, const std::string& ub_note) {
+    const auto& cands = in.election->candidates;
+    const auto n = static_cast<int>(cands.size());
+    const auto cand = [&](Cand c) {
+        const auto& name = cands[static_cast<std::size_t>(c)].name;
+        return name.empty() ? std::to_string(c) : std::to_string(c) + " (" + name + ")";
+    };
+    const auto join = [&](const std::vector<Cand>& cs) {
+        std::string t;
+        for (std::size_t i = 0; i < cs.size(); ++i) {
+            t += (i > 0 ? "; " : "") + cand(cs[i]);
+        }
+        return t;
+    };
+    const auto describe = [&](const OrderRecord& r, std::string& t) {
+        t += "  order_c " + py_list_str(r.order_c) + "\n";
+        t += "  order_a " + py_list_str(r.order_a) + "\n";
+        t += "  order_q " + order_q_str(r.order_q) + "\n";
+        t += "  distance " + r.dist.str() + "\n";
+        int seated = 0;
+        CandSet placed(n);
+        for (std::size_t i = 0; i < r.order_c.size(); ++i) {
+            const auto c = r.order_c[i];
+            const auto rr = static_cast<int>(i);
+            placed.set(c);
+            std::string line;
+            if (r.order_a[i] == 1) {
+                ++seated;
+                int lo = rr;
+                int hi = rr;
+                for (const auto& e : r.order_q) {
+                    if (e.c == c) {
+                        lo = e.lo;
+                        hi = e.hi;
+                    }
+                }
+                line = "  round " + std::to_string(rr) + ": seat " + cand(c) + ", " +
+                       (lo == hi ? "quota round " + std::to_string(lo)
+                                 : "quota rounds " + std::to_string(lo) + " to " +
+                                       std::to_string(hi));
+            } else {
+                line = "  round " + std::to_string(rr) + ": eliminate " + cand(c);
+            }
+            for (const auto& [bs, be] : r.blocks) {
+                if (bs <= rr && rr < be) {
+                    line += " [block of rounds " + std::to_string(bs) + " to " +
+                            std::to_string(be - 1) + ", any order]";
+                }
+            }
+            t += line + "\n";
+        }
+        std::vector<Cand> standing;
+        for (int c = 0; c < n; ++c) {
+            if (!placed.test(c)) {
+                standing.push_back(c);
+            }
+        }
+        if (!standing.empty()) {
+            // In a complete outcome, those left standing fill the last seats.
+            const auto what = seated + static_cast<int>(standing.size()) == in.bounds.seats
+                                  ? "seated as the last left standing"
+                                  : "still standing";
+            t += std::string("  ") + what + ": " + join(standing) + "\n";
+        }
+        if (!r.out.empty()) {
+            auto out = r.out;
+            std::sort(out.begin(), out.end());
+            t += "  standing at the end of the open run: " + join(out) +
+                 (r.need_in ? " (needs another elimination before it closes)" : "") + "\n";
+        }
+    };
+
+    std::string t = "Lower bound " + lb.str() + "\n";
+    if (lb_is_ub) {
+        t += "  the search space was exhausted: the lower bound is the upper bound\n";
+    } else if (!lb_rec) {
+        t += "  no order (no node on the frontier)\n";
+    } else {
+        describe(*lb_rec, t);
+    }
+    t += "Upper bound " + ub.str() + "\n";
+    if (!ub_rec) {
+        t += "  no order: " + ub_note + "\n";
+    } else {
+        describe(*ub_rec, t);
+    }
+    return t;
+}
+
 class Search {
   public:
     Search(const SearchInputs& in, PyNum upperbound, Logger& log)
         : in_(in), o_(*in.options), log_(log), running_ub_(upperbound), found_ub_(upperbound) {}
 
     SearchResult run();
+
+    // -orders: writes the orders behind the bounds to o_.orders.
+    void write_orders() const {
+        if (o_.orders.empty()) {
+            return;
+        }
+        std::ofstream f(o_.orders);
+        f << orders_text(in_, running_lb_, running_ub_, lb_rec_, lb_is_ub_, ub_rec_, ub_note_);
+    }
 
   private:
     void log_frontier() {
@@ -1091,6 +1210,12 @@ class Search {
     Frontier frontier_;
     PyNum running_ub_;
     PyNum running_lb_ = PyNum::integer(0);
+    // -orders: the orders behind the lower and upper bounds, and where the
+    // upper bound came from when no order lowered it.
+    std::optional<OrderRecord> lb_rec_;
+    bool lb_is_ub_ = false;
+    std::optional<OrderRecord> ub_rec_;
+    std::string ub_note_ = "the starting upper bound";
     // Smallest budget used by a -weakseed block expansion so far; running_ub_
     // never exceeds it. found_ub_ is the smallest upper bound from the
     // initial bound and leaves, ignoring that cap.
@@ -1176,6 +1301,8 @@ bool Search::handle_child(ChildResult& c) {
         if (*c.cap < running_ub_) {
             log_.line("Capping upper bound from " + running_ub_.str() + " to " + c.cap->str());
             running_ub_ = *c.cap;
+            ub_rec_.reset();
+            ub_note_ = "the budget of a -weakseed block expansion";
             if (gap_closed()) {
                 return true;
             }
@@ -1225,6 +1352,8 @@ bool Search::handle_child(ChildResult& c) {
         log_.line("        LEAF");
         if (*c.dist < running_ub_) {
             log_.line("Reducing upper bound from " + running_ub_.str() + " to " + c.dist->str());
+            ub_rec_ = OrderRecord{c.order_c, c.order_a, c.order_q, *c.dist,
+                                  c.blocks,  c.out,     c.need_in};
         }
         running_ub_ = py_min(running_ub_, *c.dist);
         found_ub_ = py_min(found_ub_, *c.dist);
@@ -1250,6 +1379,9 @@ SearchResult Search::run() {
     const auto tstart = wall_seconds();
 
     initial_frontier();
+    if (const auto* t = frontier_.top()) {
+        lb_rec_ = order_record(*t);
+    }
     log_frontier();
 
     auto tnow = wall_seconds();
@@ -1262,12 +1394,14 @@ SearchResult Search::run() {
     }
     if (frontier_.size() == 0) {
         running_lb_ = running_ub_;
+        lb_is_ub_ = true;
         log_.line("Search space exhausted");
     }
 
     bool converged = false;
     while (frontier_.size() > 0) {
         running_lb_ = frontier_.lower_bound();
+        lb_rec_ = order_record(*frontier_.top());
         log_.line("Lower bound " + running_lb_.str() + ", upper bound " + running_ub_.str());
         if (gap_closed()) {
             converged = true;
@@ -1311,6 +1445,9 @@ SearchResult Search::run() {
         if (!converged && frontier_.size() > 0) {
             const auto old_lb = running_lb_;
             running_lb_ = py_max(running_lb_, frontier_.lower_bound());
+            if (running_lb_ == frontier_.lower_bound()) {
+                lb_rec_ = order_record(*frontier_.top());
+            }
             if (old_lb < running_lb_) {
                 log_.line("Increasing lower bound from " + old_lb.str() + " to " + running_lb_.str());
             }
@@ -1321,6 +1458,7 @@ SearchResult Search::run() {
         }
         if (frontier_.size() == 0) {
             running_lb_ = running_ub_;
+            lb_is_ub_ = true;
             log_.line("Search space exhausted");
         }
         if (converged) {
@@ -1357,7 +1495,9 @@ SearchResult Search::run() {
 
 SearchResult treestv(const SearchInputs& in, PyNum upperbound, Logger& log) {
     Search s(in, upperbound, log);
-    return s.run();
+    auto res = s.run();
+    s.write_orders();
+    return res;
 }
 
 } // namespace marginstv

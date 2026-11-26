@@ -30,6 +30,7 @@ Options parse_options(const std::vector<std::string>& argv) {
         {"-displayname", [&](const std::string& v) { o.displayname = v; }},
         {"-ub", [&](const std::string& v) { o.ub = std::stoll(v); }},
         {"-log", [&](const std::string& v) { o.log = v; }},
+        {"-orders", [&](const std::string& v) { o.orders = v; }},
         {"-threads", [&](const std::string& v) { o.threads = std::stoi(v); }},
         {"-seedf", [&](const std::string& v) { o.seedf = std::stod(v); }},
         {"-seedmaxchildren", [&](const std::string& v) { o.seedmaxchildren = std::stoi(v); }},
