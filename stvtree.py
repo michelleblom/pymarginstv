@@ -2567,6 +2567,79 @@ def dive_value(order_c: list[int], order_a: list[int], \
     return lb, dlb, eqlb, dist, dist_ub, solved
 
 
+# -orders: an election order behind a bound: (order_c, order_a, order_q,
+# distance, blocks, OUT set, needs IN).
+OrderRecord = Tuple[List[int], List[int], Dict[int, QRange], Optional[float], \
+    Tuple[Tuple[int, int], ...], Tuple[int, ...], bool]
+
+
+def order_record(node: Any) -> OrderRecord:
+    """ -orders: the record of a frontier node. """
+    return (node.order_c, node.order_a, node.order_q, node.dist, \
+        tuple(getattr(node, 'blocks', ())), tuple(getattr(node, 'out', ())), \
+        bool(getattr(node, 'need_in', False)))
+
+
+def orders_text(lb: float, ub: float, lb_rec: Optional[OrderRecord], \
+    lb_is_ub: bool, ub_rec: Optional[OrderRecord], \
+    candidates: Sequence[Any], seats: int) -> str:
+    """
+        -orders: the election orders behind the final lower and upper
+        bounds, as text. Each order is given as the search logs it, then
+        round by round with candidate names.
+    """
+    def cand(c: int) -> str:
+        name = candidates[c].name
+        return "{} ({})".format(c, name) if name else str(c)
+
+    def describe(rec: OrderRecord) -> list[str]:
+        oc, oa, oq, dist, blocks, out, need_in = rec
+        lines = ["  order_c {}".format(oc), "  order_a {}".format(oa), \
+            "  order_q {}".format(oq), "  distance {}".format(dist)]
+        block_of = {r: (s_, e_) for s_, e_ in blocks for r in range(s_, e_)}
+        for r, (c, a) in enumerate(zip(oc, oa)):
+            if a == 1:
+                lo, hi = oq[c] if c in oq else (r, r)
+                when = "quota round {}".format(lo) if lo == hi else \
+                    "quota rounds {} to {}".format(lo, hi)
+                line = "  round {}: seat {}, {}".format(r, cand(c), when)
+            else:
+                line = "  round {}: eliminate {}".format(r, cand(c))
+            if r in block_of:
+                line += " [block of rounds {} to {}, any order]".format( \
+                    block_of[r][0], block_of[r][1] - 1)
+            lines.append(line)
+        placed = set(oc)
+        standing = [c for c in range(len(candidates)) if c not in placed]
+        if standing:
+            # In a complete outcome, those left standing fill the last seats.
+            what = "seated as the last left standing" \
+                if sum(oa) + len(standing) == seats else "still standing"
+            lines.append("  {}: {}".format(what, \
+                "; ".join(cand(c) for c in standing)))
+        if out:
+            lines.append("  standing at the end of the open run: {}{}".format( \
+                "; ".join(cand(c) for c in sorted(out)), \
+                " (needs another elimination before it closes)" \
+                if need_in else ""))
+        return lines
+
+    lines = ["Lower bound {}".format(lb)]
+    if lb_is_ub:
+        lines.append("  the search space was exhausted: the lower bound is " \
+            "the upper bound")
+    elif lb_rec is None:
+        lines.append("  no order (no node on the frontier)")
+    else:
+        lines += describe(lb_rec)
+    lines.append("Upper bound {}".format(ub))
+    if ub_rec is None:
+        lines.append("  no order: the starting upper bound")
+    else:
+        lines += describe(ub_rec)
+    return "\n".join(lines) + "\n"
+
+
 def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates: list[Candidate], \
             winners: list[int], order_c: list[int], order_a: list[int], \
             upperbound: float, args: argparse.Namespace, \
@@ -2622,6 +2695,11 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
 
     running_ub = upperbound
     running_lb: float = 0
+
+    # -orders: the orders behind the lower and upper bounds.
+    lb_rec: Optional[OrderRecord] = None
+    lb_is_ub = False
+    ub_rec: Optional[OrderRecord] = None
 
     nexps = 0
     nsolves = 0
@@ -2694,6 +2772,8 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                     print("Reducing upper bound from {} to {}".format( \
                         running_ub, dist), file=log, flush=True)
                 running_ub = dist
+                ub_rec = (node_order_c, node_order_a, node_order_q, dist, (), \
+                    (), False)
 
             # Local improvement from the cheapest leaf: take the cheapest
             # step that lowers its bound, until none does.
@@ -2736,6 +2816,7 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                         print("Reducing upper bound from {} to {}".format( \
                             running_ub, cur_val), file=log, flush=True)
                     running_ub = cur_val
+                    ub_rec = (cur[0], cur[1], cur[2], cur_val, (), (), False)
 
         # Each element in this list will contain: order_c, order_a, order_q,
         # winners so far, and continuining candidate list for the cihld node, 
@@ -2811,6 +2892,9 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
 
             frontier.insert(node, lse=args.lse, log=log)
 
+        if frontier.size > 0:
+            lb_rec = order_record(frontier.nodes[0])
+
         if log != None:
             print("Lower bound {}, upper bound {}".format(running_lb, running_ub), file=log, flush=True)
 
@@ -2828,11 +2912,13 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
 
         if frontier.size == 0:  # search space exhausted
             running_lb = running_ub  # running_ub must be a true lower bound
+            lb_is_ub = True
             if log is not None:
                 print("Search space exhausted", file=log, flush=True)
 
         while frontier.size > 0:
             running_lb = frontier.get_lower_bound()
+            lb_rec = order_record(frontier.nodes[0])
 
             if log != None:
                 print("Lower bound {}, upper bound {}".format(running_lb, running_ub), file=log, flush=True)
@@ -2919,6 +3005,9 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                             print("Reducing upper bound from {} to {}".format(running_ub, dist), \
                                   file=log, flush=True)
 
+                        if dist < running_ub:
+                            ub_rec = (node_order_c, node_order_a, node_order_q, \
+                                dist, (), (), False)
                         running_ub = min(running_ub, dist)  # update running_ub if possible
 
                         if abs(running_ub - running_lb) <= agap:
@@ -2952,6 +3041,8 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                 # check if running_lb can be increased
                 old_lb = running_lb
                 running_lb = max(running_lb, frontier.get_lower_bound())
+                if running_lb == frontier.get_lower_bound():
+                    lb_rec = order_record(frontier.nodes[0])
 
                 if old_lb < running_lb and log is not None:
                     print(f"Increasing lower bound from {old_lb} to {running_lb}", file=log, flush=True)
@@ -2962,6 +3053,7 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
 
             if frontier.size == 0:  # search space exhausted
                 running_lb = running_ub  # running_ub must be a true lower bound
+                lb_is_ub = True
                 if log is not None:
                     print("Search space exhausted", file=log, flush=True)
 
@@ -2986,6 +3078,11 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
         if pool is not None:
             pool.terminate()
             pool.join()
+
+        if getattr(args, 'orders', None):
+            with open(args.orders, "w") as f:
+                f.write(orders_text(running_lb, running_ub, lb_rec, lb_is_ub, \
+                    ub_rec, candidates, args.seats))
 
     if converged or frontier.size == 0:
         if log != None:

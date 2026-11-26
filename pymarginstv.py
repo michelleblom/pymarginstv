@@ -126,11 +126,14 @@ if __name__ == "__main__":
     # -eqlbc; earlier quota shortfalls join in with -sumq).
     parser.add_argument("-elimnq", action='store_true', default=False)
 
-    # Input: before the search, follow the reported outcome to its last
-    # elimination before the final seat, try each swap of a winner still
-    # standing with a candidate who did not win, and start from the
-    # cheapest of these leaves as the upper bound (needs -useqprefix).
+    # Input: before the search, try alternative outcomes near the end of
+    # the reported outcome, improve the cheapest step by step, and start
+    # from the best as the upper bound (needs -useqprefix).
     parser.add_argument("-dive", action='store_true', default=False)
+
+    # Output: file to write, at the end of the run, the election orders
+    # behind the final lower and upper bounds.
+    parser.add_argument("-orders", dest='orders', type=str, default=None)
 
     # Output: Log file 
     parser.add_argument('-log', dest='log', type=str)

@@ -42,6 +42,7 @@ struct Options {
     // still decides one set order the Python logs (see generate_children).
     bool evalpara = false;
     std::string log;                  // -log
+    std::string orders;               // -orders: file for the orders behind the bounds
     int threads = 0;                  // -threads: 0 = all cores
 };
 
