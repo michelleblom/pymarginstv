@@ -21,7 +21,8 @@ namespace marginstv {
 struct TreeNode {
     TreeNode(std::vector<Cand> order_c, std::vector<int> order_a, OrderQ order_q, EqlbCtx eqlbctx,
              DispCache disp_cache, PyNum dist, PyNum dist_ub, Blocks blocks = {},
-             std::vector<Cand> out = {}, bool need_in = false, bool membership = false);
+             std::vector<Cand> out = {}, bool need_in = false, bool membership = false,
+             bool refined = false);
 
     std::uint64_t id = 0;
     std::vector<Pref> order_c;
@@ -34,6 +35,7 @@ struct TreeNode {
     Blocks blocks;
     std::vector<Cand> out; // -membership: the open run's OUT set
     bool need_in = false;  // -membership: the run must gain an IN to close
+    bool refined = false;  // made by refining a block (see refine_expansion)
     Signature sig;
 
     [[nodiscard]] std::vector<Cand> order_c_list() const { return {order_c.begin(), order_c.end()}; }

@@ -129,21 +129,22 @@ Blocks = Tuple[Tuple[int, int], ...]
 
 # Result of evaluating a child node in eval_child(): (isleaf, order_c,
 # order_a, order_q, lb, dlb, eqlb, dist, dist_ub, rem, winners, solved,
-# blocks, cap, out, need_in). cap is the budget of the block expansion that
+# blocks, cap, out, need_in, refined). cap is the budget of the block expansion that
 # produced the child (infinite for an ordinary child): see -weakseed. out and
 # need_in are the open run's OUT set and whether it must gain another IN
-# before it can close: see -membership.
+# before it can close: see -membership. refined marks a leaf made by
+# refining a block (see refine_children).
 ChildResult = Tuple[bool, EqlbCtx, DispCache, List[int], \
     List[int], Dict[int, QRange], float, float, float, Optional[float], \
     Optional[float], List[int], Set[int], bool, Blocks, float, \
-    Tuple[int, ...], bool]
+    Tuple[int, ...], bool, bool]
 
 
 # Frontier node data shipped to expand_node(): (eqlbctx, order_c, order_a,
-# order_q, rem, winners, dist, blocks, out, need_in).
+# order_q, rem, winners, dist, blocks, out, need_in, refined).
 FNodeData = Tuple[EqlbCtx, DispCache, List[int], List[int], \
     Dict[int, QRange], List[int], Set[int], float, Blocks, \
-    Tuple[int, ...], bool]
+    Tuple[int, ...], bool, bool]
 
 
 # Width of the outcome-prefix digest. Signatures are retained for every
@@ -378,7 +379,7 @@ class TreeNode:
     # packed and rebuilt on access.
     __slots__ = ('id', '_order_c', '_order_a', '_order_q', \
         'dist', 'dist_ub', 'eqlbctx', 'disp_cache', 'sig', 'blocks', 'out', \
-        'need_in')
+        'need_in', 'refined')
 
     id: Optional[int]
     _order_c: PrefSeq
@@ -392,18 +393,21 @@ class TreeNode:
     blocks: Blocks
     out: Tuple[int, ...]
     need_in: bool
+    refined: bool   # made by refining a block (see refine_children)
 
     def __init__(self, order_c: list[int], order_a: list[int], \
         order_q: dict[int, QRange], \
         eqlbctx: EqlbCtx, disp_cache: DispCache, \
         distance: Optional[float], dist_ub: Optional[float], \
         blocks: Blocks = (), out: Tuple[int, ...] = (), \
-        need_in: bool = False, membership: bool = False) -> None:
+        need_in: bool = False, membership: bool = False, \
+        refined: bool = False) -> None:
 
         self.id = None
         self.blocks = blocks
         self.out = out
         self.need_in = need_in
+        self.refined = refined
 
         extra = membership_extra(order_c, order_a, blocks, out, need_in) \
             if membership else ()
@@ -2576,7 +2580,7 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                     fn_order_a, fn.order_q, \
                     derive_rem(fn_order_c, candidates), \
                     derive_winners(fn_order_c, fn_order_a), fn.dist, \
-                    fn.blocks, fn.out, fn.need_in), running_ub))
+                    fn.blocks, fn.out, fn.need_in, fn.refined), running_ub))
 
             if pool is not None and getattr(args, "evalpara", False):
                 # Child-granularity parallelism: generate every popped node's
@@ -2600,8 +2604,8 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                 # note when MINLP not solved, the dist will be the heuristic LB; new set of continuing candidates; winners 
                 # so far in the child; a boolean indicating whether the MINLP was solved for the child.  
                 for isleaf, eqlbctx, disp_cache, node_order_c, node_order_a, node_order_q, lb, dlb, eqlb, dist, \
-                        dist_ub, new_rem, node_winners, solved, blocks, cap, out, need_in \
-                        in child_results:
+                        dist_ub, new_rem, node_winners, solved, blocks, cap, out, need_in, \
+                        refined in child_results:
 
                     if cap < block_cap:
                         block_cap = cap
@@ -2652,7 +2656,7 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                             print("        LEAF TO REFINE", file=log, flush=True)
                         newn = TreeNode(node_order_c, node_order_a, node_order_q, \
                                         eqlbctx, disp_cache, dist, dist_ub, blocks, \
-                                        out, need_in, True)
+                                        out, need_in, True, refined)
                         idx = frontier.insert(newn, lse=args.lse, log=log)
                         if log is not None and idx is None:
                             print("        SUBSUMED", file=log, flush=True)
@@ -2953,7 +2957,7 @@ def eval_child(parent_dist: float, eqlbctx: EqlbCtx, disp_cache: DispCache, \
         res = _eval_child(parent_dist, eqlbctx, disp_cache, node_order_c, \
             node_order_a, node_order_q, node_winners, rem, isleaf, running_ub, \
             precomputed_elim_tallies, tuple(blocks), refined)
-    return res + (tuple(blocks), cap, tuple(out), need_in)
+    return res + (tuple(blocks), cap, tuple(out), need_in, refined)
 
 
 def run_start_of(order_a: Sequence[int]) -> int:
@@ -3491,7 +3495,7 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
     ballots, _, candidates, winner_set, ncands, args, _, _, _, _ = _CTX
 
     eqlbctx, disp_cache, forder_c, forder_a, forder_q, frem, fwinners, fdist, \
-        fblocks, fout, fneed_in = fnode_data
+        fblocks, fout, fneed_in, frefined = fnode_data
 
     # Put back what TreeNode did not store, before anything reads it: the
     # children resume both walks from this context.
@@ -3508,13 +3512,13 @@ def generate_children(fnode_data: FNodeData, running_ub: float) -> list:
     # candidate (IN or OUT) or close the run and seat someone.
     if getattr(args, 'membership', False):
         return membership_children(fdist, eqlbctx, forder_c, forder_a, \
-            forder_q, fwinners, fblocks, fout, fneed_in, running_ub)
+            forder_q, fwinners, fblocks, fout, fneed_in, running_ub, frefined)
 
     # -weakseed: a complete outcome on the frontier is one to refine.
     if getattr(args, 'weakseed', False) and \
         membership_complete(forder_c, forder_a):
         return refine_children(fdist, forder_c, forder_a, forder_q, fwinners, \
-            fblocks, running_ub)
+            fblocks, running_ub, frefined)
 
     # -weakseed: a split to expand this node with, as blocks of eliminations.
     split = weak_seed_split(forder_c, forder_a, forder_q, running_ub) \
@@ -3675,9 +3679,38 @@ def refinable(blocks: Blocks) -> bool:
     return any(e - s > 1 for s, e in blocks)
 
 
+def dive_order(forder_c: list[int], forder_a: list[int], \
+    forder_q: dict[int, QRange], fblocks: Blocks) -> list[int]:
+    """
+        -dive: the outcome with each block put in order of its candidates'
+        tallies at the block's start, smallest first (ties by candidate
+        number). Blocks are ordered from first to last, as each block's
+        starting tallies depend on the order of the blocks before it.
+    """
+    assert _CTX is not None
+    ballots, _, candidates, _, ncands, _, quota, _, _, _ = _CTX
+    order_c = list(forder_c)
+    for s_, e_ in sorted(fblocks):
+        if s_ == 0:
+            tallies = [cand.fp_votes for cand in candidates]
+        else:
+            blank_ctx = EqlbCtx(ncands, {}, 0, 0, 0, [0] * ncands, set(), [], \
+                set(), {}, 0)
+            ctx = compute_elim_quota_lb_STV26_q_prefix(blank_ctx, candidates, \
+                ballots, order_c[:s_], forder_a[:s_], quota, forder_q, None, \
+                transfers_only=True)
+            assert ctx.gone is not None and ctx.gone_set is not None and \
+                ctx.gone_pos is not None
+            tallies = compute_round_tallies_q_prefix(ballots, ctx.gone, \
+                ctx.gone_set, ctx.transfer, ctx.winners, forder_q, ctx.gone_pos, \
+                ncands)
+        order_c[s_:e_] = sorted(order_c[s_:e_], key=lambda c: (tallies[c], c))
+    return order_c
+
+
 def refine_children(fdist: float, forder_c: list[int], forder_a: list[int], \
     forder_q: dict[int, QRange], fwinners: set[int], fblocks: Blocks, \
-    running_ub: float) -> list:
+    running_ub: float, frefined: bool = False) -> list:
     """
         A complete outcome (-membership or -weakseed) whose block bounds
         were all it had. Its last block of two or more candidates is split by which of them
@@ -3685,6 +3718,11 @@ def refine_children(fdist: float, forder_c: list[int], forder_a: list[int], \
         block's end, the rest stay a block (a block of one is an ordered
         elimination). Each child is bounded by the elimination-quota walk
         from round 0, so its ordered rounds get the exact round bounds.
+
+        Under -dive, an outcome refined for the first time (not itself made
+        by refining) also gets the child with every block put in order (see
+        dive_order). That child is an ordered leaf, so it can lower the
+        upper bound long before refinement alone would order every block.
     """
     assert _CTX is not None
     ncands = _CTX[4]
@@ -3703,13 +3741,20 @@ def refine_children(fdist: float, forder_c: list[int], forder_a: list[int], \
         children.append((fdist, blank_ctx, blank_disp_cache(ncands), order_c, \
             list(forder_a), forder_q, set(fwinners), rem, True, running_ub, \
             None, blocks, math.inf, (), False, False, True))
+    # When the split leaves no block, the children are all ordered already.
+    if getattr(_CTX[5], 'dive', False) and not frefined and \
+        (e_ - s_ > 2 or refinable(rest)):
+        children.append((fdist, blank_ctx, blank_disp_cache(ncands), \
+            dive_order(forder_c, forder_a, forder_q, fblocks), list(forder_a), \
+            forder_q, set(fwinners), rem, True, running_ub, None, (), math.inf, \
+            (), False, False, True))
     return children
 
 
 def membership_children(fdist: float, eqlbctx: EqlbCtx, forder_c: list[int], \
     forder_a: list[int], forder_q: dict[int, QRange], fwinners: set[int], \
     fblocks: Blocks, fout: Tuple[int, ...], fneed_in: bool, \
-    running_ub: float) -> list:
+    running_ub: float, frefined: bool = False) -> list:
     """
         -membership: eval_child argument tuples for a node whose run of
         eliminations is open. The run's eliminations so far (IN) are the
@@ -3731,7 +3776,7 @@ def membership_children(fdist: float, eqlbctx: EqlbCtx, forder_c: list[int], \
     _, _, candidates, winner_set, ncands, args, _, _, _, _ = _CTX
     if membership_complete(forder_c, forder_a):
         return refine_children(fdist, forder_c, forder_a, forder_q, fwinners, \
-            fblocks, running_ub)
+            fblocks, running_ub, frefined)
     rs = run_start_of(forder_a)
     st = run_state(forder_c[:rs], forder_a[:rs], forder_q, eqlbctx)
     IN = set(forder_c[rs:])

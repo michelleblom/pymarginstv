@@ -153,6 +153,11 @@ if __name__ == "__main__":
     # eliminations (needs -useqprefix, -eqlbc and -nominlps).
     parser.add_argument('-membership', action='store_true', default=False)
 
+    # Input: with -membership or -weakseed, when a complete outcome is first
+    # refined, also put every block in order of the tallies at its start
+    # (smallest first) and evaluate that ordered outcome as a leaf.
+    parser.add_argument('-dive', action='store_true', default=False)
+
     # Output: Log file
     parser.add_argument('-log', dest='log', type=str)
 

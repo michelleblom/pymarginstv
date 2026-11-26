@@ -449,8 +449,42 @@ ChildResult eval_open_run(const SearchInputs& in, const Expansion& ex, const Chi
     return res;
 }
 
+// -dive: the outcome with each block put in order of its candidates'
+// tallies at the block's start, smallest first (ties by candidate number).
+// Blocks are ordered first to last, as each block's starting tallies depend
+// on the order of the blocks before it (dive_order in stvtree.py).
+std::vector<Cand> dive_order(const SearchInputs& in, const std::vector<Cand>& forder_c,
+                             const std::vector<int>& forder_a, const OrderQ& q,
+                             const Blocks& fblocks) {
+    const auto n = in.bounds.ncands;
+    auto order_c = forder_c;
+    auto blocks = fblocks;
+    std::sort(blocks.begin(), blocks.end());
+    for (const auto& [s, e] : blocks) {
+        std::vector<double> tallies;
+        if (s == 0) {
+            tallies = in.bounds.fp;
+        } else {
+            const auto len = static_cast<std::size_t>(s);
+            const std::span<const Cand> pc(order_c.data(), len);
+            const std::span<const int> pa(forder_a.data(), len);
+            const PrefixRef p{pc, pa, &q};
+            const auto ctx = compute_eqlb_stv26_qprefix(blank_eqlb(n), in.bounds, p, nullptr, true);
+            tallies = compute_round_tallies_q_prefix(ctx, in.bounds, pc, q).tallies;
+        }
+        std::sort(order_c.begin() + s, order_c.begin() + e, [&](Cand a, Cand b) {
+            const auto ta = tallies[static_cast<std::size_t>(a)];
+            const auto tb = tallies[static_cast<std::size_t>(b)];
+            return ta < tb || (ta == tb && a < b);
+        });
+    }
+    return order_c;
+}
+
 // A complete outcome bounded only by its blocks: split its last block of
 // two or more by which candidate went last (refine_children in stvtree.py).
+// Under -dive, an outcome refined for the first time also gets the child
+// with every block put in order (see dive_order), an ordered leaf.
 Expansion refine_expansion(const SearchInputs& in, const TreeNode& node,
                            const std::vector<Cand>& forder_c, const std::vector<int>& forder_a,
                            const CandSet& winners, const PyNum& running_ub) {
@@ -507,6 +541,20 @@ Expansion refine_expansion(const SearchInputs& in, const TreeNode& node,
         spec.isleaf = true;
         spec.running_ub = running_ub;
         spec.blocks = std::move(blocks);
+        spec.refined = true;
+        ex.children.push_back(std::move(spec));
+    }
+    // When the split leaves no block, the children are all ordered already.
+    if (in.options->dive && !node.refined && (e - s > 2 || refinable(rest))) {
+        ChildSpec spec;
+        spec.parent_dist = node.dist;
+        spec.order_c = dive_order(in, forder_c, forder_a, node.order_q, fb);
+        spec.order_a = forder_a;
+        spec.order_q = node.order_q;
+        spec.winners = winners;
+        spec.rem = rem;
+        spec.isleaf = true;
+        spec.running_ub = running_ub;
         spec.refined = true;
         ex.children.push_back(std::move(spec));
     }
@@ -897,6 +945,7 @@ ChildResult eval_child(const SearchInputs& in, const Expansion& ex, const ChildS
     res.cap = spec.cap;
     res.out = spec.out;
     res.need_in = spec.need_in;
+    res.refined = spec.refined;
     res.order_c = spec.order_c;
     res.order_a = spec.order_a;
     res.order_q = spec.order_q;
@@ -1165,7 +1214,7 @@ bool Search::handle_child(ChildResult& c) {
                                                std::move(c.order_q), std::move(c.eqlbctx),
                                                std::move(c.disp_cache), *c.dist, *c.dist_ub,
                                                std::move(c.blocks), std::move(c.out), c.need_in,
-                                               true);
+                                               true, c.refined);
         if (!frontier_.insert(std::move(node), o_.lse)) {
             log_.line("        SUBSUMED");
         }

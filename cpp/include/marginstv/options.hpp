@@ -46,6 +46,9 @@ struct Options {
     // deciding, one candidate at a time, whether it is eliminated in the
     // run or still standing when it ends.
     bool membership = false;
+    // -dive: when a complete outcome is first refined, also put every block
+    // in order of the tallies at its start and evaluate it as a leaf.
+    bool dive = false;
     // -evalpara: both levels of parallelism always run here, but the flag
     // still decides one set order the Python logs (see generate_children).
     bool evalpara = false;

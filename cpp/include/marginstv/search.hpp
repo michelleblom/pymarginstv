@@ -86,6 +86,7 @@ struct ChildResult {
     std::optional<PyNum> cap;
     std::vector<Cand> out;
     bool need_in = false;
+    bool refined = false;
 };
 
 struct InitialResult {
