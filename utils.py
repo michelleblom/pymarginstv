@@ -503,6 +503,103 @@ def compute_weub(candidates: list[Candidate], winners: list[int], \
                        
 
 
+def quota_rounds_from_tallies(order_c: list[int], order_a: list[int], \
+    tallies: dict[int, list[float]], quota: int) -> dict[int, tuple[int, int]]:
+    """
+        For each candidate seated in the reported count, the first round at
+        whose start they held a quota (quota-in-prefix convention). A seating
+        that follows another seating cannot take an earlier round than the
+        one before it. A candidate seated without a quota gets their own
+        round. tallies[c][r] is c's tally at the start of round r.
+    """
+    order_q: dict[int, tuple[int, int]] = {}
+    prev: Optional[int] = None
+    for p, (c, a) in enumerate(zip(order_c, order_a)):
+        if a == 0:
+            prev = None
+            continue
+        lo = p if prev is None else prev
+        r = next((i for i in range(lo, p + 1) if tallies[c][i] >= quota), p)
+        order_q[c] = (r, r)
+        prev = r
+    return order_q
+
+
+def starting_ub_order(candidates: list[Candidate], winners: list[int], \
+    order_c: list[int], order_a: list[int], tallies: dict[int, list[float]], \
+    quota: int, weub: float, simple_ub: float, external: Optional[float]) \
+    -> tuple[Optional[tuple], str]:
+    """
+        -orders: the alternative outcome behind the starting upper bound, as
+        (order_c, order_a, order_q, distance, blocks, OUT set, needs IN) or
+        None, and a note on where the bound came from.
+
+        WEUB: the reported count up to the round where it eliminated c, with
+        a winner w still standing eliminated there instead (the least
+        change; ties to the earliest round, then the smallest w, then the
+        full gap before half of it). Simple bound: the non-winner c with the
+        most first preferences given a quota in round 0 (ties to the
+        smallest c). A bound given with -ub has no order.
+    """
+    def cand(c: int) -> str:
+        name = candidates[c].name
+        return "{} ({})".format(c, name) if name else str(c)
+
+    start = math.ceil(min(weub, simple_ub))
+    if external is not None and math.ceil(external) < start:
+        return None, "given with -ub"
+
+    if weub <= simple_ub:
+        seated = set(winners)
+        standing = set(c.num for c in candidates)
+        best: Optional[tuple] = None
+        for r in range(len(order_c)):
+            cnum = order_c[r]
+            standing.discard(cnum)
+            if not seated:
+                break
+            if order_a[r] == 1:
+                seated.discard(cnum)
+                continue
+            ctally = tallies[cnum][r]
+            for w in sorted(seated):
+                wtally = tallies[w][r]
+                change = math.ceil(wtally - ctally)
+                if best is None or change < best[0]:
+                    best = (change, r, w, cnum, False)
+                halfless = wtally - 0.5 * change
+                if all(tallies[s][r] >= halfless for s in sorted(standing) \
+                    if s != w and s != cnum):
+                    half = math.ceil(0.5 * change)
+                    if half < best[0]:
+                        best = (half, r, w, cnum, True)
+        if best is not None:
+            value, r, w, c, half = best
+            reported_q = quota_rounds_from_tallies(order_c, order_a, tallies, \
+                quota)
+            pc = order_c[:r] + [w]
+            pa = order_a[:r] + [0]
+            pq = {x: reported_q[x] for x, a in zip(pc, pa) if a == 1}
+            note = "winner elimination bound (WEUB): {} eliminated in round " \
+                "{}, where the reported count eliminated {}{}".format(cand(w), \
+                r, cand(c), ", by moving half the gap from {} to {}".format( \
+                cand(w), cand(c)) if half else "")
+            return (pc, pa, pq, value, (), (), False), note
+
+    best_c: Optional[int] = None
+    for x in candidates:
+        if x.num in winners:
+            continue
+        if best_c is None or quota - x.fp_votes < quota - candidates[best_c].fp_votes:
+            best_c = x.num
+    if best_c is None:
+        return None, "the starting upper bound"
+    note = "simple bound: {} given a quota on first preferences".format( \
+        cand(best_c))
+    return ([best_c], [1], {best_c: (0, 0)}, \
+        quota - candidates[best_c].fp_votes, (), (), False), note
+
+
 def simulate_stv(ballots: list[Ballot], candidates: list[Candidate], \
     nseats: int, order_c: list[int], order_a: list[int], \
     winners: list[int], log: Optional[TextIO] = None) -> tuple[int, dict[int, list[float]], float]:

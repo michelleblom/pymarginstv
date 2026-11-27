@@ -2179,11 +2179,12 @@ def order_record(node: Any) -> OrderRecord:
 
 def orders_text(lb: float, ub: float, lb_rec: Optional[OrderRecord], \
     lb_is_ub: bool, ub_rec: Optional[OrderRecord], \
-    candidates: Sequence[Any], seats: int) -> str:
+    candidates: Sequence[Any], seats: int, ub_note: str = "") -> str:
     """
         -orders: the election orders behind the final lower and upper
         bounds, as text. Each order is given as the search logs it, then
-        round by round with candidate names.
+        round by round with candidate names. ub_note, when given, says where
+        the upper bound came from.
     """
     def cand(c: int) -> str:
         name = candidates[c].name
@@ -2230,17 +2231,20 @@ def orders_text(lb: float, ub: float, lb_rec: Optional[OrderRecord], \
     else:
         lines += describe(lb_rec)
     lines.append("Upper bound {}".format(ub))
-    if ub_rec is None:
-        lines.append("  no order: the starting upper bound")
-    else:
+    if ub_note:
+        lines.append("  {}".format(ub_note))
+    if ub_rec is not None:
         lines += describe(ub_rec)
+    elif not ub_note:
+        lines.append("  no order")
     return "\n".join(lines) + "\n"
 
 
 def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates: list[Candidate], \
             winners: list[int], order_c: list[int], order_a: list[int], \
             upperbound: float, args: argparse.Namespace, \
-            quota: int, tot_ballots: float, log: Optional[TextIO] = None) \
+            quota: int, tot_ballots: float, log: Optional[TextIO] = None, \
+            start_ub: Optional[tuple[Optional[OrderRecord], str]] = None) \
             -> tuple[float, float, int, int, int, int]:
     """
         Main function for performing the branch-and-bound algorithm that
@@ -2295,7 +2299,8 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
     # -orders: the orders behind the lower and upper bounds.
     lb_rec: Optional[OrderRecord] = None
     lb_is_ub = False
-    ub_rec: Optional[OrderRecord] = None
+    ub_rec, ub_note = start_ub if start_ub is not None else \
+        (None, "the starting upper bound")
 
     nexps = 0
     nsolves = 0
@@ -2529,6 +2534,7 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
                         if dist < running_ub:
                             ub_rec = (node_order_c, node_order_a, node_order_q, \
                                 dist, (), (), False)
+                            ub_note = ""
                         running_ub = min(running_ub, dist)  # update running_ub if possible
 
                         if abs(running_ub - running_lb) <= agap:
@@ -2603,7 +2609,7 @@ def treestv(ballots: list[Ballot], ballot_metadata : BallotMetadata, candidates:
         if getattr(args, 'orders', None):
             with open(args.orders, "w") as f:
                 f.write(orders_text(running_lb, running_ub, lb_rec, lb_is_ub, \
-                    ub_rec, candidates, args.seats))
+                    ub_rec, candidates, args.seats, ub_note))
 
     if converged or frontier.size == 0:
         if log != None:
