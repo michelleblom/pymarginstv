@@ -14,6 +14,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace marginstv;
@@ -95,6 +96,10 @@ int run(const Options& opt) {
     in.distance.qprefix = opt.useqprefix;
     in.distance.sidecar_path = opt.log + ".solves.csv";
     in.orig_ub = upper_bound;
+    if (!opt.orders.empty()) {
+        std::tie(in.start_ub_rec, in.start_ub_note) =
+            starting_ub_order(election, outcome, weub, simple_ub, opt.ub);
+    }
 
     const auto tstart = wall_seconds();
     const auto res = treestv(in, upper_bound, log);
