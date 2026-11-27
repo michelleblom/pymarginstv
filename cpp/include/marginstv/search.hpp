@@ -17,9 +17,22 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace marginstv {
+
+// -orders: an election order behind a bound (OrderRecord in stvtree.py).
+struct OrderRecord {
+    std::vector<Cand> order_c;
+    std::vector<int> order_a;
+    OrderQ order_q;
+    PyNum dist;
+    std::vector<std::pair<int, int>> blocks;
+    std::vector<Cand> out;
+    bool need_in = false;
+};
 
 struct SearchInputs {
     const Election* election = nullptr;
@@ -32,6 +45,9 @@ struct SearchInputs {
     DistanceSettings distance;
     // -dive: the round each reported winner first held a quota.
     std::optional<OrderQ> reported_q;
+    // -orders: the order behind the starting upper bound, and where it came from.
+    std::optional<OrderRecord> start_ub_rec;
+    std::string start_ub_note = "the starting upper bound";
 };
 
 // -dive: for each candidate seated in the reported outcome, the first round
@@ -58,6 +74,12 @@ struct DiveLeaf {
     std::vector<Cand> rem;
 };
 std::vector<DiveLeaf> dive_leaves(const SearchInputs& in);
+
+// -orders: the alternative outcome behind the starting upper bound, and a
+// note on where the bound came from (starting_ub_order in utils.py).
+std::pair<std::optional<OrderRecord>, std::string>
+starting_ub_order(const Election& election, const Outcome& outcome, const PyNum& weub,
+                  const PyNum& simple_ub, std::optional<long long> external);
 
 // ------------------------------------------------------------------------
 // Pieces of the search, exposed for the replay tests.

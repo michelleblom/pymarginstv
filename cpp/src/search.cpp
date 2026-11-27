@@ -383,16 +383,6 @@ ChildResult eval_child(const SearchInputs& in, const Expansion& ex, const ChildS
 namespace {
 
 // -orders: an election order behind a bound (OrderRecord in stvtree.py).
-struct OrderRecord {
-    std::vector<Cand> order_c;
-    std::vector<int> order_a;
-    OrderQ order_q;
-    PyNum dist;
-    std::vector<std::pair<int, int>> blocks;
-    std::vector<Cand> out;
-    bool need_in = false;
-};
-
 OrderRecord order_record(const TreeNode& node) {
     return {node.order_c_list(), node.order_a_list(), node.order_q, node.dist, {}, {}, false};
 }
@@ -401,7 +391,7 @@ OrderRecord order_record(const TreeNode& node) {
 // (orders_text in stvtree.py).
 std::string orders_text(const SearchInputs& in, const PyNum& lb, const PyNum& ub,
                         const std::optional<OrderRecord>& lb_rec, bool lb_is_ub,
-                        const std::optional<OrderRecord>& ub_rec) {
+                        const std::optional<OrderRecord>& ub_rec, const std::string& ub_note) {
     const auto& cands = in.election->candidates;
     const auto n = static_cast<int>(cands.size());
     const auto cand = [&](Cand c) {
@@ -482,10 +472,13 @@ std::string orders_text(const SearchInputs& in, const PyNum& lb, const PyNum& ub
         describe(*lb_rec, t);
     }
     t += "Upper bound " + ub.str() + "\n";
-    if (!ub_rec) {
-        t += "  no order: the starting upper bound\n";
-    } else {
+    if (!ub_note.empty()) {
+        t += "  " + ub_note + "\n";
+    }
+    if (ub_rec) {
         describe(*ub_rec, t);
+    } else if (ub_note.empty()) {
+        t += "  no order\n";
     }
     return t;
 }
@@ -493,7 +486,8 @@ std::string orders_text(const SearchInputs& in, const PyNum& lb, const PyNum& ub
 class Search {
   public:
     Search(const SearchInputs& in, PyNum upperbound, Logger& log)
-        : in_(in), o_(*in.options), log_(log), running_ub_(upperbound) {}
+        : in_(in), o_(*in.options), log_(log), running_ub_(upperbound),
+          ub_rec_(in.start_ub_rec), ub_note_(in.start_ub_note) {}
 
     SearchResult run();
 
@@ -503,7 +497,7 @@ class Search {
             return;
         }
         std::ofstream f(o_.orders);
-        f << orders_text(in_, running_lb_, running_ub_, lb_rec_, lb_is_ub_, ub_rec_);
+        f << orders_text(in_, running_lb_, running_ub_, lb_rec_, lb_is_ub_, ub_rec_, ub_note_);
     }
 
   private:
@@ -534,6 +528,7 @@ class Search {
     std::optional<OrderRecord> lb_rec_;
     bool lb_is_ub_ = false;
     std::optional<OrderRecord> ub_rec_;
+    std::string ub_note_;
     std::uint64_t nexps_ = 0;
     std::uint64_t nsolves_ = 0;
 };
@@ -1120,6 +1115,7 @@ void Search::dive() {
         log_.line("Reducing upper bound from " + running_ub_.str() + " to " + c.dist->str());
         running_ub_ = *c.dist;
         ub_rec_ = OrderRecord{l.order_c, l.order_a, l.order_q, *c.dist, {}, {}, false};
+        ub_note_.clear();
     }
 
     // Local improvement from the cheapest leaf: take the cheapest step that
@@ -1176,6 +1172,7 @@ void Search::dive() {
         log_.line("Reducing upper bound from " + running_ub_.str() + " to " + cur_val.str());
         running_ub_ = cur_val;
         ub_rec_ = OrderRecord{cur.order_c, cur.order_a, cur.order_q, cur_val, {}, {}, false};
+        ub_note_.clear();
     }
 }
 
@@ -1263,6 +1260,7 @@ bool Search::handle_child(ChildResult& c) {
         if (*c.dist < running_ub_) {
             log_.line("Reducing upper bound from " + running_ub_.str() + " to " + c.dist->str());
             ub_rec_ = OrderRecord{c.order_c, c.order_a, c.order_q, *c.dist, {}, {}, false};
+            ub_note_.clear();
         }
         running_ub_ = py_min(running_ub_, *c.dist);
         if (gap_closed()) {
@@ -1397,6 +1395,130 @@ SearchResult Search::run() {
 }
 
 } // namespace
+
+std::pair<std::optional<OrderRecord>, std::string>
+starting_ub_order(const Election& election, const Outcome& outcome, const PyNum& weub,
+                  const PyNum& simple_ub, std::optional<long long> external) {
+    const auto& cands = election.candidates;
+    const auto n = cands.size();
+    const auto cand = [&](Cand c) {
+        const auto& name = cands[static_cast<std::size_t>(c)].name;
+        return name.empty() ? std::to_string(c) : std::to_string(c) + " (" + name + ")";
+    };
+    const auto tally = [&](std::size_t c, std::size_t r) { return outcome.tallies[c * n + r]; };
+
+    const auto start = py_ceil(py_min(weub, simple_ub).as_double());
+    if (external && PyNum::integer(*external) < start) {
+        return {std::nullopt, "given with -ub"};
+    }
+
+    if (!(simple_ub < weub)) {
+        std::vector<bool> seated(n, false);
+        std::size_t nseated = 0;
+        for (const auto w : outcome.winners) {
+            if (!seated[static_cast<std::size_t>(w)]) {
+                seated[static_cast<std::size_t>(w)] = true;
+                ++nseated;
+            }
+        }
+        std::vector<bool> standing(n, true);
+        struct Best {
+            PyNum value;
+            std::size_t r;
+            std::size_t w;
+            std::size_t c;
+            bool half;
+        };
+        std::optional<Best> best;
+        for (std::size_t r = 0; r < outcome.order_c.size(); ++r) {
+            const auto cnum = static_cast<std::size_t>(outcome.order_c[r]);
+            standing[cnum] = false;
+            if (nseated == 0) {
+                break;
+            }
+            if (outcome.order_a[r] == 1) {
+                seated[cnum] = false;
+                --nseated;
+                continue;
+            }
+            const auto ctally = tally(cnum, r);
+            for (std::size_t w = 0; w < n; ++w) {
+                if (!seated[w]) {
+                    continue;
+                }
+                const auto wtally = tally(w, r);
+                const auto change = py_ceil(wtally - ctally);
+                if (!best || change < best->value) {
+                    best = Best{change, r, w, cnum, false};
+                }
+                const auto halfless = wtally - 0.5 * change.as_double();
+                bool use_half = true;
+                for (std::size_t s = 0; s < n; ++s) {
+                    if (standing[s] && s != w && s != cnum && tally(s, r) < halfless) {
+                        use_half = false;
+                        break;
+                    }
+                }
+                if (use_half) {
+                    const auto half = py_ceil(0.5 * change.as_double());
+                    if (half < best->value) {
+                        best = Best{half, r, w, cnum, true};
+                    }
+                }
+            }
+        }
+        if (best) {
+            const auto reported_q = reported_quota_rounds(outcome, static_cast<int>(n));
+            OrderRecord rec;
+            rec.order_c.assign(outcome.order_c.begin(),
+                               outcome.order_c.begin() + static_cast<std::ptrdiff_t>(best->r));
+            rec.order_a.assign(outcome.order_a.begin(),
+                               outcome.order_a.begin() + static_cast<std::ptrdiff_t>(best->r));
+            rec.order_c.push_back(static_cast<Cand>(best->w));
+            rec.order_a.push_back(0);
+            for (std::size_t i = 0; i < rec.order_c.size(); ++i) {
+                if (rec.order_a[i] != 1) {
+                    continue;
+                }
+                for (const auto& e : reported_q) {
+                    if (e.c == rec.order_c[i]) {
+                        rec.order_q.push_back(e);
+                    }
+                }
+            }
+            rec.dist = best->value;
+            const auto w = cand(static_cast<Cand>(best->w));
+            const auto c = cand(static_cast<Cand>(best->c));
+            auto note = "winner elimination bound (WEUB): " + w + " eliminated in round " +
+                        std::to_string(best->r) + ", where the reported count eliminated " + c;
+            if (best->half) {
+                note += ", by moving half the gap from " + w + " to " + c;
+            }
+            return {rec, note};
+        }
+    }
+
+    std::optional<Cand> best_c;
+    for (const auto& x : cands) {
+        if (std::find(outcome.winners.begin(), outcome.winners.end(), x.num) !=
+            outcome.winners.end()) {
+            continue;
+        }
+        if (!best_c || outcome.quota - x.fp_votes <
+                           outcome.quota - cands[static_cast<std::size_t>(*best_c)].fp_votes) {
+            best_c = x.num;
+        }
+    }
+    if (!best_c) {
+        return {std::nullopt, "the starting upper bound"};
+    }
+    OrderRecord rec;
+    rec.order_c = {*best_c};
+    rec.order_a = {1};
+    rec.order_q = {QEntry{*best_c, 0, 0}};
+    rec.dist = PyNum::integer(outcome.quota - cands[static_cast<std::size_t>(*best_c)].fp_votes);
+    return {rec, "simple bound: " + cand(*best_c) + " given a quota on first preferences"};
+}
 
 SearchResult treestv(const SearchInputs& in, PyNum upperbound, Logger& log) {
     Search s(in, upperbound, log);

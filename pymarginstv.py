@@ -23,7 +23,8 @@ from time import perf_counter
 import time
 
 from utils import read_ballots_txt, read_ballots_json, \
-    read_ballots_blt, simulate_stv, compute_weub, compute_simple_ub
+    read_ballots_blt, simulate_stv, compute_weub, compute_simple_ub, \
+    starting_ub_order
 
 from stvtree import reported_quota_rounds, treestv
 
@@ -211,9 +212,13 @@ if __name__ == "__main__":
     reported_q = reported_quota_rounds(order_c, order_a, tallies, quota) \
         if args.dive else None
 
+    # -orders: the alternative outcome behind the starting upper bound.
+    start_ub = starting_ub_order(candidates, winners, order_c, order_a, \
+        tallies, quota, weub, simple_ub, args.ub) if args.orders else None
+
     lb, ub, nexps, nsolves, ignores, agg_prunes = treestv(ballots, ballot_metadata, candidates, \
         winners, order_c, order_a, upper_bound, args, quota, totvotes, log=log, \
-        reported_q=reported_q)
+        reported_q=reported_q, start_ub=start_ub)
     tend = time.time()
 
     print("{}--{}, {}, {}, {}, {}".format(lb, ub, nexps, nsolves, ignores, \
